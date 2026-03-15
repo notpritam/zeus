@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { isPowerBlocked } from '../services/power';
+import { isPowerBlocked, startPowerBlock, stopPowerBlock } from '../services/power';
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('zeus:status', () => {
@@ -8,5 +8,14 @@ export function registerIpcHandlers(): void {
       websocket: false,
       tunnel: null,
     };
+  });
+
+  ipcMain.handle('zeus:toggle-power', () => {
+    if (isPowerBlocked()) {
+      stopPowerBlock();
+    } else {
+      startPowerBlock();
+    }
+    return isPowerBlocked();
   });
 }

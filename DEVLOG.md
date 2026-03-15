@@ -79,10 +79,45 @@ src/
 ### Step 1.11 — Code Rules
 - Created `CODERULES.md` — project structure, TS rules, main/renderer/preload conventions, security, workflow
 
-### Step 1.12 — Verification
-- `npx electron-vite build` → clean build (main 2.5KB, preload 0.2KB, renderer 488KB)
-- `npx electron-vite preview` → app launches, power blocker active, React UI renders
-- No errors
+### Step 1.12 — Path Alias
+- Added `@/` alias → `src/renderer/src/` in both `tsconfig.web.json` and `electron.vite.config.ts`
+- Updated all renderer imports to use `@/` instead of relative paths
+- Added rule to CODERULES.md
+
+### Step 1.13 — Mode Toggle (Pause/Resume Zeus)
+- Installed `framer-motion` for subtle animations
+- Created `ModeToggle` component — spring-animated toggle switch (running/paused)
+- Added `zeus:toggle-power` IPC channel: toggles `powerSaveBlocker` on/off
+- Updated preload to expose `window.zeus.togglePower()`
+- Created `types/zeus.d.ts` — typed global `window.zeus` API
+- Updated `StatusRow` — badge animates (fade + scale) on state change
+- Updated `App.tsx` — fetches initial status on mount, toggle controls power blocker
+- Full stack verified: click toggle → IPC → main process stops/starts power blocker → UI updates
+
+### Step 1.14 — Frameless Window
+- Set `titleBarStyle: 'hiddenInset'` with `trafficLightPosition: { x: 12, y: 12 }` on macOS
+- Added `-webkit-app-region: drag` on body so the whole window is draggable
+- Toggle button has `no-drag` so it stays clickable
+- Added top padding to clear the traffic lights
+
+### Step 1.15 — Test Setup (Vitest)
+- Installed `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `jsdom`
+- Created `vitest.config.ts` with jsdom environment and `@/` alias
+- Created test setup file mocking `window.zeus` API
+- Tests written:
+  - `StatusRow.test.tsx` — renders label/status, applies active/inactive classes (3 tests)
+  - `ModeToggle.test.tsx` — shows RUNNING/PAUSED, fires onToggle callback (3 tests)
+  - `App.test.tsx` — renders after loading, shows all status rows (3 tests)
+- Scripts: `npm test` (single run), `npm run test:watch` (watch mode)
+- All 9 tests pass
+
+### Step 1.16 — Tailwind CSS v4
+- Installed `tailwindcss` + `@tailwindcss/vite`
+- Added Tailwind plugin to renderer in `electron.vite.config.ts`
+- Replaced all custom CSS with Tailwind utility classes
+- Defined Zeus color tokens via `@theme` in `styles.css` (zeus-bg, zeus-card, zeus-green, etc.)
+- Updated tests to assert on Tailwind class names instead of old CSS classes
+- Build + all 9 tests pass
 
 **Phase 1 status: COMPLETE**
 

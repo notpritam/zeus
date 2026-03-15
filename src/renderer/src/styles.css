@@ -1,3 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zeus-bg: #0a0a0a;
+  --color-zeus-card: #111111;
+  --color-zeus-border: #222222;
+  --color-zeus-border-dim: #1a1a1a;
+  --color-zeus-green: #22c55e;
+  --color-zeus-green-bg: #0d2818;
+  --color-zeus-green-border: rgba(34, 197, 94, 0.25);
+  --color-zeus-muted: #888888;
+  --color-zeus-dim: #666666;
+  --color-zeus-faint: #555555;
+  --color-zeus-ghost: #333333;
+  --color-zeus-surface: #1a1a1a;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,81 +23,5 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-  background: #0a0a0a;
-  color: #e0e0e0;
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-}
-
-.container {
-  text-align: center;
-  width: 100%;
-  padding: 2rem;
-}
-
-h1 {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.25rem;
-}
-
-.subtitle {
-  font-size: 0.75rem;
-  color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  margin-bottom: 2rem;
-}
-
-.status-card {
-  background: #111;
-  border: 1px solid #222;
-  border-radius: 8px;
-  padding: 1rem 1.5rem;
-  margin: 0 auto;
-  max-width: 280px;
-}
-
-.status-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 0;
-}
-
-.status-row + .status-row {
-  border-top: 1px solid #1a1a1a;
-}
-
-.label {
-  font-size: 0.8rem;
-  color: #888;
-}
-
-.badge {
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  padding: 0.2rem 0.6rem;
-  border-radius: 4px;
-}
-
-.badge.active {
-  background: #0d2818;
-  color: #22c55e;
-}
-
-.badge.inactive {
-  background: #1a1a1a;
-  color: #555;
-}
-
-.version {
-  margin-top: 1.5rem;
-  font-size: 0.65rem;
-  color: #333;
+  -webkit-app-region: drag;
 }

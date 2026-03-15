@@ -10,6 +10,8 @@ function createWindow(): void {
     width: 480,
     height: 360,
     resizable: false,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 12, y: 12 },
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

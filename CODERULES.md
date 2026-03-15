@@ -66,6 +66,7 @@ zeus/
 - Page-level components go in `src/renderer/src/pages/` (if needed later).
 - Keep components small and focused.
 - **Always use `@/` path alias for imports.** Never use relative paths (`./`, `../`). `@` maps to `src/renderer/src/`. Example: `import StatusRow from '@/components/StatusRow'`.
+- **Use Tailwind utility classes for all styling.** No custom CSS files per component. Zeus color tokens are defined in `styles.css` via `@theme` (e.g., `bg-zeus-card`, `text-zeus-green`). Add new tokens there if needed.
 - No direct Node.js usage. Everything goes through the `zeus` API exposed via preload.
 - All communication with main process: `window.zeus.<method>()` → IPC → service.
 

@@ -1,0 +1,23 @@
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import StatusRow from '@/components/StatusRow';
+
+describe('StatusRow', () => {
+  it('renders label and status', () => {
+    render(<StatusRow label="Power Lock" status="ACTIVE" />);
+    expect(screen.getByText('Power Lock')).toBeInTheDocument();
+    expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+  });
+
+  it('applies active styles when active', () => {
+    render(<StatusRow label="Power Lock" status="ACTIVE" active />);
+    const badge = screen.getByText('ACTIVE');
+    expect(badge.className).toContain('bg-zeus-green-bg');
+  });
+
+  it('applies inactive styles by default', () => {
+    render(<StatusRow label="WebSocket" status="OFFLINE" />);
+    const badge = screen.getByText('OFFLINE');
+    expect(badge.className).toContain('bg-zeus-surface');
+  });
+});
