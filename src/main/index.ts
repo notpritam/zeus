@@ -1,6 +1,8 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { startPowerBlock } from './services/power';
+import { startWebSocketServer, stopWebSocketServer } from './services/websocket';
+import { destroyAllSessions } from './services/terminal';
 import { registerIpcHandlers } from './ipc/handlers';
 import { createMainWindowOptions } from './window';
 
@@ -20,8 +22,9 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   startPowerBlock();
+  await startWebSocketServer();
   registerIpcHandlers();
   createWindow();
 
@@ -30,6 +33,11 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', async () => {
+  destroyAllSessions();
+  await stopWebSocketServer();
 });
 
 app.on('window-all-closed', () => {

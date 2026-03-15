@@ -5,7 +5,7 @@ import ModeToggle from '@/components/ModeToggle';
 import { useZeusStore } from '@/stores/useZeusStore';
 
 function App() {
-  const { powerBlock, loading, init, togglePower } = useZeusStore();
+  const { powerBlock, websocket, loading, init, togglePower } = useZeusStore();
 
   useEffect(() => {
     init();
@@ -30,7 +30,7 @@ function App() {
           transition={{ duration: 0.25, ease: 'easeOut' }}
         >
           {/* Header */}
-          <div className="space-y-1.5 flex items-center justify-center flex-col">
+          <div className="flex flex-col items-center justify-center space-y-1.5">
             <h1 className="text-text-primary text-[1.75rem] font-bold tracking-[-0.04em]">Zeus</h1>
             <p className="text-text-dim text-[10px] tracking-[0.28em] uppercase">
               Remote Orchestration Server
@@ -51,14 +51,18 @@ function App() {
                 status={powerBlock ? 'ACTIVE' : 'OFF'}
                 active={powerBlock}
               />
-              <StatusRow label="WebSocket" status="OFFLINE" />
+              <StatusRow
+                label="WebSocket"
+                status={websocket ? 'ACTIVE' : 'OFFLINE'}
+                active={websocket}
+              />
               <StatusRow label="Tunnel" status="OFFLINE" />
             </div>
           </div>
 
           {/* Footer */}
           <div className="mt-auto pt-1">
-            <div className=" flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <span className="text-text-ghost text-[10px]">Zeus v1.0.0</span>
               <span className={`text-[10px] ${powerBlock ? 'text-accent' : 'text-text-faint'}`}>
                 {powerBlock ? 'Awake' : 'Sleeping'}

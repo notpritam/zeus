@@ -146,6 +146,64 @@ src/
 
 ## Phase 2: The Brains (Local WebSockets & `node-pty`)
 
-*Not started yet.*
+**Goal:** Spawn terminal sessions via `node-pty` and stream them over WebSocket.
+
+### Step 2.1 — Install Dependencies
+- `npm install ws node-pty` — production deps (externalized by `externalizeDepsPlugin()`)
+- `npm install -D @types/ws` — WebSocket type definitions
+- `npx @electron/rebuild` — rebuilt native `node-pty` for Electron's Node version
+- Added `"postinstall": "electron-rebuild"` script for future installs
+
+### Step 2.2 — Shared Types (`src/main/types.ts`)
+- Defined `WsEnvelope` — `{ channel, sessionId, payload, auth }` per CLAUDE.md spec
+- Terminal payloads: `input`, `output`, `resize`, `exit`
+- Control payloads: `start_session`, `stop_session`, `session_started`, `error`
+
+### Step 2.3 — Terminal Service (`src/main/services/terminal.ts`)
+- Follows same pattern as `power.ts` (module-level state, exported functions)
+- `sessions` Map tracks active PTY instances by UUID
+- `createSession(options, onOutput, onExit)` — spawns PTY with `node-pty`
+  - Shell from `$SHELL` (defaults to `/bin/zsh`), default 80x24
+  - Returns `{ sessionId, shell }`
+- `writeToSession`, `resizeSession`, `destroySession` — PTY lifecycle
+- `destroyAllSessions` — cleanup for shutdown
+- `getSessionCount`, `hasSession` — query helpers
+- Service is WebSocket-agnostic — takes callbacks, keeps it testable
+
+### Step 2.4 — WebSocket Service (`src/main/services/websocket.ts`)
+- Uses `http.createServer()` + `ws.WebSocketServer` (no Express)
+- Binds to `127.0.0.1:3000` (local only for Phase 2)
+- Routes messages by `envelope.channel`:
+  - `control` → handles `start_session` / `stop_session`
+  - `terminal` → handles `input` / `resize`
+  - `git`, `qa` → stubbed with error response
+- Tracks client→sessions via `Map<WebSocket, Set<string>>`
+- On client disconnect, destroys all owned sessions (no orphaned PTYs)
+- `startWebSocketServer()` / `stopWebSocketServer()` — async lifecycle
+
+### Step 2.5 — Main Process Wiring (`src/main/index.ts`)
+- `startWebSocketServer()` called after `startPowerBlock()` in `app.whenReady()`
+- Made ready callback `async`
+- `before-quit` handler: `destroyAllSessions()` + `stopWebSocketServer()`
+
+### Step 2.6 — IPC & Preload Updates
+- `handlers.ts`: replaced hardcoded `websocket: false` → `isWebSocketRunning()`
+- Added `zeus:toggle-websocket` IPC handler (start/stop WS server)
+- `preload/index.ts`: exposed `toggleWebSocket` to renderer
+- `zeus.d.ts`: added `toggleWebSocket: () => Promise<boolean>`
+
+### Step 2.7 — UI Wiring
+- `useZeusStore.ts`: added `toggleWebSocket` action (same pattern as `togglePower`)
+- `App.tsx`: WebSocket StatusRow now shows live state (`ACTIVE`/`OFFLINE`)
+
+### Step 2.8 — Tests
+- Updated `setup.ts` — guarded `window.zeus` mock for Node env compatibility
+- `useZeusStore.test.ts` — added `toggleWebSocket` action test
+- `App.test.tsx` — added test verifying WebSocket status reflects store state
+- New `terminal.test.ts` — PTY spawn, write, resize, destroy lifecycle (8 tests)
+- New `websocket.test.ts` — server start/stop, client connect, start_session flow, error handling (4 tests)
+- Total: 33 tests across 8 suites, all passing
+
+**Phase 2 status: COMPLETE**
 
 ---

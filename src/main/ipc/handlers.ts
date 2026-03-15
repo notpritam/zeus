@@ -1,11 +1,16 @@
 import { ipcMain } from 'electron';
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from '../services/power';
+import {
+  isWebSocketRunning,
+  startWebSocketServer,
+  stopWebSocketServer,
+} from '../services/websocket';
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('zeus:status', () => {
     return {
       powerBlock: isPowerBlocked(),
-      websocket: false,
+      websocket: isWebSocketRunning(),
       tunnel: null,
     };
   });
@@ -17,5 +22,14 @@ export function registerIpcHandlers(): void {
       startPowerBlock();
     }
     return isPowerBlocked();
+  });
+
+  ipcMain.handle('zeus:toggle-websocket', async () => {
+    if (isWebSocketRunning()) {
+      await stopWebSocketServer();
+    } else {
+      await startWebSocketServer();
+    }
+    return isWebSocketRunning();
   });
 }

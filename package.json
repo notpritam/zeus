@@ -11,7 +11,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\""
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
+    "postinstall": "electron-rebuild"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +27,7 @@
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^41.0.2",
     "electron-vite": "^5.0.0",
@@ -45,6 +47,8 @@
   },
   "dependencies": {
     "framer-motion": "^12.36.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.19.0",
     "zustand": "^5.0.11"
   }
 }

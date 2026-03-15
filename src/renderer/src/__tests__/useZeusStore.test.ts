@@ -42,4 +42,13 @@ describe('useZeusStore', () => {
     expect(useZeusStore.getState().powerBlock).toBe(false);
     expect(window.zeus.togglePower).toHaveBeenCalledOnce();
   });
+
+  it('toggleWebSocket updates websocket state', async () => {
+    window.zeus.toggleWebSocket = vi.fn().mockResolvedValue(true);
+
+    await useZeusStore.getState().toggleWebSocket();
+
+    expect(useZeusStore.getState().websocket).toBe(true);
+    expect(window.zeus.toggleWebSocket).toHaveBeenCalledOnce();
+  });
 });

@@ -5,6 +5,7 @@ interface ZeusAPI {
     tunnel: string | null;
   }>;
   togglePower: () => Promise<boolean>;
+  toggleWebSocket: () => Promise<boolean>;
 }
 
 declare global {

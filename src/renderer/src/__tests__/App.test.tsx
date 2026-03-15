@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import App from '@/App';
 
 describe('App', () => {
@@ -23,6 +23,20 @@ describe('App', () => {
       expect(screen.getByText('Power Lock')).toBeInTheDocument();
       expect(screen.getByText('WebSocket')).toBeInTheDocument();
       expect(screen.getByText('Tunnel')).toBeInTheDocument();
+    });
+  });
+
+  it('shows websocket status from store', async () => {
+    window.zeus.getStatus = vi.fn().mockResolvedValue({
+      powerBlock: true,
+      websocket: true,
+      tunnel: null,
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      const actives = screen.getAllByText('ACTIVE');
+      expect(actives.length).toBe(2); // Power Lock + WebSocket
     });
   });
 
