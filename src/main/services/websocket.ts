@@ -18,6 +18,8 @@ import type {
 import { createSession, writeToSession, resizeSession, destroySession } from './terminal';
 import { registerSession, markExited, markKilled, getSession, getAllSessions } from './sessions';
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
+import { getTunnelUrl } from './tunnel';
+import { validateToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
 
@@ -32,6 +34,9 @@ const claudeManager = new ClaudeSessionManager();
 
 // Track which Claude session is bound to which WS client
 const clientClaudeSessions = new Map<WebSocket, Set<string>>();
+
+// Track authenticated clients
+const authenticatedClients = new WeakSet<WebSocket>();
 
 function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
   if (ws.readyState === WebSocket.OPEN) {
@@ -168,7 +173,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: null,
+        tunnel: getTunnelUrl(),
       },
       auth: '',
     });
@@ -186,7 +191,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: null,
+        tunnel: getTunnelUrl(),
       },
       auth: '',
     });
@@ -419,8 +424,26 @@ export async function startWebSocketServer(port = 3000): Promise<void> {
 
     const wsServer = new WebSocketServer({ server: httpServer });
 
-    wsServer.on('connection', (ws) => {
-      console.log('[Zeus] WebSocket client connected');
+    wsServer.on('connection', (ws, req) => {
+      const remoteAddr = req.socket.remoteAddress ?? '';
+      const isLocal = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+
+      if (isLocal) {
+        authenticatedClients.add(ws);
+        console.log('[Zeus] WebSocket client connected (local — auto-authenticated)');
+      } else {
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const token = url.searchParams.get('token');
+
+        if (!token || !validateToken(token)) {
+          console.warn(`[Zeus] Unauthorized WebSocket connection from ${remoteAddr}`);
+          ws.close(4401, 'Unauthorized');
+          return;
+        }
+
+        authenticatedClients.add(ws);
+        console.log(`[Zeus] WebSocket client connected (remote — authenticated: ${remoteAddr})`);
+      }
 
       ws.on('message', (data) => handleMessage(ws, data.toString()));
       ws.on('close', () => {
@@ -431,7 +454,7 @@ export async function startWebSocketServer(port = 3000): Promise<void> {
 
     httpServer.on('error', reject);
 
-    httpServer.listen(port, '127.0.0.1', () => {
+    httpServer.listen(port, '0.0.0.0', () => {
       server = httpServer;
       wss = wsServer;
       console.log(`[Zeus] Server listening on http://127.0.0.1:${port}`);
@@ -461,6 +484,20 @@ export async function stopWebSocketServer(): Promise<void> {
         resolve();
       });
     });
+  });
+}
+
+export function notifyTunnelStatus(): void {
+  broadcastEnvelope({
+    channel: 'status',
+    sessionId: '',
+    payload: {
+      type: 'status_update',
+      powerBlock: isPowerBlocked(),
+      websocket: true,
+      tunnel: getTunnelUrl(),
+    },
+    auth: '',
   });
 }
 

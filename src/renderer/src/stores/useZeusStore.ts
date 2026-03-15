@@ -103,7 +103,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         set({
           powerBlock: payload.powerBlock ?? get().powerBlock,
           websocket: payload.websocket ?? get().websocket,
-          tunnel: payload.tunnel ?? get().tunnel,
+          tunnel: payload.tunnel !== undefined ? payload.tunnel : get().tunnel,
         });
       }
     });

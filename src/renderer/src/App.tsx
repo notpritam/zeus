@@ -10,6 +10,7 @@ function App() {
     connected,
     powerBlock,
     websocket,
+    tunnel,
     sessions,
     activeSessionId,
     claudeSessions,
@@ -66,6 +67,7 @@ function App() {
             activeClaudeId={activeClaudeId}
             powerBlock={powerBlock}
             websocket={websocket}
+            tunnel={tunnel}
             viewMode={viewMode}
             onNewSession={() => {
               startSession();

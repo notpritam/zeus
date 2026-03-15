@@ -103,7 +103,7 @@ export type ControlPayload =
 // ─── Status Payloads ───
 
 export interface StatusPayload {
-  type: 'status_update' | 'get_status' | 'toggle_power';
+  type: 'status_update' | 'get_status' | 'toggle_power' | 'toggle_tunnel';
   powerBlock?: boolean;
   websocket?: boolean;
   tunnel?: string | null;

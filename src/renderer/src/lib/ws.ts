@@ -72,8 +72,11 @@ class ZeusWebSocket {
     if (isLocalDev && location.port !== '3000') {
       return 'ws://127.0.0.1:3000';
     }
-    // Production or ngrok: use same host
-    return `ws://${location.host}`;
+    // Production or ngrok: use correct protocol and pass through auth token
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = new URLSearchParams(location.search).get('token');
+    const base = `${protocol}//${location.host}`;
+    return token ? `${base}?token=${token}` : base;
   }
 
   private doConnect(): void {

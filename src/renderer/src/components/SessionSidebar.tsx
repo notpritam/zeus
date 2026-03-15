@@ -10,6 +10,7 @@ interface SessionSidebarProps {
   activeClaudeId: string | null;
   powerBlock: boolean;
   websocket: boolean;
+  tunnel: string | null;
   viewMode: 'terminal' | 'claude';
   onNewSession: () => void;
   onNewClaudeSession: (prompt: string) => void;
@@ -134,6 +135,7 @@ function SessionSidebar({
   activeClaudeId,
   powerBlock,
   websocket,
+  tunnel,
   viewMode,
   onNewSession,
   onNewClaudeSession,
@@ -233,6 +235,16 @@ function SessionSidebar({
           />
         </button>
         <StatusRow label="WebSocket" status={websocket ? 'ACTIVE' : 'OFFLINE'} active={websocket} />
+        <StatusRow label="Tunnel" status={tunnel ? 'ACTIVE' : 'OFF'} active={!!tunnel} />
+        {tunnel && (
+          <button
+            className="text-info hover:text-info/80 mt-1 w-full truncate text-left text-[10px] transition-colors [-webkit-app-region:no-drag]"
+            title={tunnel}
+            onClick={() => navigator.clipboard.writeText(tunnel)}
+          >
+            {tunnel.replace(/^https?:\/\//, '')}
+          </button>
+        )}
       </div>
     </div>
   );
