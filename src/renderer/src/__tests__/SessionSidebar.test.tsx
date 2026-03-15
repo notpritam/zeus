@@ -21,11 +21,16 @@ const makeSession = (
 const defaultProps = {
   sessions: [] as SessionRecord[],
   activeSessionId: null,
+  claudeSessions: [],
+  activeClaudeId: null,
   powerBlock: true,
   websocket: true,
+  viewMode: 'terminal' as const,
   onNewSession: vi.fn(),
+  onNewClaudeSession: vi.fn(),
   onSelectSession: vi.fn(),
   onStopSession: vi.fn(),
+  onSelectClaudeSession: vi.fn(),
   onTogglePower: vi.fn(),
 };
 
@@ -58,5 +63,25 @@ describe('SessionSidebar', () => {
     render(<SessionSidebar {...defaultProps} />);
     expect(screen.getByText('Power Lock')).toBeInTheDocument();
     expect(screen.getByText('WebSocket')).toBeInTheDocument();
+  });
+
+  it('renders new claude session button', () => {
+    render(<SessionSidebar {...defaultProps} />);
+    expect(screen.getByTestId('new-claude-btn')).toBeInTheDocument();
+  });
+
+  it('renders claude session cards', () => {
+    const claudeSessions = [
+      {
+        id: 'c1',
+        claudeSessionId: null,
+        status: 'running' as const,
+        prompt: 'Fix bug',
+        startedAt: Date.now(),
+      },
+    ];
+    render(<SessionSidebar {...defaultProps} claudeSessions={claudeSessions} />);
+    expect(screen.getByTestId('claude-card-c1')).toBeInTheDocument();
+    expect(screen.getByText('Fix bug')).toBeInTheDocument();
   });
 });

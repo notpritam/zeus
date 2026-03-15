@@ -10,7 +10,7 @@ function Header({ connected, onToggleSidebar, sidebarOpen }: HeaderProps) {
   return (
     <header
       data-testid="header"
-      className="bg-bg-card border-border flex h-10 shrink-0 items-center justify-between border-b px-4"
+      className="bg-bg-card border-border flex h-10 shrink-0 items-center justify-between border-b px-4 pl-20 [-webkit-app-region:drag]"
     >
       {/* Hamburger (mobile only) */}
       <button
@@ -21,15 +21,11 @@ function Header({ connected, onToggleSidebar, sidebarOpen }: HeaderProps) {
         {sidebarOpen ? '\u2715' : '\u2630'}
       </button>
 
-      {/* Brand */}
-      <div className="flex items-center gap-2">
-        <span className="text-text-primary text-sm font-bold tracking-tight">Zeus</span>
-      </div>
+      <div className="flex-1" />
 
       {/* Connection Status */}
       <div className="flex items-center gap-2">
         <StatusIndicator active={connected} />
-        <span className="text-text-dim text-[10px]">{connected ? 'Connected' : 'Offline'}</span>
       </div>
     </header>
   );

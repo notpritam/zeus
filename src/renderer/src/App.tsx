@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
+import ClaudeView from '@/components/ClaudeView';
 import { useZeusStore } from '@/stores/useZeusStore';
 
 function App() {
@@ -11,11 +12,22 @@ function App() {
     websocket,
     sessions,
     activeSessionId,
+    claudeSessions,
+    activeClaudeId,
+    claudeEntries,
+    pendingApprovals,
+    viewMode,
     connect,
     togglePower,
     startSession,
     stopSession,
     selectSession,
+    startClaudeSession,
+    sendClaudeMessage,
+    approveClaudeTool,
+    denyClaudeTool,
+    interruptClaude,
+    selectClaudeSession,
   } = useZeusStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,6 +36,9 @@ function App() {
     const cleanup = connect();
     return cleanup;
   }, [connect]);
+
+  const activeClaudeSession = claudeSessions.find((s) => s.id === activeClaudeId) ?? null;
+  const activeEntries = activeClaudeId ? (claudeEntries[activeClaudeId] ?? []) : [];
 
   return (
     <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
@@ -47,10 +62,17 @@ function App() {
           <SessionSidebar
             sessions={sessions}
             activeSessionId={activeSessionId}
+            claudeSessions={claudeSessions}
+            activeClaudeId={activeClaudeId}
             powerBlock={powerBlock}
             websocket={websocket}
+            viewMode={viewMode}
             onNewSession={() => {
               startSession();
+              setSidebarOpen(false);
+            }}
+            onNewClaudeSession={(prompt) => {
+              startClaudeSession(prompt);
               setSidebarOpen(false);
             }}
             onSelectSession={(id) => {
@@ -58,6 +80,10 @@ function App() {
               setSidebarOpen(false);
             }}
             onStopSession={stopSession}
+            onSelectClaudeSession={(id) => {
+              selectClaudeSession(id);
+              setSidebarOpen(false);
+            }}
             onTogglePower={togglePower}
           />
         </div>
@@ -70,9 +96,21 @@ function App() {
           />
         )}
 
-        {/* Terminal */}
-        <div data-testid="terminal-area" className="min-w-0 flex-1">
-          <TerminalView sessionId={activeSessionId} />
+        {/* Main Content — Terminal or Claude */}
+        <div data-testid="main-area" className="min-w-0 flex-1">
+          {viewMode === 'claude' ? (
+            <ClaudeView
+              session={activeClaudeSession}
+              entries={activeEntries}
+              approvals={pendingApprovals}
+              onSendMessage={sendClaudeMessage}
+              onApprove={approveClaudeTool}
+              onDeny={denyClaudeTool}
+              onInterrupt={interruptClaude}
+            />
+          ) : (
+            <TerminalView sessionId={activeSessionId} />
+          )}
         </div>
       </div>
     </div>

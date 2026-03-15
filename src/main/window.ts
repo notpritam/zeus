@@ -9,7 +9,7 @@ export function createMainWindowOptions(): BrowserWindowConstructorOptions {
     minHeight: 360,
     resizable: true,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    trafficLightPosition: { x: 16, y: 12 },
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

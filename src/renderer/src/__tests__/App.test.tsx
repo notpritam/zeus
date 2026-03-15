@@ -39,12 +39,19 @@ describe('App', () => {
     });
   });
 
-  it('has the shell layout with sidebar and terminal area', async () => {
+  it('has the shell layout with sidebar and main area', async () => {
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId('app-shell')).toBeInTheDocument();
       expect(screen.getByTestId('sidebar-panel')).toBeInTheDocument();
-      expect(screen.getByTestId('terminal-area')).toBeInTheDocument();
+      expect(screen.getByTestId('main-area')).toBeInTheDocument();
+    });
+  });
+
+  it('renders the new claude session button', async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('new-claude-btn')).toBeInTheDocument();
     });
   });
 });

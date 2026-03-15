@@ -25,4 +25,11 @@ export type {
   ClaudeInterruptPayload,
   ClaudeStopPayload,
   ClaudePayload,
+  ClaudeSessionStatus,
+  ClaudeSessionInfo,
+  ClaudeApprovalInfo,
+  NormalizedEntry,
+  NormalizedEntryType,
+  ToolStatus,
+  ActionType,
 } from '../shared/types';
