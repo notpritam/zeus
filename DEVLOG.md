@@ -65,6 +65,25 @@ src/
 - Window renders status dashboard with Power Lock showing ACTIVE
 - No errors, clean exit on close
 
+### Step 1.10 — React + Vite Migration (electron-vite)
+- Replaced raw `tsc` build with `electron-vite` — handles main, preload, and renderer builds
+- Installed: `vite`, `electron-vite`, `@vitejs/plugin-react`, `react`, `react-dom`, type defs
+- Created `electron.vite.config.ts` with three build targets (main, preload, renderer)
+- Split `tsconfig.json` into references: `tsconfig.node.json` (main/preload) + `tsconfig.web.json` (renderer with JSX)
+- Moved renderer to React: `index.html` → `src/main.tsx` → `<App />`
+- `App.tsx` renders status dashboard with `StatusRow` component
+- Main process now checks `process.env.ELECTRON_RENDERER_URL` for dev mode, falls back to built files
+- Build output: `out/` (was `dist/`)
+- Scripts: `npm run dev` (HMR), `npm run build`, `npm run start` (build + preview)
+
+### Step 1.11 — Code Rules
+- Created `CODERULES.md` — project structure, TS rules, main/renderer/preload conventions, security, workflow
+
+### Step 1.12 — Verification
+- `npx electron-vite build` → clean build (main 2.5KB, preload 0.2KB, renderer 488KB)
+- `npx electron-vite preview` → app launches, power blocker active, React UI renders
+- No errors
+
 **Phase 1 status: COMPLETE**
 
 ---

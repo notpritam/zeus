@@ -1,11 +1,11 @@
 {
   "name": "zeus",
   "version": "1.0.0",
-  "main": "dist/main/index.js",
+  "main": "out/main/index.js",
   "scripts": {
-    "build": "tsc && cp -r src/renderer dist/",
-    "start": "npm run build && electron .",
-    "dev": "tsc --watch",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,8 +14,15 @@
   "description": "Remote orchestration tool — headless AI-powered dev server",
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
     "electron": "^41.0.2",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0"
   }
 }
