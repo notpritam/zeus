@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'xterm/css/xterm.css';
 
 /* ─── Zeus Design Tokens ─── */
 
@@ -62,6 +63,15 @@
 
   body {
     font-family: var(--font-sans);
-    -webkit-app-region: drag;
   }
+}
+
+/* ─── xterm.js overrides ─── */
+
+.xterm {
+  font-family: var(--font-mono);
+}
+
+.xterm-viewport {
+  background-color: var(--color-bg) !important;
 }

@@ -3,10 +3,10 @@ import path from 'path';
 
 export function createMainWindowOptions(): BrowserWindowConstructorOptions {
   return {
-    width: 380,
-    height: 420,
-    minWidth: 380,
-    minHeight: 420,
+    width: 1024,
+    height: 640,
+    minWidth: 480,
+    minHeight: 360,
     resizable: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },

@@ -1,7 +1,2 @@
-import { contextBridge, ipcRenderer } from 'electron';
-
-contextBridge.exposeInMainWorld('zeus', {
-  getStatus: () => ipcRenderer.invoke('zeus:status'),
-  togglePower: () => ipcRenderer.invoke('zeus:toggle-power'),
-  toggleWebSocket: () => ipcRenderer.invoke('zeus:toggle-websocket'),
-});
+// Preload is intentionally empty — all communication goes over WebSocket.
+// File kept for Electron's webPreferences.preload requirement.

@@ -1,75 +1,79 @@
-import { useEffect } from 'react';
-import { motion } from 'framer-motion';
-import StatusRow from '@/components/StatusRow';
-import ModeToggle from '@/components/ModeToggle';
+import { useEffect, useState } from 'react';
+import Header from '@/components/Header';
+import SessionSidebar from '@/components/SessionSidebar';
+import TerminalView from '@/components/TerminalView';
 import { useZeusStore } from '@/stores/useZeusStore';
 
 function App() {
-  const { powerBlock, websocket, loading, init, togglePower } = useZeusStore();
+  const {
+    connected,
+    powerBlock,
+    websocket,
+    sessions,
+    activeSessionId,
+    connect,
+    togglePower,
+    startSession,
+    stopSession,
+    selectSession,
+  } = useZeusStore();
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    init();
-  }, [init]);
-
-  if (loading) return null;
+    const cleanup = connect();
+    return cleanup;
+  }, [connect]);
 
   return (
     <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
-      {/* Drag region — clears macOS traffic lights */}
-      <div className="h-12 w-full shrink-0" />
+      {/* macOS traffic light clearance */}
+      <div className="h-6 w-full shrink-0 md:hidden" />
 
-      <div
-        data-testid="app-shell"
-        className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-6 pb-6"
-      >
-        <motion.div
-          data-testid="app-panel"
-          className="bg-bg flex w-full max-w-[560px] flex-col gap-8 rounded-[28px] px-7 py-7"
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
+      <Header
+        connected={connected}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+      />
+
+      <div data-testid="app-shell" className="relative flex min-h-0 flex-1">
+        {/* Sidebar — always visible on desktop, slide-over on mobile */}
+        <div
+          data-testid="sidebar-panel"
+          className={`absolute inset-y-0 left-0 z-10 w-[280px] transition-transform md:relative md:translate-x-0 ${
+            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
         >
-          {/* Header */}
-          <div className="flex flex-col items-center justify-center space-y-1.5">
-            <h1 className="text-text-primary text-[1.75rem] font-bold tracking-[-0.04em]">Zeus</h1>
-            <p className="text-text-dim text-[10px] tracking-[0.28em] uppercase">
-              Remote Orchestration Server
-            </p>
-          </div>
+          <SessionSidebar
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            powerBlock={powerBlock}
+            websocket={websocket}
+            onNewSession={() => {
+              startSession();
+              setSidebarOpen(false);
+            }}
+            onSelectSession={(id) => {
+              selectSession(id);
+              setSidebarOpen(false);
+            }}
+            onStopSession={stopSession}
+            onTogglePower={togglePower}
+          />
+        </div>
 
-          {/* Mode Toggle */}
-          <ModeToggle active={powerBlock} onToggle={togglePower} />
+        {/* Backdrop for mobile slide-over */}
+        {sidebarOpen && (
+          <div
+            className="absolute inset-0 z-[5] bg-black/50 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
-          {/* Services */}
-          <div className="flex flex-col gap-2 p-4">
-            <p className="text-text-dim text-[10px] font-medium tracking-[0.28em] uppercase">
-              Services
-            </p>
-            <div className="border-border bg-bg-card rounded-xl border px-4 py-2">
-              <StatusRow
-                label="Power Lock"
-                status={powerBlock ? 'ACTIVE' : 'OFF'}
-                active={powerBlock}
-              />
-              <StatusRow
-                label="WebSocket"
-                status={websocket ? 'ACTIVE' : 'OFFLINE'}
-                active={websocket}
-              />
-              <StatusRow label="Tunnel" status="OFFLINE" />
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="mt-auto pt-1">
-            <div className="flex items-center justify-between">
-              <span className="text-text-ghost text-[10px]">Zeus v1.0.0</span>
-              <span className={`text-[10px] ${powerBlock ? 'text-accent' : 'text-text-faint'}`}>
-                {powerBlock ? 'Awake' : 'Sleeping'}
-              </span>
-            </div>
-          </div>
-        </motion.div>
+        {/* Terminal */}
+        <div data-testid="terminal-area" className="min-w-0 flex-1">
+          <TerminalView sessionId={activeSessionId} />
+        </div>
       </div>
     </div>
   );

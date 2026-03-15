@@ -1,54 +1,77 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useZeusStore } from '@/stores/useZeusStore';
+import { zeusWs } from '@/lib/ws';
 
 describe('useZeusStore', () => {
   beforeEach(() => {
     useZeusStore.setState({
+      connected: false,
       powerBlock: true,
-      websocket: false,
+      websocket: true,
       tunnel: null,
-      loading: true,
+      sessions: [],
+      activeSessionId: null,
     });
+    vi.clearAllMocks();
   });
 
   it('has correct initial state', () => {
     const state = useZeusStore.getState();
+    expect(state.connected).toBe(false);
     expect(state.powerBlock).toBe(true);
-    expect(state.websocket).toBe(false);
+    expect(state.websocket).toBe(true);
     expect(state.tunnel).toBeNull();
-    expect(state.loading).toBe(true);
+    expect(state.sessions).toEqual([]);
+    expect(state.activeSessionId).toBeNull();
   });
 
-  it('init fetches status and sets loading to false', async () => {
-    window.zeus.getStatus = vi.fn().mockResolvedValue({
-      powerBlock: true,
-      websocket: false,
-      tunnel: null,
-    });
-
-    await useZeusStore.getState().init();
-
-    const state = useZeusStore.getState();
-    expect(state.loading).toBe(false);
-    expect(state.powerBlock).toBe(true);
-    expect(window.zeus.getStatus).toHaveBeenCalledOnce();
+  it('connect calls zeusWs.connect and subscribes to channels', () => {
+    const cleanup = useZeusStore.getState().connect();
+    expect(zeusWs.on).toHaveBeenCalledWith('status', expect.any(Function));
+    expect(zeusWs.on).toHaveBeenCalledWith('control', expect.any(Function));
+    expect(zeusWs.connect).toHaveBeenCalled();
+    expect(typeof cleanup).toBe('function');
   });
 
-  it('togglePower updates powerBlock state', async () => {
-    window.zeus.togglePower = vi.fn().mockResolvedValue(false);
-
-    await useZeusStore.getState().togglePower();
-
-    expect(useZeusStore.getState().powerBlock).toBe(false);
-    expect(window.zeus.togglePower).toHaveBeenCalledOnce();
+  it('togglePower sends toggle_power via WS', () => {
+    useZeusStore.getState().togglePower();
+    expect(zeusWs.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'status',
+        payload: { type: 'toggle_power' },
+      }),
+    );
   });
 
-  it('toggleWebSocket updates websocket state', async () => {
-    window.zeus.toggleWebSocket = vi.fn().mockResolvedValue(true);
+  it('startSession sends start_session via WS', () => {
+    useZeusStore.getState().startSession(100, 40);
+    expect(zeusWs.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'control',
+        payload: { type: 'start_session', cols: 100, rows: 40 },
+      }),
+    );
+  });
 
-    await useZeusStore.getState().toggleWebSocket();
+  it('stopSession sends stop_session via WS', () => {
+    useZeusStore.getState().stopSession('test-id');
+    expect(zeusWs.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'control',
+        sessionId: 'test-id',
+        payload: { type: 'stop_session' },
+      }),
+    );
+  });
 
-    expect(useZeusStore.getState().websocket).toBe(true);
-    expect(window.zeus.toggleWebSocket).toHaveBeenCalledOnce();
+  it('selectSession updates activeSessionId', () => {
+    useZeusStore.getState().selectSession('abc-123');
+    expect(useZeusStore.getState().activeSessionId).toBe('abc-123');
+  });
+
+  it('selectSession can clear selection', () => {
+    useZeusStore.setState({ activeSessionId: 'abc' });
+    useZeusStore.getState().selectSession(null);
+    expect(useZeusStore.getState().activeSessionId).toBeNull();
   });
 });

@@ -207,3 +207,173 @@ src/
 **Phase 2 status: COMPLETE**
 
 ---
+
+## Phase 3: The Face (Single Web UI + Session Management)
+
+**Goal:** Build the UI to manage sessions and run terminals, accessible from both the desktop Electron window and a phone browser.
+
+### Step 3.1 — Shared Types + Session Registry
+- Created `src/shared/types.ts` — shared interfaces (WsEnvelope, SessionRecord, StatusPayload)
+- Added `SessionRecord` type with lifecycle tracking (active/exited/killed)
+- Extended `WsEnvelope.channel` with `'status'` channel
+- Extended `ControlPayload` with `list_sessions`, `session_list`, `session_updated`
+- Added `StatusPayload` for power/service status communication
+- `src/main/types.ts` now re-exports everything from shared
+- Created `src/main/services/sessions.ts` — session registry (registerSession, markExited, markKilled, getAllSessions, getActiveSessions, clearCompleted)
+- Updated both `tsconfig.node.json` and `tsconfig.web.json` to include `src/shared/**/*`
+
+### Step 3.2 — WebSocket Server Rewrite
+- Integrated `sirv` for static file serving — `http.createServer()` now serves built renderer files from `out/renderer/`
+- Added graceful fallback when renderer dir doesn't exist (for tests)
+- Added `broadcastEnvelope()` helper — sends to ALL connected clients
+- Wired session registry into `websocket.ts`:
+  - `start_session` → `registerSession()`, broadcasts `session_started` + `session_updated` to all clients
+  - PTY `onExit` → `markExited()`, broadcasts exit + session update
+  - `stop_session` → `markKilled()` before `destroySession()`, broadcasts update
+  - `list_sessions` → responds with full session list
+  - Client disconnect → marks owned sessions as killed, broadcasts updates
+- Added `status` channel handler:
+  - `get_status` → responds with `{ powerBlock, websocket, tunnel }`
+  - `toggle_power` → toggles `powerSaveBlocker`, broadcasts new status to all clients
+- Terminal output now broadcasts to ALL clients (not just session owner)
+
+### Step 3.3 — Electron → Server Loading + IPC Removal
+- `index.ts` now loads from `http://127.0.0.1:3000` in production (was `loadFile`)
+- Dev mode still uses `ELECTRON_RENDERER_URL` (Vite HMR)
+- Removed `registerIpcHandlers()` call
+- `before-quit` now marks all active sessions as killed before destroying
+- Deleted `src/main/ipc/handlers.ts` — all communication via WebSocket
+- Stripped `src/preload/index.ts` — empty (kept for Electron's preload requirement)
+- Updated window size to 1024x640 for terminal-centric layout
+
+### Step 3.4 — Dependencies
+- Installed `sirv` — static file serving (3KB, zero-dep)
+- Installed `xterm` — terminal emulator
+- Installed `@xterm/addon-fit` — auto-resize terminal
+- Installed `@xterm/addon-web-links` — clickable URLs in terminal
+
+### Step 3.5 — WebSocket Client Library (`src/renderer/src/lib/ws.ts`)
+- Singleton `ZeusWebSocket` class for the renderer
+- `connect()` / `disconnect()` / `send(envelope)` / `on(channel, handler)`
+- Auto-reconnect with exponential backoff (1s → 2s → 4s → max 10s)
+- URL: `ws://${location.host}` (same-origin) with dev override for Vite on :5173
+- Dispatches `_connected` / `_disconnected` synthetic events on status channel
+
+### Step 3.6 — Zustand Store Rewrite (`useZeusStore.ts`)
+- Replaced all `window.zeus.*` IPC calls with WebSocket communication
+- New state: `connected`, `powerBlock`, `websocket`, `tunnel`, `sessions`, `activeSessionId`
+- `connect()` → subscribes to `status` + `control` channels, auto-requests initial state
+- `session_started` → auto-selects new session
+- `session_list` → replaces sessions array
+- `session_updated` → upserts matching session record
+- Actions: `togglePower`, `fetchSessions`, `startSession`, `stopSession`, `selectSession`
+
+### Step 3.7 — useTerminal Hook (`src/renderer/src/hooks/useTerminal.ts`)
+- xterm.js ↔ WebSocket bridge
+- Creates `Terminal` + `FitAddon` + `WebLinksAddon`
+- Themed to match Zeus design tokens (dark background, green cursor/accent)
+- `terminal.onData()` → sends input envelope to server
+- Subscribes to terminal channel, filters by sessionId for output/exit
+- `ResizeObserver` → `fitAddon.fit()` → sends resize envelope
+- Full cleanup on sessionId change or unmount
+
+### Step 3.8 — New Components + App Layout
+- **`Header.tsx`** — "Zeus" brand + connection status dot (green/red) + mobile hamburger toggle
+- **`SessionCard.tsx`** — compact card: truncated ID (8 chars), shell, status badge (green=active, gray=exited, red=killed), relative time, stop button
+- **`SessionSidebar.tsx`** — "New Session" button + session list (active on top, completed below) + service status footer (Power Lock, WebSocket)
+- **`TerminalView.tsx`** — xterm.js container using `useTerminal` hook, empty state when no session selected
+- **`App.tsx`** rewritten — grid layout with sidebar (280px) + terminal area
+  - Desktop (`md:` breakpoint): sidebar always visible
+  - Mobile: header with hamburger → slide-over sidebar panel with backdrop
+
+### Step 3.9 — Type + CSS Updates
+- Removed `ZeusAPI` / `window.zeus` from `zeus.d.ts`
+- Added xterm.js CSS import and theme overrides in `styles.css`
+- Removed `-webkit-app-region: drag` from body (drag region only on specific elements)
+
+### Step 3.10 — Tests
+- New `sessions.test.ts` — register, markExited, markKilled, getAllSessions, getActiveSessions, clearCompleted (8 tests)
+- New `SessionCard.test.tsx` — renders truncated ID, status badge, stop button, fires callbacks (5 tests)
+- New `SessionSidebar.test.tsx` — empty state, new session button, renders cards, status rows (5 tests)
+- New `TerminalView.test.tsx` — empty state, mounts container on session select (2 tests)
+- Rewrote `setup.ts` — removed `window.zeus` mock, added xterm/WebSocket mocks, ResizeObserver polyfill
+- Rewrote `useZeusStore.test.ts` — WS-based store (connect, togglePower, startSession, stopSession, selectSession) (7 tests)
+- Rewrote `App.test.tsx` — new layout (header, sidebar, terminal area, service status) (6 tests)
+- Updated `websocket.test.ts` — works with sirv graceful fallback (5 tests)
+- Total: 55 tests across 12 suites, all passing
+
+### Step 3.11 — Verification
+- `npm run build` → `out/renderer/` has `index.html` + assets ✓
+- `npm run lint` → 0 errors ✓
+- `npm run format:check` → all files formatted ✓
+- `npm test` → 55 tests passing ✓
+
+**Phase 3 status: COMPLETE**
+
+---
+
+## Claude Code Session Management (SDK Integration)
+
+**Goal:** Spawn Claude CLI as a piped subprocess, manage the stream-json protocol, and emit normalized entries over WebSocket for remote UI rendering. Based on vibe-kanban's session handling patterns.
+
+### Step C.1 — Type Definitions (`src/main/services/claude-types.ts`)
+- Full TypeScript type system mirroring Claude Code's stream-json protocol
+- **Inbound types (App → Claude stdin):** `SDKControlRequest` (initialize, set_permission_mode, interrupt), `ControlResponseMessage` (allow/deny), `UserMessage`
+- **Outbound types (Claude stdout → App):** `ClaudeJson` union type — `system`, `assistant`, `user`, `tool_use`, `tool_result`, `stream_event`, `result`, `control_request`, `rate_limit_event`
+- **Sub-types:** `StreamEvent` (content_block_start/delta/stop, message_start/delta/stop), `ContentBlockDelta` (text_delta, thinking_delta, signature_delta)
+- **Permission system:** `PermissionMode`, `PermissionResult` (allow/deny), `PermissionUpdate` (setMode, addRules)
+- **UI types:** `NormalizedEntry` (id, entryType, content), `NormalizedEntryType` (user_message, assistant_message, tool_use, thinking, system_message, error_message, token_usage), `ActionType` (file_read, file_edit, command_run, search, web_fetch, task_create, plan_presentation), `ToolStatus`, `FileChange`
+- **Helper factories:** `makeControlRequest()`, `makeControlResponse()`, `makeUserMessage()` — using `crypto.randomUUID()` (no external uuid package)
+
+### Step C.2 — Protocol Peer (`src/main/services/claude-protocol.ts`)
+- Bidirectional JSON communication over stdin/stdout
+- Reads stdout line-by-line via `readline.createInterface()`
+- Parses each line as `ClaudeJson`, emits `message`, `control_request`, `result` events
+- Filters stderr noise (npm warnings, fast mode warnings)
+- Outbound methods: `initialize(hooks)`, `setPermissionMode(mode)`, `sendUserMessage(content)`, `sendPermissionResponse(requestId, result)`, `sendHookResponse(requestId, output)`, `interrupt()`
+- Strongly-typed EventEmitter with `ProtocolPeerEvents` interface
+
+### Step C.3 — Log Processor (`src/main/services/claude-log-processor.ts`)
+- Converts raw `ClaudeJson` → `NormalizedEntry[]` for UI rendering
+- Handles all message types: assistant (text + thinking), user, tool_use, stream_event, result
+- **Stream accumulation:** Tracks `streamingText` and `streamingThinking` across `content_block_start` → `content_block_delta` → `content_block_stop` lifecycle
+- **Tool mapping:** Maps tool names to `ActionType` — Read → file_read, Edit/Write → file_edit, Bash → command_run, Grep/Glob → search, WebFetch → web_fetch, Task/Agent → task_create, ExitPlanMode → plan_presentation, mcp__* → other
+- **Tool tracking:** Stores tool_use id → entry metadata for later tool_result matching
+- Generates human-readable content strings (e.g., "Reading src/App.tsx", "$ npm install")
+- Skips replayed user messages (`isReplay: true`)
+
+### Step C.4 — Session Manager (`src/main/services/claude-session.ts`)
+- **`ClaudeSession`** — one instance per conversation:
+  - Spawns `npx @anthropic-ai/claude-code@latest` with `-p --output-format=stream-json --input-format=stream-json --include-partial-messages --permission-prompt-tool=stdio --permission-mode=bypassPermissions`
+  - Protocol initialization sequence: `initialize(hooks)` → `setPermissionMode(mode)` → `sendUserMessage(prompt)`
+  - **Hook configuration:** Plan mode auto-approves everything except ExitPlanMode/AskUserQuestion; bypass mode only intercepts AskUserQuestion; default mode approves reads
+  - **Session ID tracking:** Extracted from first message with `session_id` field
+  - **Message UUID tracking:** User messages commit immediately; assistant messages pend until `result` confirms (for safe resume points)
+  - **Control request handling:** `can_use_tool` → emits `approval_needed` for UI; `hook_callback` → auto-approves `AUTO_APPROVE_CALLBACK_ID`, handles `STOP_GIT_CHECK_CALLBACK_ID`
+  - **Special tools:** ExitPlanMode auto-approved with `updatedPermissions` to switch to bypass; AskUserQuestion always routed to user
+  - Events: `entry`, `raw`, `approval_needed`, `session_id`, `done`, `error`
+  - Methods: `start(prompt)`, `sendMessage(content)`, `approveTool(approvalId)`, `denyTool(approvalId, reason)`, `interrupt()`, `kill()`
+- **`ClaudeSessionManager`** — manages multiple concurrent sessions:
+  - `createSession(prompt, options)`, `resumeSession(sessionId, prompt, options)`
+  - Resume via `--resume <sessionId>` flag, fork via `--resume-session-at <messageId>`
+  - `getSession(id)`, `getAllSessions()`, `killSession(id)`, `killAll()`
+
+### Step C.5 — WebSocket Integration
+- Added `'claude'` channel to `WsEnvelope.channel` union in shared types
+- Added Claude payload types: `ClaudeStartPayload`, `ClaudeResumePayload`, `ClaudeSendMessagePayload`, `ClaudeApproveToolPayload`, `ClaudeDenyToolPayload`, `ClaudeInterruptPayload`, `ClaudeStopPayload`
+- Wired `handleClaude()` into `websocket.ts` message router:
+  - `start_claude` → `claudeManager.createSession()`, wires session events to WS broadcast
+  - `resume_claude` → `claudeManager.resumeSession()`
+  - `send_message` → `session.sendMessage(content)`
+  - `approve_tool` / `deny_tool` → `session.approveTool/denyTool(approvalId)`
+  - `interrupt` → `session.interrupt()`
+  - `stop_claude` → `claudeManager.killSession()`
+- Claude events broadcast to all WS clients: `entry` (normalized), `approval_needed`, `claude_session_id`, `done`, `error`
+- Client disconnect → kills owned Claude sessions
+- Server shutdown → `claudeManager.killAll()`
+
+### Step C.6 — Verification
+- `npx tsc --noEmit` — clean compile, no errors
+- `npm test` — all 55 existing tests pass (no regressions)
+
+---

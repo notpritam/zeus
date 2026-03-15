@@ -1,9 +1,8 @@
 import { app, BrowserWindow } from 'electron';
-import path from 'path';
 import { startPowerBlock } from './services/power';
 import { startWebSocketServer, stopWebSocketServer } from './services/websocket';
 import { destroyAllSessions } from './services/terminal';
-import { registerIpcHandlers } from './ipc/handlers';
+import { getActiveSessions, markKilled } from './services/sessions';
 import { createMainWindowOptions } from './window';
 
 let mainWindow: BrowserWindow | null = null;
@@ -11,10 +10,11 @@ let mainWindow: BrowserWindow | null = null;
 function createWindow(): void {
   mainWindow = new BrowserWindow(createMainWindowOptions());
 
+  // In dev: use Vite HMR server. In prod: load from the HTTP server.
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    mainWindow.loadURL('http://127.0.0.1:3000');
   }
 
   mainWindow.on('closed', () => {
@@ -25,7 +25,6 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   startPowerBlock();
   await startWebSocketServer();
-  registerIpcHandlers();
   createWindow();
 
   app.on('activate', () => {
@@ -36,6 +35,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', async () => {
+  // Mark all active sessions as killed before destroying
+  for (const session of getActiveSessions()) {
+    markKilled(session.id);
+  }
   destroyAllSessions();
   await stopWebSocketServer();
 });
