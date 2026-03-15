@@ -115,7 +115,12 @@ Goal: Make the UI aware of what Claude is doing to files.
 ## Coding Conventions
 
 * Always use `async/await` for PTY spawns and IPC calls.
-* Use ES modules (`import`/`export`) throughout.
-* Keep the Electron main process lean — delegate heavy work to utility modules under `host/main/`.
+* TypeScript everywhere — all source lives in `src/`, compiles to `dist/`.
+* Use ES module style imports (`import`/`export`) in TS source.
+* Keep the Electron main process lean — delegate heavy work to utility modules under `src/main/services/`.
 * All WebSocket messages must conform to the envelope schema above.
 * Never store secrets in code — use environment variables or Electron's `safeStorage`.
+
+## Development Log
+
+**`DEVLOG.md`** — Running log of every step taken during development. Append to this file after completing each step so the developer can review progress at any time. Most recent entries go at the bottom.
