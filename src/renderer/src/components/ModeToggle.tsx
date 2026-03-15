@@ -8,14 +8,14 @@ interface ModeToggleProps {
 function ModeToggle({ active, onToggle }: ModeToggleProps) {
   return (
     <button
-      className="inline-flex items-center gap-3 border-none bg-transparent p-1 cursor-pointer [-webkit-app-region:no-drag]"
+      className="inline-flex cursor-pointer items-center gap-3 border-none bg-transparent p-1 [-webkit-app-region:no-drag]"
       onClick={onToggle}
     >
       <div
         className={`flex h-[22px] w-10 items-center rounded-full border p-0.5 transition-colors duration-200 ${
           active
-            ? 'justify-end border-zeus-green-border bg-zeus-green-bg'
-            : 'justify-start border-zeus-ghost bg-zeus-surface'
+            ? 'border-zeus-green-border bg-zeus-green-bg justify-end'
+            : 'border-zeus-ghost bg-zeus-surface justify-start'
         }`}
       >
         <motion.div
@@ -27,7 +27,7 @@ function ModeToggle({ active, onToggle }: ModeToggleProps) {
         />
       </div>
       <motion.span
-        className="font-mono text-[0.65rem] font-semibold tracking-[0.12em] text-zeus-dim"
+        className="text-zeus-dim font-mono text-[0.65rem] font-semibold tracking-[0.12em]"
         key={active ? 'running' : 'paused'}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}

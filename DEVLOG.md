@@ -119,6 +119,13 @@ src/
 - Updated tests to assert on Tailwind class names instead of old CSS classes
 - Build + all 9 tests pass
 
+### Step 1.17 — Linting & Formatting
+- Fixed `max-w-[280px]` → `max-w-70` (use canonical Tailwind classes, not arbitrary values)
+- Set up ESLint (`eslint.config.mjs`) — `@eslint/js` + `typescript-eslint` + `eslint-plugin-react`
+- Set up Prettier (`.prettierrc`) with `prettier-plugin-tailwindcss` — auto-sorts Tailwind classes
+- Scripts: `npm run lint`, `npm run format`, `npm run format:check`
+- All checks pass: format, lint, tests, build
+
 **Phase 1 status: COMPLETE**
 
 ---

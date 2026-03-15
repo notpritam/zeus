@@ -43,6 +43,12 @@ zeus/
 | `npm run dev` | Starts electron-vite dev server with HMR |
 | `npm run build` | Production build → `out/` |
 | `npm run start` | Build + preview (launch built app) |
+| `npm test` | Run all tests (Vitest, single run) |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run lint` | ESLint check on `src/` |
+| `npm run lint:fix` | ESLint auto-fix |
+| `npm run format` | Prettier auto-format (sorts Tailwind classes) |
+| `npm run format:check` | Check formatting without writing |
 
 ## TypeScript Rules
 

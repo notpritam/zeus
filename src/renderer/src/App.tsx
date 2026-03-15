@@ -22,15 +22,15 @@ function App() {
   if (loading) return null;
 
   return (
-    <div className="flex h-screen items-center justify-center bg-zeus-bg text-gray-200 select-none">
+    <div className="bg-zeus-bg flex h-screen items-center justify-center text-gray-200 select-none">
       <motion.div
         className="w-full px-8 pt-10 pb-8 text-center"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <h1 className="text-3xl font-bold text-white mb-1">Zeus</h1>
-        <p className="text-xs text-zeus-dim uppercase tracking-[0.15em] mb-6">
+        <h1 className="mb-1 text-3xl font-bold text-white">Zeus</h1>
+        <p className="text-zeus-dim mb-6 text-xs tracking-[0.15em] uppercase">
           Remote Orchestration Server
         </p>
 
@@ -40,23 +40,19 @@ function App() {
 
         <AnimatePresence mode="wait">
           <motion.div
-            className="mx-auto max-w-70 rounded-lg border border-zeus-border bg-zeus-card p-4"
+            className="border-zeus-border bg-zeus-card mx-auto max-w-70 rounded-lg border p-4"
             key={active ? 'active' : 'paused'}
             initial={{ opacity: 0.8 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2 }}
           >
-            <StatusRow
-              label="Power Lock"
-              status={active ? 'ACTIVE' : 'OFF'}
-              active={active}
-            />
+            <StatusRow label="Power Lock" status={active ? 'ACTIVE' : 'OFF'} active={active} />
             <StatusRow label="WebSocket" status="OFFLINE" />
             <StatusRow label="Tunnel" status="OFFLINE" />
           </motion.div>
         </AnimatePresence>
 
-        <p className="mt-6 text-[0.65rem] text-zeus-ghost">v1.0.0</p>
+        <p className="text-zeus-ghost mt-6 text-[0.65rem]">v1.0.0</p>
       </motion.div>
     </div>
   );
