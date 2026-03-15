@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import Markdown from '@/components/Markdown';
 import type {
   NormalizedEntry,
   NormalizedEntryType,
@@ -23,7 +24,7 @@ function AssistantBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-start">
       <div className="bg-bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
-        <p className="text-text-secondary text-sm whitespace-pre-wrap">{content}</p>
+        <Markdown content={content} />
       </div>
     </div>
   );
@@ -43,9 +44,15 @@ function ThinkingBlock({ content }: { content: string }) {
         <span className="font-medium">Thinking</span>
         <span className="text-text-ghost text-[10px]">{expanded ? 'collapse' : 'expand'}</span>
       </div>
-      <p className="text-text-faint mt-1 text-xs whitespace-pre-wrap">
-        {expanded ? content : preview + (content.length > 120 ? '...' : '')}
-      </p>
+      {expanded ? (
+        <div className="text-text-faint mt-1 text-xs">
+          <Markdown content={content} />
+        </div>
+      ) : (
+        <p className="text-text-faint mt-1 text-xs whitespace-pre-wrap">
+          {preview + (content.length > 120 ? '...' : '')}
+        </p>
+      )}
     </button>
   );
 }

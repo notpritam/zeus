@@ -75,3 +75,88 @@
 .xterm-viewport {
   background-color: var(--color-bg) !important;
 }
+
+/* ─── Markdown prose ─── */
+
+.zeus-markdown {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.zeus-markdown p {
+  margin-bottom: 0.5rem;
+}
+
+.zeus-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.zeus-markdown h1,
+.zeus-markdown h2,
+.zeus-markdown h3,
+.zeus-markdown h4 {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.zeus-markdown h1 {
+  font-size: 1.25rem;
+}
+
+.zeus-markdown h2 {
+  font-size: 1.1rem;
+}
+
+.zeus-markdown h3 {
+  font-size: 1rem;
+}
+
+.zeus-markdown ul,
+.zeus-markdown ol {
+  padding-left: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.zeus-markdown ul {
+  list-style-type: disc;
+}
+
+.zeus-markdown ol {
+  list-style-type: decimal;
+}
+
+.zeus-markdown li {
+  margin-bottom: 0.25rem;
+}
+
+.zeus-markdown blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.zeus-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 0.75rem 0;
+}
+
+.zeus-markdown strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.zeus-markdown em {
+  font-style: italic;
+}
+
+.zeus-markdown img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.5rem 0;
+}
