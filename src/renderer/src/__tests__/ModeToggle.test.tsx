@@ -19,4 +19,9 @@ describe('ModeToggle', () => {
     fireEvent.click(screen.getByRole('button'));
     expect(onToggle).toHaveBeenCalledOnce();
   });
+
+  it('shows Server Mode label', () => {
+    render(<ModeToggle active onToggle={() => {}} />);
+    expect(screen.getByText('Server Mode')).toBeInTheDocument();
+  });
 });

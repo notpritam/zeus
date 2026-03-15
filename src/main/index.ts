@@ -7,11 +7,11 @@ let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 480,
-    height: 360,
+    width: 380,
+    height: 420,
     resizable: false,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 12, y: 12 },
+    trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

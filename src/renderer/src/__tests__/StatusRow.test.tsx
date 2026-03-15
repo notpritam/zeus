@@ -9,15 +9,17 @@ describe('StatusRow', () => {
     expect(screen.getByText('ACTIVE')).toBeInTheDocument();
   });
 
-  it('applies active styles when active', () => {
+  it('applies accent styles when active', () => {
     render(<StatusRow label="Power Lock" status="ACTIVE" active />);
     const badge = screen.getByText('ACTIVE');
-    expect(badge.className).toContain('bg-zeus-green-bg');
+    expect(badge.className).toContain('bg-accent-bg');
+    expect(badge.className).toContain('text-accent');
   });
 
-  it('applies inactive styles by default', () => {
+  it('applies surface styles by default', () => {
     render(<StatusRow label="WebSocket" status="OFFLINE" />);
     const badge = screen.getByText('OFFLINE');
-    expect(badge.className).toContain('bg-zeus-surface');
+    expect(badge.className).toContain('bg-bg-surface');
+    expect(badge.className).toContain('text-text-faint');
   });
 });

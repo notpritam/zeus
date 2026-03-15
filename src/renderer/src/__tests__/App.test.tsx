@@ -25,4 +25,11 @@ describe('App', () => {
       expect(screen.getByText('Tunnel')).toBeInTheDocument();
     });
   });
+
+  it('shows services section header', async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Services')).toBeInTheDocument();
+    });
+  });
 });

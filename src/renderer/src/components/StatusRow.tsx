@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import StatusIndicator from '@/components/StatusIndicator';
 
 interface StatusRowProps {
   label: string;
@@ -8,11 +9,14 @@ interface StatusRowProps {
 
 function StatusRow({ label, status, active = false }: StatusRowProps) {
   return (
-    <div className="[&+&]:border-zeus-border-dim flex items-center justify-between py-2 [&+&]:border-t">
-      <span className="text-zeus-muted text-sm">{label}</span>
+    <div className="[&+&]:border-border-dim flex items-center justify-between py-2.5 [&+&]:border-t">
+      <div className="flex items-center gap-2">
+        <StatusIndicator active={active} />
+        <span className="text-text-muted text-[12px]">{label}</span>
+      </div>
       <motion.span
-        className={`rounded px-2.5 py-0.5 text-[0.65rem] font-semibold tracking-wider ${
-          active ? 'bg-zeus-green-bg text-zeus-green' : 'bg-zeus-surface text-zeus-faint'
+        className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold tracking-wider ${
+          active ? 'bg-accent-bg text-accent' : 'bg-bg-surface text-text-faint'
         }`}
         key={`${label}-${active}`}
         initial={{ opacity: 0, scale: 0.9 }}

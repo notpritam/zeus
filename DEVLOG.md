@@ -119,7 +119,21 @@ src/
 - Updated tests to assert on Tailwind class names instead of old CSS classes
 - Build + all 9 tests pass
 
-### Step 1.17 — Linting & Formatting
+### Step 1.17 — Theme System
+- Replaced ad-hoc `zeus-*` color tokens with semantic token system in `@theme`
+- Token categories: backgrounds (`bg`, `bg-card`, `bg-surface`, `bg-elevated`), text (`text-primary` through `text-ghost`), borders, accent (green), danger (red), warning (amber), info (blue)
+- Added radius tokens (`radius-sm/md/lg`) and font tokens (`font-sans`, `font-mono`)
+- All components updated to use semantic tokens (e.g., `bg-zeus-card` → `bg-bg-card`, `text-zeus-green` → `text-accent`)
+
+### Step 1.18 — Zustand State Management
+- Installed `zustand` for global state management
+- Created `useZeusStore` in `src/renderer/src/stores/` — holds `powerBlock`, `websocket`, `tunnel`, `loading`
+- Store actions: `init()` fetches status from main process, `togglePower()` toggles power blocker
+- Refactored `App.tsx` — removed `useState`/`useEffect` state, uses store directly
+- Added `useZeusStore.test.ts` — tests init, togglePower, and initial state (3 tests)
+- Total: 12 tests across 4 suites, all passing
+
+### Step 1.19 — Linting & Formatting
 - Fixed `max-w-[280px]` → `max-w-70` (use canonical Tailwind classes, not arbitrary values)
 - Set up ESLint (`eslint.config.mjs`) — `@eslint/js` + `typescript-eslint` + `eslint-plugin-react`
 - Set up Prettier (`.prettierrc`) with `prettier-plugin-tailwindcss` — auto-sorts Tailwind classes

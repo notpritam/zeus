@@ -8,30 +8,33 @@ interface ModeToggleProps {
 function ModeToggle({ active, onToggle }: ModeToggleProps) {
   return (
     <button
-      className="inline-flex cursor-pointer items-center gap-3 border-none bg-transparent p-1 [-webkit-app-region:no-drag]"
+      className="group border-border bg-bg-card hover:border-border-dim flex w-full cursor-pointer items-center justify-between rounded-lg border px-3.5 py-2.5 transition-colors [-webkit-app-region:no-drag]"
       onClick={onToggle}
     >
-      <div
-        className={`flex h-[22px] w-10 items-center rounded-full border p-0.5 transition-colors duration-200 ${
-          active
-            ? 'border-zeus-green-border bg-zeus-green-bg justify-end'
-            : 'border-zeus-ghost bg-zeus-surface justify-start'
-        }`}
-      >
-        <motion.div
-          className={`h-4 w-4 rounded-full transition-colors duration-200 ${
-            active ? 'bg-zeus-green' : 'bg-zeus-faint'
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors duration-200 ${
+            active
+              ? 'border-accent-border bg-accent-bg justify-end'
+              : 'border-text-ghost bg-bg-surface justify-start'
           }`}
-          layout
-          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-        />
+        >
+          <motion.div
+            className={`h-3.5 w-3.5 rounded-full transition-colors duration-200 ${
+              active ? 'bg-accent' : 'bg-text-faint'
+            }`}
+            layout
+            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+          />
+        </div>
+        <span className="text-text-secondary text-[12px]">Server Mode</span>
       </div>
       <motion.span
-        className="text-zeus-dim font-mono text-[0.65rem] font-semibold tracking-[0.12em]"
+        className={`text-[10px] font-semibold tracking-wider ${active ? 'text-accent' : 'text-text-faint'}`}
         key={active ? 'running' : 'paused'}
-        initial={{ opacity: 0, y: 4 }}
+        initial={{ opacity: 0, y: 3 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+        transition={{ duration: 0.15 }}
       >
         {active ? 'RUNNING' : 'PAUSED'}
       </motion.span>

@@ -1,58 +1,65 @@
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect } from 'react';
+import { motion } from 'framer-motion';
 import StatusRow from '@/components/StatusRow';
 import ModeToggle from '@/components/ModeToggle';
+import { useZeusStore } from '@/stores/useZeusStore';
 
 function App() {
-  const [active, setActive] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const { powerBlock, loading, init, togglePower } = useZeusStore();
 
   useEffect(() => {
-    window.zeus.getStatus().then((status) => {
-      setActive(status.powerBlock);
-      setLoading(false);
-    });
-  }, []);
-
-  const handleToggle = async () => {
-    const newState = await window.zeus.togglePower();
-    setActive(newState);
-  };
+    init();
+  }, [init]);
 
   if (loading) return null;
 
   return (
-    <div className="bg-zeus-bg flex h-screen items-center justify-center text-gray-200 select-none">
-      <motion.div
-        className="w-full px-8 pt-10 pb-8 text-center"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        <h1 className="mb-1 text-3xl font-bold text-white">Zeus</h1>
-        <p className="text-zeus-dim mb-6 text-xs tracking-[0.15em] uppercase">
-          Remote Orchestration Server
-        </p>
+    <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
+      {/* Drag region — clears macOS traffic lights */}
+      <div className="h-12 w-full shrink-0" />
 
+      <motion.div
+        className="mx-6 flex flex-1 flex-col pb-5"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
+        {/* Header */}
         <div className="mb-6">
-          <ModeToggle active={active} onToggle={handleToggle} />
+          <h1 className="text-text-primary text-lg font-bold tracking-tight">Zeus</h1>
+          <p className="text-text-dim mt-1 text-[10px] tracking-widest uppercase">
+            Remote Orchestration Server
+          </p>
         </div>
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            className="border-zeus-border bg-zeus-card mx-auto max-w-70 rounded-lg border p-4"
-            key={active ? 'active' : 'paused'}
-            initial={{ opacity: 0.8 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.2 }}
-          >
-            <StatusRow label="Power Lock" status={active ? 'ACTIVE' : 'OFF'} active={active} />
+        {/* Mode Toggle */}
+        <ModeToggle active={powerBlock} onToggle={togglePower} />
+
+        {/* Services */}
+        <div className="mt-5">
+          <p className="text-text-dim mb-2 text-[10px] font-medium tracking-widest uppercase">
+            Services
+          </p>
+          <div className="border-border bg-bg-card rounded-lg border px-4 py-1">
+            <StatusRow
+              label="Power Lock"
+              status={powerBlock ? 'ACTIVE' : 'OFF'}
+              active={powerBlock}
+            />
             <StatusRow label="WebSocket" status="OFFLINE" />
             <StatusRow label="Tunnel" status="OFFLINE" />
-          </motion.div>
-        </AnimatePresence>
+          </div>
+        </div>
 
-        <p className="text-zeus-ghost mt-6 text-[0.65rem]">v1.0.0</p>
+        {/* Footer */}
+        <div className="mt-auto pt-4">
+          <div className="border-border-dim flex items-center justify-between border-t pt-3">
+            <span className="text-text-ghost text-[10px]">Zeus v1.0.0</span>
+            <span className={`text-[10px] ${powerBlock ? 'text-accent' : 'text-text-faint'}`}>
+              {powerBlock ? 'Awake' : 'Sleeping'}
+            </span>
+          </div>
+        </div>
       </motion.div>
     </div>
   );

@@ -72,7 +72,15 @@ zeus/
 - Page-level components go in `src/renderer/src/pages/` (if needed later).
 - Keep components small and focused.
 - **Always use `@/` path alias for imports.** Never use relative paths (`./`, `../`). `@` maps to `src/renderer/src/`. Example: `import StatusRow from '@/components/StatusRow'`.
-- **Use Tailwind utility classes for all styling.** No custom CSS files per component. Zeus color tokens are defined in `styles.css` via `@theme` (e.g., `bg-zeus-card`, `text-zeus-green`). Add new tokens there if needed.
+- **Use Tailwind utility classes for all styling.** No custom CSS files per component.
+- **Use semantic theme tokens, not raw colors.** All tokens are in `styles.css` via `@theme`. Use semantic names:
+  - Backgrounds: `bg-bg`, `bg-bg-card`, `bg-bg-surface`, `bg-bg-elevated`
+  - Text: `text-text-primary`, `text-text-secondary`, `text-text-muted`, `text-text-dim`, `text-text-faint`, `text-text-ghost`
+  - Borders: `border-border`, `border-border-dim`
+  - Accent (active/success): `bg-accent-bg`, `text-accent`, `border-accent-border`
+  - Danger/Warning/Info: same pattern (`bg-danger-bg`, `text-warn`, `border-info-border`)
+  - Never use raw hex values in components. Add new tokens to `@theme` if needed.
+- **State management: Zustand.** One store per domain in `src/renderer/src/stores/`. App-wide state (power, websocket, tunnel) lives in `useZeusStore`. Components read from the store, never manage shared state locally.
 - No direct Node.js usage. Everything goes through the `zeus` API exposed via preload.
 - All communication with main process: `window.zeus.<method>()` → IPC → service.
 
