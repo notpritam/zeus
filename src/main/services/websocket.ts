@@ -226,12 +226,22 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
   });
 
-  // Forward completion
-  session.on('done', (result) => {
+  // Forward turn completion (token usage) — session stays alive
+  session.on('turn_complete', (result) => {
     broadcastEnvelope({
       channel: 'claude',
       sessionId: envelope.sessionId,
-      payload: { type: 'done', result },
+      payload: { type: 'turn_complete', result },
+      auth: '',
+    });
+  });
+
+  // Forward session end (process exited)
+  session.on('done', () => {
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'done' },
       auth: '',
     });
   });
@@ -255,7 +265,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     const workingDir = opts.workingDir || process.env.HOME || '/';
 
     try {
-      const session = await claudeManager.createSession(opts.prompt, {
+      const session = await claudeManager.createSession(envelope.sessionId, opts.prompt, {
         workingDir,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
         model: opts.model,
@@ -281,9 +291,12 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     const workingDir = opts.workingDir || process.env.HOME || '/';
 
     try {
-      const session = await claudeManager.resumeSession(opts.claudeSessionId, opts.prompt, {
-        workingDir,
-      });
+      const session = await claudeManager.resumeSession(
+        envelope.sessionId,
+        opts.claudeSessionId,
+        opts.prompt,
+        { workingDir },
+      );
 
       if (!clientClaudeSessions.has(ws)) clientClaudeSessions.set(ws, new Set());
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);

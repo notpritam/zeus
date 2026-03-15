@@ -58,10 +58,11 @@ export class ProtocolPeer extends EventEmitter {
 
     rl.on('close', () => this.emit('close'));
 
-    // Stderr — forward as messages, suppress known noise
+    // Stderr — log everything for debugging, forward non-noise as messages
     if (this.child.stderr) {
       const stderrRl = createInterface({ input: this.child.stderr });
       stderrRl.on('line', (line: string) => {
+        console.error('[Claude stderr]', line);
         if (line.includes('[WARN] Fast mode')) return;
         if (line.includes('npm warn')) return;
         this.emit('message', { type: 'stderr', content: line } as ClaudeJson);

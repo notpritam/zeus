@@ -268,10 +268,17 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       startedAt: Date.now(),
     };
 
+    // Add optimistic user message entry for the initial prompt
+    const userEntry: NormalizedEntry = {
+      id: `user-${Date.now()}`,
+      entryType: { type: 'user_message' },
+      content: prompt,
+    };
+
     set((state) => ({
       claudeSessions: [...state.claudeSessions, session],
       activeClaudeId: id,
-      claudeEntries: { ...state.claudeEntries, [id]: [] },
+      claudeEntries: { ...state.claudeEntries, [id]: [userEntry] },
       viewMode: 'claude',
     }));
 
@@ -286,6 +293,19 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   sendClaudeMessage: (content: string) => {
     const { activeClaudeId } = get();
     if (!activeClaudeId) return;
+
+    // Add optimistic user message entry
+    const userEntry: NormalizedEntry = {
+      id: `user-${Date.now()}`,
+      entryType: { type: 'user_message' },
+      content,
+    };
+    set((state) => ({
+      claudeEntries: {
+        ...state.claudeEntries,
+        [activeClaudeId]: [...(state.claudeEntries[activeClaudeId] ?? []), userEntry],
+      },
+    }));
 
     zeusWs.send({
       channel: 'claude',

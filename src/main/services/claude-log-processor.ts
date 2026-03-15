@@ -34,15 +34,8 @@ export class ClaudeLogProcessor {
         return [];
 
       case 'user':
-        if (!(msg as { isReplay?: boolean }).isReplay) {
-          return [
-            {
-              id: crypto.randomUUID(),
-              entryType: { type: 'user_message' },
-              content: this.extractMessageText(msg),
-            },
-          ];
-        }
+        // User messages are added optimistically by the renderer store.
+        // Skip echoes from Claude to avoid duplicates.
         return [];
 
       case 'tool_use':
@@ -64,48 +57,6 @@ export class ClaudeLogProcessor {
       default:
         return [];
     }
-  }
-
-  private processAssistant(msg: ClaudeJson): NormalizedEntry[] {
-    const entries: NormalizedEntry[] = [];
-    const message = (msg as { message?: { content?: ContentItem[] | string } }).message;
-    if (!message?.content) return entries;
-
-    const content = message.content;
-    if (typeof content === 'string') {
-      entries.push({
-        id: crypto.randomUUID(),
-        entryType: { type: 'assistant_message' },
-        content,
-      });
-    } else if (Array.isArray(content)) {
-      for (const item of content) {
-        if (item.type === 'text') {
-          entries.push({
-            id: crypto.randomUUID(),
-            entryType: { type: 'assistant_message' },
-            content: item.text,
-          });
-        } else if (item.type === 'thinking') {
-          entries.push({
-            id: crypto.randomUUID(),
-            entryType: { type: 'thinking' },
-            content: item.thinking,
-          });
-        } else if (item.type === 'tool_use') {
-          entries.push(
-            this.processToolUse({
-              type: 'tool_use',
-              id: item.id,
-              tool_name: item.name,
-              ...(typeof item.input === 'object' && item.input !== null ? item.input : {}),
-            } as ClaudeJson),
-          );
-        }
-      }
-    }
-
-    return entries;
   }
 
   private processToolUse(msg: ClaudeJson): NormalizedEntry {

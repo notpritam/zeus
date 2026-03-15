@@ -64,7 +64,9 @@ export class ClaudeSession extends EventEmitter {
     const mode = this.options.permissionMode ?? 'bypassPermissions';
 
     // 1. Spawn Claude CLI as piped subprocess
-    this.child = spawn('npx', ['-y', '@anthropic-ai/claude-code@latest', ...args], {
+    const spawnArgs = ['-y', '@anthropic-ai/claude-code@latest', ...args];
+    console.log('[Claude] Spawning:', 'npx', spawnArgs.join(' '));
+    this.child = spawn('npx', spawnArgs, {
       cwd: this.options.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, NPM_CONFIG_LOGLEVEL: 'error' },
@@ -72,14 +74,19 @@ export class ClaudeSession extends EventEmitter {
 
     this._isRunning = true;
 
-    this.child.on('exit', (code) => {
-      this._isRunning = false;
-      if (code !== 0 && code !== null) {
-        this.emit('error', new Error(`Claude CLI exited with code ${code}`));
+    this.child.on('exit', (code, signal) => {
+      console.log(`[Claude] Process exited: code=${code} signal=${signal}`);
+      if (this._isRunning) {
+        this._isRunning = false;
+        if (code !== 0 && code !== null) {
+          this.emit('error', new Error(`Claude CLI exited with code ${code}`));
+        }
+        this.emit('done', null);
       }
     });
 
     this.child.on('error', (err) => {
+      console.error('[Claude] Process error:', err.message);
       this._isRunning = false;
       this.emit('error', err);
     });
@@ -96,23 +103,29 @@ export class ClaudeSession extends EventEmitter {
       this.handleControlRequest(requestId, request);
     });
 
-    this.protocol.on('result', (msg: ClaudeJson) => {
+    this.protocol.on('result', () => {
       // Commit pending assistant UUID on Result
       if (this._pendingAssistantUuid) {
         this._lastMessageId = this._pendingAssistantUuid;
         this._pendingAssistantUuid = null;
       }
-      this._isRunning = false;
-      this.emit('done', msg);
+      // result = end of one turn, NOT end of session.
+      // The process stays alive for follow-ups via stdin.
     });
 
     this.protocol.on('error', (err) => this.emit('error', err));
 
     this.protocol.on('close', () => {
-      this._isRunning = false;
+      // Process stdout closed — session is truly done
+      if (this._isRunning) {
+        this._isRunning = false;
+        this.emit('done', null);
+      }
     });
 
-    // 4. Initialize protocol (same sequence as vibe-kanban)
+    // 4. Initialize the stream-json protocol on stdin.
+    // --input-format=stream-json requires initialization before Claude
+    // will process anything. The prompt is sent via stdin as well.
     const hooks = this.buildHooks(mode);
     await this.protocol.initialize(hooks);
     await this.protocol.setPermissionMode(mode);
@@ -326,49 +339,48 @@ export class ClaudeSession extends EventEmitter {
 // --- Session Manager (manages multiple Claude sessions) ---
 
 export class ClaudeSessionManager {
+  // Keyed by client-provided key (envelope sessionId)
   private sessions = new Map<string, ClaudeSession>();
-  private pendingByInternalId = new Map<string, ClaudeSession>();
 
-  async createSession(prompt: string, options: SessionOptions): Promise<ClaudeSession> {
+  async createSession(
+    clientKey: string,
+    prompt: string,
+    options: SessionOptions,
+  ): Promise<ClaudeSession> {
     const session = new ClaudeSession(options);
-    const internalId = crypto.randomUUID();
 
-    // Track by internal ID until we get the real session ID
-    this.pendingByInternalId.set(internalId, session);
-
-    session.on('session_id', (id) => {
-      this.sessions.set(id, session);
-      this.pendingByInternalId.delete(internalId);
-    });
+    // Store immediately by client key so lookups work right away
+    this.sessions.set(clientKey, session);
 
     await session.start(prompt);
     return session;
   }
 
   async resumeSession(
-    sessionId: string,
+    clientKey: string,
+    claudeSessionId: string,
     prompt: string,
     options: SessionOptions,
   ): Promise<ClaudeSession> {
-    return this.createSession(prompt, {
+    return this.createSession(clientKey, prompt, {
       ...options,
-      resumeSessionId: sessionId,
+      resumeSessionId: claudeSessionId,
     });
   }
 
-  getSession(sessionId: string): ClaudeSession | undefined {
-    return this.sessions.get(sessionId);
+  getSession(clientKey: string): ClaudeSession | undefined {
+    return this.sessions.get(clientKey);
   }
 
   getAllSessions(): Map<string, ClaudeSession> {
     return new Map(this.sessions);
   }
 
-  killSession(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
+  killSession(clientKey: string): void {
+    const session = this.sessions.get(clientKey);
     if (session) {
       session.kill();
-      this.sessions.delete(sessionId);
+      this.sessions.delete(clientKey);
     }
   }
 
@@ -377,9 +389,5 @@ export class ClaudeSessionManager {
       session.kill();
     }
     this.sessions.clear();
-    for (const session of this.pendingByInternalId.values()) {
-      session.kill();
-    }
-    this.pendingByInternalId.clear();
   }
 }
