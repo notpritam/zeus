@@ -1,15 +1,21 @@
 {
   "name": "zeus",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/main/index.js",
   "scripts": {
+    "build": "tsc && cp -r src/renderer dist/",
+    "start": "npm run build && electron .",
+    "dev": "tsc --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Remote orchestration tool — headless AI-powered dev server",
   "devDependencies": {
-    "electron": "^41.0.2"
+    "@types/node": "^25.5.0",
+    "electron": "^41.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

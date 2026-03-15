@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Zeus</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>⚡ Zeus</h1>
+    <p class="subtitle">Remote Orchestration Server</p>
+    <div class="status-card">
+      <div class="status-row">
+        <span class="label">Power Lock</span>
+        <span class="badge active" id="power-status">ACTIVE</span>
+      </div>
+      <div class="status-row">
+        <span class="label">WebSocket</span>
+        <span class="badge inactive" id="ws-status">OFFLINE</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Tunnel</span>
+        <span class="badge inactive" id="tunnel-status">OFFLINE</span>
+      </div>
+    </div>
+    <p class="version">v1.0.0</p>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
