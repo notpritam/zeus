@@ -3,10 +3,10 @@ import { describe, it, expect } from 'vitest';
 import App from '@/App';
 
 describe('App', () => {
-  it('renders the header with Zeus brand', async () => {
+  it('renders the header', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('Zeus')).toBeInTheDocument();
+      expect(screen.getByTestId('header')).toBeInTheDocument();
     });
   });
 

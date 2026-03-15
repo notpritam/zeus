@@ -28,7 +28,10 @@ export class ClaudeLogProcessor {
   process(msg: ClaudeJson): NormalizedEntry[] {
     switch (msg.type) {
       case 'assistant':
-        return this.processAssistant(msg);
+        // Skip — content is already handled by stream_event
+        // (content_block_start/delta/stop). The assistant message
+        // is redundant when using --include-partial-messages.
+        return [];
 
       case 'user':
         if (!(msg as { isReplay?: boolean }).isReplay) {
