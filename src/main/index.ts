@@ -2,22 +2,12 @@ import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import { startPowerBlock } from './services/power';
 import { registerIpcHandlers } from './ipc/handlers';
+import { createMainWindowOptions } from './window';
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 380,
-    height: 420,
-    resizable: false,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
+  mainWindow = new BrowserWindow(createMainWindowOptions());
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);

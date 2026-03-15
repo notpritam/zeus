@@ -8,10 +8,10 @@ interface ModeToggleProps {
 function ModeToggle({ active, onToggle }: ModeToggleProps) {
   return (
     <button
-      className="group border-border bg-bg-card hover:border-border-dim flex w-full cursor-pointer items-center justify-between rounded-lg border px-3.5 py-2.5 transition-colors [-webkit-app-region:no-drag]"
+      className="group border-border bg-bg-card hover:border-border-dim flex w-full cursor-pointer items-center justify-between rounded-xl border px-4 py-3 transition-colors [-webkit-app-region:no-drag]"
       onClick={onToggle}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3.5">
         <div
           className={`flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors duration-200 ${
             active
@@ -27,10 +27,10 @@ function ModeToggle({ active, onToggle }: ModeToggleProps) {
             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
           />
         </div>
-        <span className="text-text-secondary text-[12px]">Server Mode</span>
+        <span className="text-text-secondary text-[13px]">Server Mode</span>
       </div>
       <motion.span
-        className={`text-[10px] font-semibold tracking-wider ${active ? 'text-accent' : 'text-text-faint'}`}
+        className={`shrink-0 text-[10px] font-semibold tracking-[0.2em] ${active ? 'text-accent' : 'text-text-faint'}`}
         key={active ? 'running' : 'paused'}
         initial={{ opacity: 0, y: 3 }}
         animate={{ opacity: 1, y: 0 }}

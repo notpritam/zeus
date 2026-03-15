@@ -32,4 +32,33 @@ describe('App', () => {
       expect(screen.getByText('Services')).toBeInTheDocument();
     });
   });
+
+  it('uses the shell and panel layout wrappers', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+    });
+
+    const shell = screen.getByTestId('app-shell');
+    const panel = screen.getByTestId('app-panel');
+
+    expect(shell.className).toContain('justify-center');
+    expect(shell.className).toContain('flex-1');
+    expect(panel.className).toContain('w-full');
+    expect(panel.className).toContain('gap-8');
+  });
+
+  it('uses a scrollable content shell', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+    });
+
+    const shell = screen.getByTestId('app-shell');
+
+    expect(shell.className).toContain('overflow-y-auto');
+    expect(shell.className).toContain('min-h-0');
+  });
 });
