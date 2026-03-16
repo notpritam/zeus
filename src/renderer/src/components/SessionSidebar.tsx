@@ -50,7 +50,7 @@ function ClaudeCard({
     activity.state === 'tool_running' ? 'text-blue-400' :
     activity.state === 'waiting_approval' ? 'text-orange-400' :
     activity.state === 'starting' ? 'text-purple-400' :
-    'text-primary';
+    'text-muted-foreground';
 
   const isActive = session.status === 'running' && activity.state !== 'idle';
 
