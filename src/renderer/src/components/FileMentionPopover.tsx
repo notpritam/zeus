@@ -23,12 +23,13 @@ export default function FileMentionPopover({
   onSelect,
   onClose,
 }: FileMentionPopoverProps) {
-  const { search, results, loading } = useFileSearch(sessionId);
+  const { query, search, results, loading } = useFileSearch(sessionId);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     search(initialQuery);
-  }, [initialQuery, search]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -61,7 +62,7 @@ export default function FileMentionPopover({
       <Command shouldFilter={false}>
         <CommandInput
           placeholder="Search files..."
-          value={initialQuery}
+          value={query}
           onValueChange={(v) => search(v)}
           autoFocus
         />
