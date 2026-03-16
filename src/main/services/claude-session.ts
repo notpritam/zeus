@@ -13,6 +13,8 @@ import type {
   PermissionResult,
 } from './claude-types';
 import { ClaudeLogProcessor } from './claude-log-processor';
+import path from 'path';
+import { app } from 'electron';
 
 // Hook callback IDs matching vibe-kanban conventions
 const AUTO_APPROVE_CALLBACK_ID = 'AUTO_APPROVE_CALLBACK_ID';
@@ -24,6 +26,8 @@ export interface SessionOptions {
   model?: string;
   resumeSessionId?: string;
   resumeAtMessageId?: string;
+  enableQA?: boolean;
+  qaTargetUrl?: string;
 }
 
 export interface ApprovalRequest {
@@ -146,9 +150,12 @@ export class ClaudeSession extends EventEmitter {
     const pending = this.pendingApprovals.get(approvalId);
     if (!pending || !this.protocol) return;
 
+    const finalInput = updatedInput ?? pending.toolInput;
+    console.log('[ClaudeSession] approveTool', approvalId, 'updatedInput?', !!updatedInput, JSON.stringify(finalInput).slice(0, 300));
+
     const result: PermissionResult = {
       behavior: 'allow',
-      updatedInput: updatedInput ?? pending.toolInput,
+      updatedInput: finalInput,
     };
     await this.protocol.sendPermissionResponse(pending.requestId, result);
     this.pendingApprovals.delete(approvalId);
@@ -200,6 +207,29 @@ export class ClaudeSession extends EventEmitter {
       if (this.options.resumeAtMessageId) {
         args.push('--resume-session-at', this.options.resumeAtMessageId);
       }
+    }
+
+    // QA MCP server integration
+    if (this.options.enableQA) {
+      const mcpServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
+      const mcpConfig = JSON.stringify({
+        mcpServers: {
+          'zeus-qa': {
+            command: 'node',
+            args: [mcpServerPath],
+          },
+        },
+      });
+      args.push('--mcp-config', mcpConfig);
+
+      const targetUrl = this.options.qaTargetUrl || 'http://localhost:5173';
+      const qaPrompt = [
+        'You have access to QA browser testing tools via the zeus-qa MCP server.',
+        `After making UI changes, call qa_run_test_flow with url "${targetUrl}".`,
+        'Check the summary for errors. If issues found, fix them and re-test.',
+        'Do not claim work is complete until qa_run_test_flow returns a clean report.',
+      ].join(' ');
+      args.push('--append-system-prompt', qaPrompt);
     }
 
     return args;
