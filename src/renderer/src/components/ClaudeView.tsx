@@ -172,6 +172,7 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
   const { toolName, actionType, status } = entryType;
 
   const statusLabel = typeof status === 'string' ? status : status.status;
+  const isRunning = statusLabel === 'created';
   const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
     success: 'default',
     pending_approval: 'secondary',
@@ -180,13 +181,14 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
   };
 
   return (
-    <div className="bg-secondary border-border rounded-lg border px-3 py-2">
+    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${isRunning ? 'border-primary/30' : ''}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-primary text-[10px] font-semibold">
+          {isRunning && <span className="zeus-dot-pulse inline-block size-1.5 shrink-0 rounded-full bg-primary" />}
+          <Badge variant="outline" className={`text-[10px] font-semibold ${isRunning ? 'zeus-shimmer-accent border-primary/30' : 'text-primary'}`}>
             {toolName}
           </Badge>
-          <span className="text-muted-foreground truncate font-mono text-xs">
+          <span className={`truncate font-mono text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>
             {toolActionLabel(actionType)}
           </span>
         </div>
@@ -194,11 +196,11 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
           variant={statusVariant[statusLabel] ?? 'secondary'}
           className="text-[9px] uppercase tracking-wider"
         >
-          {statusLabel}
+          {isRunning ? 'running' : statusLabel}
         </Badge>
       </div>
       {content && !content.startsWith(toolName) && (
-        <p className="text-muted-foreground mt-1 truncate text-xs">{content}</p>
+        <p className={`mt-1 truncate text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>{content}</p>
       )}
     </div>
   );
@@ -298,45 +300,43 @@ function ApprovalBanner({
 
 // ─── Main ClaudeView ───
 
+// ─── Text Shimmer (opencode-style) ───
+
+function TextShimmer({ text, active = true }: { text: string; active?: boolean }) {
+  return <span className={active ? 'zeus-shimmer' : 'text-muted-foreground'}>{text}</span>;
+}
+
 // ─── Activity Indicator ───
 
 function ActivityIndicator({ activity }: { activity: SessionActivity }) {
   if (activity.state === 'idle') return null;
 
-  const icon = (() => {
-    switch (activity.state) {
-      case 'thinking':
-        return <Brain className="text-primary size-3 animate-pulse" />;
-      case 'streaming':
-        return <Sparkles className="text-primary size-3 animate-pulse" />;
-      case 'tool_running':
-        return <Terminal className="text-primary size-3 animate-pulse" />;
-      case 'waiting_approval':
-        return <ShieldAlert className="text-warn size-3" />;
-      case 'starting':
-        return <Loader2 className="text-primary size-3 animate-spin" />;
-    }
-  })();
-
-  const label = (() => {
-    switch (activity.state) {
-      case 'thinking':
-        return 'Thinking...';
-      case 'streaming':
-        return 'Writing...';
-      case 'tool_running':
-        return activity.description;
-      case 'waiting_approval':
-        return `Waiting for approval: ${activity.toolName}`;
-      case 'starting':
-        return 'Starting...';
-    }
-  })();
-
   return (
-    <div className="text-muted-foreground flex items-center gap-2 px-1 py-1 text-xs">
-      {icon}
-      <span className="truncate">{label}</span>
+    <div className="flex justify-start">
+      <div className="bg-card border-border inline-flex items-center gap-2.5 rounded-xl rounded-bl-sm border px-3 py-2">
+        {/* Pulsing dot */}
+        <span className={`zeus-dot-pulse inline-block size-2 shrink-0 rounded-full ${
+          activity.state === 'waiting_approval' ? 'bg-warn' : 'bg-primary'
+        }`} />
+
+        {/* Icon */}
+        {activity.state === 'thinking' && <Brain className="text-primary size-3.5" />}
+        {activity.state === 'streaming' && <Sparkles className="text-primary size-3.5" />}
+        {activity.state === 'tool_running' && <Terminal className="text-primary size-3.5" />}
+        {activity.state === 'waiting_approval' && <ShieldAlert className="text-warn size-3.5" />}
+        {activity.state === 'starting' && <Loader2 className="text-primary size-3.5 animate-spin" />}
+
+        {/* Shimmer label */}
+        <span className="text-xs font-medium">
+          {activity.state === 'thinking' && <TextShimmer text="Thinking..." />}
+          {activity.state === 'streaming' && <TextShimmer text="Writing..." />}
+          {activity.state === 'tool_running' && <TextShimmer text={activity.description} />}
+          {activity.state === 'waiting_approval' && (
+            <span className="text-warn">Waiting for approval: {activity.toolName}</span>
+          )}
+          {activity.state === 'starting' && <TextShimmer text="Starting session..." />}
+        </span>
+      </div>
     </div>
   );
 }
@@ -577,11 +577,12 @@ function ClaudeView({
       <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-primary text-sm font-bold">Claude</span>
+          {isBusy && <span className="zeus-dot-pulse inline-block size-2 rounded-full bg-primary" />}
           <Badge
             variant={statusVariant[session.status] ?? 'secondary'}
             className="text-[9px] uppercase tracking-wider"
           >
-            {session.status}
+            {isBusy ? activity.state.replace('_', ' ') : session.status}
           </Badge>
         </div>
         <div className="flex items-center gap-2">

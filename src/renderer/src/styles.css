@@ -219,3 +219,56 @@
 [data-separator][data-active] {
   background-color: var(--color-info);
 }
+
+/* ─── Text Shimmer (opencode-style) ─── */
+
+@keyframes zeus-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.zeus-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-text-muted) 0%,
+    var(--color-text-muted) 35%,
+    var(--color-text-primary) 50%,
+    var(--color-text-muted) 65%,
+    var(--color-text-muted) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: zeus-shimmer 2.5s ease-in-out infinite;
+}
+
+.zeus-shimmer-accent {
+  background: linear-gradient(
+    90deg,
+    var(--color-primary) 0%,
+    var(--color-primary) 35%,
+    #93c5fd 50%,
+    var(--color-primary) 65%,
+    var(--color-primary) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: zeus-shimmer 2.5s ease-in-out infinite;
+}
+
+/* Pulsing dot */
+@keyframes zeus-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.zeus-dot-pulse {
+  animation: zeus-dot-pulse 1.5s ease-in-out infinite;
+}
