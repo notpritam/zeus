@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Plus, Sparkles, Settings, Trash2, Archive } from 'lucide-react';
@@ -42,14 +41,10 @@ function ClaudeCard({
   onDelete: () => void;
   onArchive: () => void;
 }) {
-  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
-    running: 'default',
-    done: 'secondary',
-    error: 'destructive',
-  };
-
-  // Color the Sparkles icon based on activity state
+  // Color the Sparkles icon based on session/activity state
   const sparklesColor =
+    session.status === 'error' ? 'text-red-400' :
+    session.status === 'done' ? 'text-muted-foreground' :
     activity.state === 'thinking' ? 'text-yellow-400' :
     activity.state === 'streaming' ? 'text-green-400' :
     activity.state === 'tool_running' ? 'text-blue-400' :
@@ -76,13 +71,7 @@ function ClaudeCard({
             {session.name || session.prompt}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-2">
-          <Badge
-            variant={statusVariant[session.status] ?? 'secondary'}
-            className="text-[9px] uppercase tracking-wider"
-          >
-            {session.status}
-          </Badge>
+        <div className="mt-0.5 flex items-center gap-2 pl-5">
           <span className="text-muted-foreground text-[10px]">{session.id.slice(-6)}</span>
         </div>
       </div>
