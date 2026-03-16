@@ -184,7 +184,7 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
     <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${isRunning ? 'border-primary/30' : ''}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {isRunning && <span className="zeus-dot-pulse inline-block size-1.5 shrink-0 rounded-full bg-primary" />}
+          {isRunning && <span className="inline-block size-1.5 shrink-0 rounded-full bg-primary" />}
           <Badge variant="outline" className={`text-[10px] font-semibold ${isRunning ? 'zeus-shimmer-accent border-primary/30' : 'text-primary'}`}>
             {toolName}
           </Badge>
@@ -314,11 +314,6 @@ function ActivityIndicator({ activity }: { activity: SessionActivity }) {
   return (
     <div className="flex justify-start">
       <div className="bg-card border-border inline-flex items-center gap-2.5 rounded-xl rounded-bl-sm border px-3 py-2">
-        {/* Pulsing dot */}
-        <span className={`zeus-dot-pulse inline-block size-2 shrink-0 rounded-full ${
-          activity.state === 'waiting_approval' ? 'bg-warn' : 'bg-primary'
-        }`} />
-
         {/* Icon */}
         {activity.state === 'thinking' && <Brain className="text-primary size-3.5" />}
         {activity.state === 'streaming' && <Sparkles className="text-primary size-3.5" />}

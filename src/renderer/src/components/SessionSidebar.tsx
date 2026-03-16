@@ -53,17 +53,34 @@ function ClaudeCard({
     'text-muted-foreground';
 
   const isActive = session.status === 'running' && activity.state !== 'idle';
+  const needsApproval = activity.state === 'waiting_approval';
+  const isDone = session.status === 'done';
+  const isError = session.status === 'error';
+
+  // Attention glow class for the card border
+  const attentionClass =
+    needsApproval ? 'zeus-attention-approval' :
+    isDone ? 'zeus-attention-done' :
+    isError ? 'zeus-attention-error' :
+    '';
 
   return (
     <button
       data-testid={`claude-card-${session.id}`}
-      className={`group flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
+      className={`group relative flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
         active
           ? 'border-ring/50 bg-primary/10'
           : 'border-border hover:bg-secondary'
-      }`}
+      } ${attentionClass}`}
       onClick={onSelect}
     >
+      {/* Attention ping dot */}
+      {needsApproval && (
+        <span className="absolute -top-1 -right-1 flex size-2.5">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-orange-400 opacity-75" />
+          <span className="relative inline-flex size-2.5 rounded-full bg-orange-400" />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Sparkles className={`size-3 shrink-0 transition-colors ${sparklesColor} ${isActive ? 'animate-pulse' : ''}`} />
