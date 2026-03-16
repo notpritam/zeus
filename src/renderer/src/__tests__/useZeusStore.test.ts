@@ -87,7 +87,7 @@ describe('useZeusStore', () => {
   });
 
   it('startClaudeSession creates session and sends WS message', () => {
-    useZeusStore.getState().startClaudeSession('Fix the bug');
+    useZeusStore.getState().startClaudeSession({ prompt: 'Fix the bug', workingDir: '/tmp' });
     const state = useZeusStore.getState();
     expect(state.claudeSessions).toHaveLength(1);
     expect(state.claudeSessions[0].prompt).toBe('Fix the bug');
@@ -103,7 +103,7 @@ describe('useZeusStore', () => {
   });
 
   it('sendClaudeMessage sends to active session', () => {
-    useZeusStore.getState().startClaudeSession('Test');
+    useZeusStore.getState().startClaudeSession({ prompt: 'Test', workingDir: '/tmp' });
     const id = useZeusStore.getState().activeClaudeId;
     vi.clearAllMocks();
     useZeusStore.getState().sendClaudeMessage('Follow up');

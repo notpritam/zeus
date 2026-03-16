@@ -32,4 +32,9 @@ export type {
   NormalizedEntryType,
   ToolStatus,
   ActionType,
+  PermissionMode,
+  SavedProject,
+  ClaudeDefaults,
+  ZeusSettings,
+  SettingsPayload,
 } from '../shared/types';

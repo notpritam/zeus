@@ -10,6 +10,7 @@ import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from '.
 import { destroyAllSessions } from './services/terminal';
 import { getActiveSessions, markKilled } from './services/sessions';
 import { initAuthToken } from './services/auth';
+import { initSettings } from './services/settings';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
 
@@ -33,6 +34,7 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   startPowerBlock();
   initAuthToken();
+  initSettings();
   await startWebSocketServer();
 
   const tunnelUrl = await startTunnel(3000);

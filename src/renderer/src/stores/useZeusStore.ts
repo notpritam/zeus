@@ -7,9 +7,14 @@ import type {
   SessionListPayload,
   SessionUpdatedPayload,
   StatusPayload,
+  SettingsPayload,
   ClaudeSessionInfo,
   ClaudeApprovalInfo,
   NormalizedEntry,
+  SavedProject,
+  ClaudeDefaults,
+  PermissionMode,
+  ZeusSettings,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude';
@@ -33,6 +38,15 @@ interface ZeusState {
   claudeEntries: Record<string, NormalizedEntry[]>;
   pendingApprovals: ClaudeApprovalInfo[];
 
+  // Settings
+  savedProjects: SavedProject[];
+  claudeDefaults: ClaudeDefaults;
+  lastUsedProjectId: string | null;
+  settingsError: string | null;
+
+  // New Claude session modal
+  showNewClaudeModal: boolean;
+
   // View mode
   viewMode: ViewMode;
 
@@ -45,7 +59,14 @@ interface ZeusState {
   selectSession: (sessionId: string | null) => void;
 
   // Claude actions
-  startClaudeSession: (prompt: string, workingDir?: string) => void;
+  startClaudeSession: (config: {
+    prompt: string;
+    workingDir: string;
+    sessionName?: string;
+    permissionMode?: PermissionMode;
+    model?: string;
+    notificationSound?: boolean;
+  }) => void;
   sendClaudeMessage: (content: string) => void;
   approveClaudeTool: (approvalId: string) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
@@ -53,6 +74,15 @@ interface ZeusState {
   stopClaude: () => void;
   selectClaudeSession: (id: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
+
+  // Modal actions
+  openNewClaudeModal: () => void;
+  closeNewClaudeModal: () => void;
+
+  // Settings actions
+  addProject: (name: string, path: string) => void;
+  removeProject: (id: string) => void;
+  updateDefaults: (defaults: Partial<ClaudeDefaults>) => void;
 }
 
 let claudeIdCounter = 0;
@@ -69,6 +99,17 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   activeClaudeId: null,
   claudeEntries: {},
   pendingApprovals: [],
+
+  savedProjects: [],
+  claudeDefaults: {
+    permissionMode: 'bypassPermissions',
+    model: '',
+    notificationSound: true,
+  },
+  lastUsedProjectId: null,
+  settingsError: null,
+  showNewClaudeModal: false,
+
   viewMode: 'terminal',
 
   connect: () => {
@@ -89,6 +130,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           channel: 'control',
           sessionId: '',
           payload: { type: 'list_sessions' },
+          auth: '',
+        });
+        zeusWs.send({
+          channel: 'settings',
+          sessionId: '',
+          payload: { type: 'get_settings' },
           auth: '',
         });
         return;
@@ -203,6 +250,24 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to settings channel
+    const unsubSettings = zeusWs.on('settings', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as SettingsPayload;
+      if (payload.type === 'settings_update') {
+        const s = (payload as { settings: ZeusSettings }).settings;
+        set({
+          savedProjects: s.savedProjects,
+          claudeDefaults: s.claudeDefaults,
+          lastUsedProjectId: s.lastUsedProjectId,
+          settingsError: null,
+        });
+      }
+      if (payload.type === 'settings_error') {
+        const { message } = payload as { message: string };
+        set({ settingsError: message });
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -210,6 +275,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubStatus();
       unsubControl();
       unsubClaude();
+      unsubSettings();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -258,13 +324,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Claude actions ---
 
-  startClaudeSession: (prompt: string, workingDir?: string) => {
+  startClaudeSession: (config) => {
+    const { prompt, workingDir, sessionName, permissionMode, model, notificationSound } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
       id,
       claudeSessionId: null,
       status: 'running',
       prompt,
+      name: sessionName,
+      notificationSound,
       startedAt: Date.now(),
     };
 
@@ -285,7 +354,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'claude',
       sessionId: id,
-      payload: { type: 'start_claude', prompt, workingDir },
+      payload: {
+        type: 'start_claude',
+        prompt,
+        workingDir,
+        permissionMode,
+        model,
+        sessionName,
+        notificationSound,
+      },
       auth: '',
     });
   },
@@ -384,5 +461,39 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   setViewMode: (mode: ViewMode) => {
     set({ viewMode: mode });
+  },
+
+  // --- Modal actions ---
+
+  openNewClaudeModal: () => set({ showNewClaudeModal: true }),
+  closeNewClaudeModal: () => set({ showNewClaudeModal: false }),
+
+  // --- Settings actions ---
+
+  addProject: (name: string, path: string) => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'add_project', name, path },
+      auth: '',
+    });
+  },
+
+  removeProject: (id: string) => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'remove_project', id },
+      auth: '',
+    });
+  },
+
+  updateDefaults: (defaults: Partial<ClaudeDefaults>) => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'update_defaults', defaults },
+      auth: '',
+    });
   },
 }));

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
 import SessionCard from '@/components/SessionCard';
 import StatusRow from '@/components/StatusRow';
@@ -13,7 +12,7 @@ interface SessionSidebarProps {
   tunnel: string | null;
   viewMode: 'terminal' | 'claude';
   onNewSession: () => void;
-  onNewClaudeSession: (prompt: string) => void;
+  onNewClaudeSession: () => void;
   onSelectSession: (id: string) => void;
   onStopSession: (id: string) => void;
   onSelectClaudeSession: (id: string) => void;
@@ -50,7 +49,9 @@ function ClaudeCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-info text-[10px] font-bold">AI</span>
-          <span className="text-text-secondary truncate text-xs">{session.prompt}</span>
+          <span className="text-text-secondary truncate text-xs">
+            {session.name || session.prompt}
+          </span>
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <span
@@ -62,67 +63,6 @@ function ClaudeCard({
         </div>
       </div>
     </button>
-  );
-}
-
-// ─── Claude Prompt Input ───
-
-function ClaudePromptInput({ onSubmit }: { onSubmit: (prompt: string) => void }) {
-  const [prompt, setPrompt] = useState('');
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <button
-        data-testid="new-claude-btn"
-        className="bg-info hover:bg-info/90 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors [-webkit-app-region:no-drag]"
-        onClick={() => setOpen(true)}
-      >
-        + Claude Session
-      </button>
-    );
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = prompt.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-    setPrompt('');
-    setOpen(false);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-      <input
-        data-testid="claude-prompt-input"
-        autoFocus
-        type="text"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="What should Claude do?"
-        className="bg-bg-surface border-border text-text-secondary placeholder:text-text-ghost focus:border-info rounded-lg border px-3 py-2 text-xs outline-none"
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') setOpen(false);
-        }}
-      />
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={!prompt.trim()}
-          className="bg-info hover:bg-info/90 flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors disabled:opacity-40"
-        >
-          Start
-        </button>
-        <button
-          type="button"
-          className="text-text-faint hover:text-text-muted rounded-lg px-3 py-1.5 text-xs transition-colors"
-          onClick={() => setOpen(false)}
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -163,7 +103,13 @@ function SessionSidebar({
         >
           + New Session
         </button>
-        <ClaudePromptInput onSubmit={onNewClaudeSession} />
+        <button
+          data-testid="new-claude-btn"
+          className="bg-info hover:bg-info/90 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors [-webkit-app-region:no-drag]"
+          onClick={onNewClaudeSession}
+        >
+          + Claude Session
+        </button>
       </div>
 
       {/* Session List */}

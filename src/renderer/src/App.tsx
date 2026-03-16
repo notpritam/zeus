@@ -3,7 +3,10 @@ import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
 import ClaudeView from '@/components/ClaudeView';
+import NewClaudeSessionModal from '@/components/NewClaudeSessionModal';
 import { useZeusStore } from '@/stores/useZeusStore';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
+import { zeusWs } from '@/lib/ws';
 
 function App() {
   const {
@@ -18,6 +21,10 @@ function App() {
     claudeEntries,
     pendingApprovals,
     viewMode,
+    savedProjects,
+    claudeDefaults,
+    lastUsedProjectId,
+    showNewClaudeModal,
     connect,
     togglePower,
     startSession,
@@ -29,6 +36,11 @@ function App() {
     denyClaudeTool,
     interruptClaude,
     selectClaudeSession,
+    openNewClaudeModal,
+    closeNewClaudeModal,
+    addProject,
+    removeProject,
+    settingsError,
   } = useZeusStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -37,6 +49,8 @@ function App() {
     const cleanup = connect();
     return cleanup;
   }, [connect]);
+
+  useNotificationSound(claudeSessions);
 
   const activeClaudeSession = claudeSessions.find((s) => s.id === activeClaudeId) ?? null;
   const activeEntries = activeClaudeId ? (claudeEntries[activeClaudeId] ?? []) : [];
@@ -73,8 +87,8 @@ function App() {
               startSession();
               setSidebarOpen(false);
             }}
-            onNewClaudeSession={(prompt) => {
-              startClaudeSession(prompt);
+            onNewClaudeSession={() => {
+              openNewClaudeModal();
               setSidebarOpen(false);
             }}
             onSelectSession={(id) => {
@@ -115,6 +129,31 @@ function App() {
           )}
         </div>
       </div>
+
+      {/* New Claude Session Modal */}
+      <NewClaudeSessionModal
+        open={showNewClaudeModal}
+        onClose={closeNewClaudeModal}
+        savedProjects={savedProjects}
+        claudeDefaults={claudeDefaults}
+        lastUsedProjectId={lastUsedProjectId}
+        onStart={(config) => {
+          startClaudeSession(config);
+          // Persist last used project
+          const project = savedProjects.find((p) => p.path === config.workingDir);
+          if (project) {
+            zeusWs.send({
+              channel: 'settings',
+              sessionId: '',
+              payload: { type: 'set_last_used_project', id: project.id },
+              auth: '',
+            });
+          }
+        }}
+        onAddProject={addProject}
+        onRemoveProject={removeProject}
+        settingsError={settingsError}
+      />
     </div>
   );
 }

@@ -1,5 +1,39 @@
 // Shared types — used by both main process and renderer
 
+// ─── Permission Mode ───
+
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+
+// ─── Settings Types ───
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  path: string;
+  addedAt: number;
+}
+
+export interface ClaudeDefaults {
+  permissionMode: PermissionMode;
+  model: string;
+  notificationSound: boolean;
+}
+
+export interface ZeusSettings {
+  savedProjects: SavedProject[];
+  claudeDefaults: ClaudeDefaults;
+  lastUsedProjectId: string | null;
+}
+
+export type SettingsPayload =
+  | { type: 'get_settings' }
+  | { type: 'settings_update'; settings: ZeusSettings }
+  | { type: 'add_project'; name: string; path: string }
+  | { type: 'remove_project'; id: string }
+  | { type: 'update_defaults'; defaults: Partial<ClaudeDefaults> }
+  | { type: 'set_last_used_project'; id: string | null }
+  | { type: 'settings_error'; message: string };
+
 // ─── Session ───
 
 export type SessionStatus = 'active' | 'exited' | 'killed';
@@ -19,7 +53,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -115,8 +149,10 @@ export interface ClaudeStartPayload {
   type: 'start_claude';
   prompt: string;
   workingDir?: string;
-  permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+  permissionMode?: PermissionMode;
   model?: string;
+  sessionName?: string;
+  notificationSound?: boolean;
 }
 
 export interface ClaudeResumePayload {
@@ -168,6 +204,8 @@ export interface ClaudeSessionInfo {
   claudeSessionId: string | null; // real Claude session ID (from stream)
   status: ClaudeSessionStatus;
   prompt: string;
+  name?: string;
+  notificationSound?: boolean;
   startedAt: number;
 }
 

@@ -14,6 +14,7 @@ import type {
   ClaudeSendMessagePayload,
   ClaudeApproveToolPayload,
   ClaudeDenyToolPayload,
+  SettingsPayload,
 } from '../types';
 import { createSession, writeToSession, resizeSession, destroySession } from './terminal';
 import { registerSession, markExited, markKilled, getSession, getAllSessions } from './sessions';
@@ -22,6 +23,13 @@ import { getTunnelUrl } from './tunnel';
 import { validateToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
+import {
+  getSettings,
+  addProject,
+  removeProject,
+  updateDefaults,
+  setLastUsedProject,
+} from './settings';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -351,6 +359,56 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
   }
 }
 
+function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
+  const payload = envelope.payload as SettingsPayload;
+
+  if (payload.type === 'get_settings') {
+    sendEnvelope(ws, {
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+  } else if (payload.type === 'add_project') {
+    if (!fs.existsSync(payload.path)) {
+      sendEnvelope(ws, {
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'settings_error', message: `Directory does not exist: ${payload.path}` },
+        auth: '',
+      });
+      return;
+    }
+    addProject(payload.name, payload.path);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+  } else if (payload.type === 'remove_project') {
+    removeProject(payload.id);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+  } else if (payload.type === 'update_defaults') {
+    updateDefaults(payload.defaults);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+  } else if (payload.type === 'set_last_used_project') {
+    setLastUsedProject(payload.id);
+  } else {
+    sendError(ws, '', `Unknown settings type: ${(payload as { type: string }).type}`);
+  }
+}
+
 function handleMessage(ws: WebSocket, raw: string): void {
   let envelope: WsEnvelope;
   try {
@@ -372,6 +430,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       break;
     case 'claude':
       handleClaude(ws, envelope);
+      break;
+    case 'settings':
+      handleSettings(ws, envelope);
       break;
     case 'git':
     case 'qa':
