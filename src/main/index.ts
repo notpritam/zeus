@@ -13,6 +13,7 @@ import { initAuthToken } from './services/auth';
 import { initSettings } from './services/settings';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
+import { initDatabase, closeDatabase, markStaleSessionsErrored, pruneOldSessions } from './services/db';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -35,6 +36,9 @@ app.whenReady().then(async () => {
   startPowerBlock();
   initAuthToken();
   initSettings();
+  initDatabase();
+  markStaleSessionsErrored();
+  pruneOldSessions(30);
   await startWebSocketServer();
 
   const tunnelUrl = await startTunnel(3000);
@@ -57,6 +61,7 @@ app.on('before-quit', async () => {
   destroyAllSessions();
   await stopTunnel();
   await stopWebSocketServer();
+  closeDatabase();
 });
 
 app.on('window-all-closed', () => {

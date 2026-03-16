@@ -160,3 +160,14 @@
   border-radius: 8px;
   margin: 0.5rem 0;
 }
+
+/* ─── Resizable Panel Handles ─── */
+
+[data-separator] {
+  transition: background-color 150ms ease;
+}
+
+[data-separator]:hover,
+[data-separator][data-active] {
+  background-color: var(--color-info);
+}

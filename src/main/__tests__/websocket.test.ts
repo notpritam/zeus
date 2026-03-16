@@ -73,7 +73,7 @@ describe('websocket service', () => {
     const ws = await connect();
 
     const response = (await sendAndReceive(ws, {
-      channel: 'git',
+      channel: 'qa',
       sessionId: '',
       payload: {},
       auth: '',

@@ -15,6 +15,8 @@ import type {
   ClaudeDefaults,
   PermissionMode,
   ZeusSettings,
+  GitStatusData,
+  GitPayload,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude';
@@ -38,6 +40,10 @@ interface ZeusState {
   claudeEntries: Record<string, NormalizedEntry[]>;
   pendingApprovals: ClaudeApprovalInfo[];
 
+  // Git
+  gitStatus: Record<string, GitStatusData>;
+  gitErrors: Record<string, string>;
+
   // Settings
   savedProjects: SavedProject[];
   claudeDefaults: ClaudeDefaults;
@@ -49,6 +55,10 @@ interface ZeusState {
 
   // View mode
   viewMode: ViewMode;
+
+  // Right panel
+  rightPanelOpen: boolean;
+  rightPanelTab: 'source-control' | 'file-explorer';
 
   // Actions
   connect: () => () => void;
@@ -66,6 +76,7 @@ interface ZeusState {
     permissionMode?: PermissionMode;
     model?: string;
     notificationSound?: boolean;
+    enableGitWatcher?: boolean;
   }) => void;
   sendClaudeMessage: (content: string) => void;
   approveClaudeTool: (approvalId: string) => void;
@@ -78,6 +89,16 @@ interface ZeusState {
   // Modal actions
   openNewClaudeModal: () => void;
   closeNewClaudeModal: () => void;
+
+  // Git actions
+  startGitWatching: (sessionId: string, workingDir: string) => void;
+  stopGitWatching: (sessionId: string) => void;
+  refreshGitStatus: (sessionId: string) => void;
+  commitChanges: (sessionId: string, message: string) => void;
+
+  // Right panel actions
+  toggleRightPanel: () => void;
+  setRightPanelTab: (tab: 'source-control' | 'file-explorer') => void;
 
   // Settings actions
   addProject: (name: string, path: string) => void;
@@ -100,6 +121,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   claudeEntries: {},
   pendingApprovals: [],
 
+  gitStatus: {},
+  gitErrors: {},
+
   savedProjects: [],
   claudeDefaults: {
     permissionMode: 'bypassPermissions',
@@ -111,6 +135,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   showNewClaudeModal: false,
 
   viewMode: 'terminal',
+
+  rightPanelOpen: false,
+  rightPanelTab: 'source-control',
 
   connect: () => {
     // Subscribe to status channel
@@ -136,6 +163,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           channel: 'settings',
           sessionId: '',
           payload: { type: 'get_settings' },
+          auth: '',
+        });
+        zeusWs.send({
+          channel: 'claude',
+          sessionId: '',
+          payload: { type: 'list_claude_sessions' },
           auth: '',
         });
         return;
@@ -187,6 +220,30 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const unsubClaude = zeusWs.on('claude', (envelope: WsEnvelope) => {
       const payload = envelope.payload as { type: string };
       const sid = envelope.sessionId;
+
+      if (payload.type === 'claude_session_list') {
+        const { sessions } = envelope.payload as { sessions: ClaudeSessionInfo[] };
+        set((state) => {
+          // Keep any live sessions from current state, add historical from DB
+          const liveIds = new Set(
+            state.claudeSessions.filter((s) => s.status === 'running').map((s) => s.id),
+          );
+          const merged = [
+            ...state.claudeSessions.filter((s) => liveIds.has(s.id)),
+            ...sessions.filter((s) => !liveIds.has(s.id)),
+          ];
+          return { claudeSessions: merged };
+        });
+        return;
+      }
+
+      if (payload.type === 'claude_history') {
+        const { entries } = envelope.payload as { entries: NormalizedEntry[] };
+        set((state) => ({
+          claudeEntries: { ...state.claudeEntries, [sid]: entries },
+        }));
+        return;
+      }
 
       if (payload.type === 'entry') {
         const entry = (envelope.payload as { entry: NormalizedEntry }).entry;
@@ -268,6 +325,43 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to git channel
+    const unsubGit = zeusWs.on('git', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as GitPayload;
+      const sid = envelope.sessionId;
+
+      if (payload.type === 'git_status') {
+        set((state) => ({
+          gitStatus: { ...state.gitStatus, [sid]: payload.data },
+          gitErrors: { ...state.gitErrors, [sid]: undefined as unknown as string },
+        }));
+        // Auto-open right panel on first status
+        if (!get().rightPanelOpen && payload.data.changes.length > 0) {
+          set({ rightPanelOpen: true });
+        }
+      }
+
+      if (payload.type === 'git_commit_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_error') {
+        set((state) => ({
+          gitErrors: { ...state.gitErrors, [sid]: payload.message },
+        }));
+      }
+
+      if (payload.type === 'not_a_repo') {
+        set((state) => ({
+          gitErrors: { ...state.gitErrors, [sid]: 'Not a git repository' },
+        }));
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -276,6 +370,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubControl();
       unsubClaude();
       unsubSettings();
+      unsubGit();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -325,7 +420,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   // --- Claude actions ---
 
   startClaudeSession: (config) => {
-    const { prompt, workingDir, sessionName, permissionMode, model, notificationSound } = config;
+    const {
+      prompt,
+      workingDir,
+      sessionName,
+      permissionMode,
+      model,
+      notificationSound,
+      enableGitWatcher,
+    } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
       id,
@@ -334,6 +437,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       prompt,
       name: sessionName,
       notificationSound,
+      enableGitWatcher,
+      workingDir,
       startedAt: Date.now(),
     };
 
@@ -362,6 +467,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         model,
         sessionName,
         notificationSound,
+        enableGitWatcher,
       },
       auth: '',
     });
@@ -457,6 +563,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   selectClaudeSession: (id: string | null) => {
     set({ activeClaudeId: id, viewMode: id ? 'claude' : get().viewMode });
+    // Lazy-load entries from DB if not already loaded
+    if (id && (!get().claudeEntries[id] || get().claudeEntries[id].length === 0)) {
+      zeusWs.send({
+        channel: 'claude',
+        sessionId: id,
+        payload: { type: 'get_claude_history' },
+        auth: '',
+      });
+    }
   },
 
   setViewMode: (mode: ViewMode) => {
@@ -467,6 +582,54 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   openNewClaudeModal: () => set({ showNewClaudeModal: true }),
   closeNewClaudeModal: () => set({ showNewClaudeModal: false }),
+
+  // --- Git actions ---
+
+  startGitWatching: (sessionId: string, workingDir: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'start_watching', workingDir },
+      auth: '',
+    });
+  },
+
+  stopGitWatching: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'stop_watching' },
+      auth: '',
+    });
+  },
+
+  refreshGitStatus: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'refresh' },
+      auth: '',
+    });
+  },
+
+  commitChanges: (sessionId: string, message: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_commit', message },
+      auth: '',
+    });
+  },
+
+  // --- Right panel actions ---
+
+  toggleRightPanel: () => {
+    set((state) => ({ rightPanelOpen: !state.rightPanelOpen }));
+  },
+
+  setRightPanelTab: (tab: 'source-control' | 'file-explorer') => {
+    set({ rightPanelTab: tab });
+  },
 
   // --- Settings actions ---
 

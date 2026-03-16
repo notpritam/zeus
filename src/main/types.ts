@@ -37,4 +37,8 @@ export type {
   ClaudeDefaults,
   ZeusSettings,
   SettingsPayload,
+  GitFileStatus,
+  GitFileChange,
+  GitStatusData,
+  GitPayload,
 } from '../shared/types';

@@ -4,9 +4,17 @@ interface HeaderProps {
   connected: boolean;
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
+  onToggleRightPanel: () => void;
+  rightPanelOpen: boolean;
 }
 
-function Header({ connected, onToggleSidebar, sidebarOpen }: HeaderProps) {
+function Header({
+  connected,
+  onToggleSidebar,
+  sidebarOpen,
+  onToggleRightPanel,
+  rightPanelOpen,
+}: HeaderProps) {
   return (
     <header
       data-testid="header"
@@ -23,8 +31,33 @@ function Header({ connected, onToggleSidebar, sidebarOpen }: HeaderProps) {
 
       <div className="flex-1" />
 
-      {/* Connection Status */}
-      <div className="flex items-center gap-2">
+      {/* Connection Status + Right Panel Toggle */}
+      <div className="flex items-center gap-3">
+        {/* Right Panel Toggle (desktop only) */}
+        <button
+          data-testid="right-panel-toggle"
+          className={`hidden text-sm [-webkit-app-region:no-drag] md:block ${
+            rightPanelOpen
+              ? 'text-info'
+              : 'text-text-muted hover:text-text-secondary'
+          } transition-colors`}
+          onClick={onToggleRightPanel}
+          title="Toggle Source Control Panel"
+        >
+          {/* Panel icon using box-drawing characters */}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          >
+            <rect x="1" y="2" width="14" height="12" rx="1" />
+            <line x1="10" y1="2" x2="10" y2="14" />
+          </svg>
+        </button>
+
         <StatusIndicator active={connected} />
       </div>
     </header>

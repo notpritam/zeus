@@ -34,6 +34,33 @@ export type SettingsPayload =
   | { type: 'set_last_used_project'; id: string | null }
   | { type: 'settings_error'; message: string };
 
+// ─── Git Payloads ───
+
+export type GitFileStatus = 'M' | 'A' | 'D' | 'R' | '??' | 'MM' | 'AM' | 'UU';
+
+export interface GitFileChange {
+  file: string;
+  status: GitFileStatus;
+  oldFile?: string;
+}
+
+export interface GitStatusData {
+  branch: string;
+  changes: GitFileChange[];
+  ahead: number;
+  behind: number;
+}
+
+export type GitPayload =
+  | { type: 'start_watching'; workingDir: string }
+  | { type: 'stop_watching' }
+  | { type: 'git_status'; data: GitStatusData }
+  | { type: 'git_commit'; message: string }
+  | { type: 'git_commit_result'; success: boolean; error?: string; commitHash?: string }
+  | { type: 'refresh' }
+  | { type: 'git_error'; message: string }
+  | { type: 'not_a_repo' };
+
 // ─── Session ───
 
 export type SessionStatus = 'active' | 'exited' | 'killed';
@@ -153,6 +180,7 @@ export interface ClaudeStartPayload {
   model?: string;
   sessionName?: string;
   notificationSound?: boolean;
+  enableGitWatcher?: boolean;
 }
 
 export interface ClaudeResumePayload {
@@ -186,6 +214,24 @@ export interface ClaudeStopPayload {
   type: 'stop_claude';
 }
 
+export interface ClaudeListSessionsPayload {
+  type: 'list_claude_sessions';
+}
+
+export interface ClaudeSessionListPayload {
+  type: 'claude_session_list';
+  sessions: ClaudeSessionInfo[];
+}
+
+export interface ClaudeGetHistoryPayload {
+  type: 'get_claude_history';
+}
+
+export interface ClaudeHistoryPayload {
+  type: 'claude_history';
+  entries: NormalizedEntry[];
+}
+
 export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
@@ -193,7 +239,11 @@ export type ClaudePayload =
   | ClaudeApproveToolPayload
   | ClaudeDenyToolPayload
   | ClaudeInterruptPayload
-  | ClaudeStopPayload;
+  | ClaudeStopPayload
+  | ClaudeListSessionsPayload
+  | ClaudeSessionListPayload
+  | ClaudeGetHistoryPayload
+  | ClaudeHistoryPayload;
 
 // ─── Claude UI Types (renderer-side) ───
 
@@ -206,6 +256,8 @@ export interface ClaudeSessionInfo {
   prompt: string;
   name?: string;
   notificationSound?: boolean;
+  enableGitWatcher?: boolean;
+  workingDir?: string;
   startedAt: number;
 }
 

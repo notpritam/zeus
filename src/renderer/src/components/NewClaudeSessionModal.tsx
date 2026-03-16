@@ -15,6 +15,7 @@ interface NewClaudeSessionModalProps {
     permissionMode?: PermissionMode;
     model?: string;
     notificationSound?: boolean;
+    enableGitWatcher?: boolean;
   }) => void;
   onAddProject: (name: string, path: string) => void;
   onRemoveProject: (id: string) => void;
@@ -53,6 +54,7 @@ function NewClaudeSessionModal({
   );
   const [model, setModel] = useState(claudeDefaults.model);
   const [notificationSound, setNotificationSound] = useState(claudeDefaults.notificationSound);
+  const [enableGitWatcher, setEnableGitWatcher] = useState(true);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -62,6 +64,7 @@ function NewClaudeSessionModal({
       setPermissionMode(claudeDefaults.permissionMode);
       setModel(claudeDefaults.model);
       setNotificationSound(claudeDefaults.notificationSound);
+      setEnableGitWatcher(true);
       setSelectedProjectId(lastUsedProjectId);
       setCustomDir('');
       setShowCustomDir(savedProjects.length === 0);
@@ -86,6 +89,7 @@ function NewClaudeSessionModal({
       permissionMode,
       model: model.trim() || undefined,
       notificationSound,
+      enableGitWatcher,
     });
     onClose();
   };
@@ -314,6 +318,26 @@ function NewClaudeSessionModal({
               <span
                 className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
                   notificationSound ? 'translate-x-4' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Git Watcher */}
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-text-secondary text-xs font-semibold">Git Watcher</label>
+              <p className="text-text-ghost text-[10px]">Track file changes in real-time</p>
+            </div>
+            <button
+              className={`relative h-5 w-9 rounded-full transition-colors ${
+                enableGitWatcher ? 'bg-accent' : 'bg-bg-surface border-border border'
+              }`}
+              onClick={() => setEnableGitWatcher(!enableGitWatcher)}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  enableGitWatcher ? 'translate-x-4' : 'translate-x-0.5'
                 }`}
               />
             </button>

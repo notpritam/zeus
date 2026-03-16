@@ -13,29 +13,30 @@ describe('App', () => {
   it('renders the sidebar', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId('session-sidebar')).toBeInTheDocument();
+      // Mobile + desktop both render sidebars
+      expect(screen.getAllByTestId('session-sidebar').length).toBeGreaterThanOrEqual(1);
     });
   });
 
   it('renders the new session button', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId('new-session-btn')).toBeInTheDocument();
+      expect(screen.getAllByTestId('new-session-btn').length).toBeGreaterThanOrEqual(1);
     });
   });
 
   it('shows empty terminal state when no session selected', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-empty')).toBeInTheDocument();
+      expect(screen.getAllByTestId('terminal-empty').length).toBeGreaterThanOrEqual(1);
     });
   });
 
   it('renders service status rows in sidebar', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText('Power Lock')).toBeInTheDocument();
-      expect(screen.getByText('WebSocket')).toBeInTheDocument();
+      expect(screen.getAllByText('Power Lock').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('WebSocket').length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -51,7 +52,7 @@ describe('App', () => {
   it('renders the new claude session button', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByTestId('new-claude-btn')).toBeInTheDocument();
+      expect(screen.getAllByTestId('new-claude-btn').length).toBeGreaterThanOrEqual(1);
     });
   });
 });
