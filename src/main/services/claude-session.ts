@@ -142,13 +142,13 @@ export class ClaudeSession extends EventEmitter {
   }
 
   /** Approve a pending tool use */
-  async approveTool(approvalId: string): Promise<void> {
+  async approveTool(approvalId: string, updatedInput?: Record<string, unknown>): Promise<void> {
     const pending = this.pendingApprovals.get(approvalId);
     if (!pending || !this.protocol) return;
 
     const result: PermissionResult = {
       behavior: 'allow',
-      updatedInput: pending.toolInput,
+      updatedInput: updatedInput ?? pending.toolInput,
     };
     await this.protocol.sendPermissionResponse(pending.requestId, result);
     this.pendingApprovals.delete(approvalId);

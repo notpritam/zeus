@@ -245,6 +245,7 @@ export interface ClaudeSendMessagePayload {
 export interface ClaudeApproveToolPayload {
   type: 'approve_tool';
   approvalId: string;
+  updatedInput?: Record<string, unknown>;
 }
 
 export interface ClaudeDenyToolPayload {

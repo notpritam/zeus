@@ -116,7 +116,7 @@ interface ZeusState {
     enableGitWatcher?: boolean;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
-  approveClaudeTool: (approvalId: string) => void;
+  approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
   interruptClaude: () => void;
   stopClaude: () => void;
@@ -974,14 +974,14 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
-  approveClaudeTool: (approvalId: string) => {
+  approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => {
     const approval = get().pendingApprovals.find((a) => a.approvalId === approvalId);
     if (!approval) return;
 
     zeusWs.send({
       channel: 'claude',
       sessionId: approval.sessionId,
-      payload: { type: 'approve_tool', approvalId },
+      payload: { type: 'approve_tool', approvalId, updatedInput },
       auth: '',
     });
 

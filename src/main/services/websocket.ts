@@ -569,11 +569,11 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
     }
   } else if (payload.type === 'approve_tool') {
-    const { approvalId } = envelope.payload as ClaudeApproveToolPayload;
+    const { approvalId, updatedInput } = envelope.payload as ClaudeApproveToolPayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
       adoptClaudeSession(ws, envelope.sessionId);
-      await session.approveTool(approvalId);
+      await session.approveTool(approvalId, updatedInput);
     }
   } else if (payload.type === 'deny_tool') {
     const { approvalId, reason } = envelope.payload as ClaudeDenyToolPayload;

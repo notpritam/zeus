@@ -122,12 +122,12 @@ export default function ApprovalCard({ approval, onApprove, onDeny }: ApprovalCa
           <Button
             size="xs"
             className="bg-green-600 text-white hover:bg-green-700"
-            onClick={onApprove}
+            onClick={() => onApprove()}
           >
             <Check className="size-3" />
             Allow
           </Button>
-          <Button size="xs" variant="destructive" onClick={onDeny}>
+          <Button size="xs" variant="destructive" onClick={() => onDeny()}>
             <X className="size-3" />
             Deny
           </Button>

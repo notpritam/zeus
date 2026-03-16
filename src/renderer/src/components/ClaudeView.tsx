@@ -395,7 +395,7 @@ interface ClaudeViewProps {
   activity: SessionActivity;
   queue: Array<{ id: string; content: string }>;
   onSendMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
-  onApprove: (approvalId: string) => void;
+  onApprove: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   onDeny: (approvalId: string) => void;
   onInterrupt: () => void;
   onResume: () => void;
@@ -620,7 +620,7 @@ function ClaudeView({
             <ApprovalCard
               key={a.approvalId}
               approval={a}
-              onApprove={() => onApprove(a.approvalId)}
+              onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
               onDeny={() => onDeny(a.approvalId)}
             />
           ))}
