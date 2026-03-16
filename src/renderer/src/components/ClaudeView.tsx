@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder } from 'lucide-react';
 import Markdown from '@/components/Markdown';
+import FileMentionPopover from '@/components/FileMentionPopover';
 import type {
   NormalizedEntry,
   NormalizedEntryType,
@@ -14,11 +15,22 @@ import type {
 
 // ─── Entry Renderers ───
 
-function UserBubble({ content }: { content: string }) {
+function UserBubble({ content, metadata }: { content: string; metadata?: unknown }) {
+  const files = (metadata as { files?: string[] } | undefined)?.files;
   return (
     <div className="flex justify-end">
       <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
         <p className="text-foreground text-sm whitespace-pre-wrap">{content}</p>
+        {files && files.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {files.map((f) => (
+              <Badge key={f} variant="outline" className="gap-1 text-[10px]">
+                <File className="size-2.5" />
+                {f.split('/').pop()}
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -144,7 +156,7 @@ function TokenUsageBar({ entryType }: { entryType: NormalizedEntryType }) {
 function EntryItem({ entry }: { entry: NormalizedEntry }) {
   switch (entry.entryType.type) {
     case 'user_message':
-      return <UserBubble content={entry.content} />;
+      return <UserBubble content={entry.content} metadata={entry.metadata} />;
     case 'assistant_message':
       return <AssistantBubble content={entry.content} />;
     case 'thinking':
@@ -217,7 +229,7 @@ interface ClaudeViewProps {
   session: ClaudeSessionInfo | null;
   entries: NormalizedEntry[];
   approvals: ClaudeApprovalInfo[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, files?: string[]) => void;
   onApprove: (approvalId: string) => void;
   onDeny: (approvalId: string) => void;
   onInterrupt: () => void;
@@ -233,7 +245,11 @@ function ClaudeView({
   onInterrupt,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
+  const [showMentionPopover, setShowMentionPopover] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -241,6 +257,37 @@ function ClaudeView({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [entries.length]);
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+
+    const cursorPos = e.target.selectionStart ?? value.length;
+    const beforeCursor = value.substring(0, cursorPos);
+    const atMatch = beforeCursor.match(/@(\S*)$/);
+    if (atMatch) {
+      setShowMentionPopover(true);
+      setMentionQuery(atMatch[1]);
+    } else {
+      setShowMentionPopover(false);
+    }
+  }, []);
+
+  const handleFileSelect = useCallback((filePath: string, type: 'file' | 'directory') => {
+    setAttachedFiles((prev) => {
+      if (prev.some((f) => f.path === filePath)) return prev;
+      return [...prev, { path: filePath, type }];
+    });
+    // Remove the @query text from input
+    setInput((prev) => prev.replace(/@\S*$/, ''));
+    setShowMentionPopover(false);
+    // Refocus the input
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const removeFile = useCallback((filePath: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.path !== filePath));
+  }, []);
 
   if (!session) {
     return (
@@ -265,9 +312,11 @@ function ClaudeView({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed) return;
-    onSendMessage(trimmed);
+    if (!trimmed && attachedFiles.length === 0) return;
+    onSendMessage(trimmed, attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined);
     setInput('');
+    setAttachedFiles([]);
+    setShowMentionPopover(false);
   };
 
   return (
@@ -324,26 +373,57 @@ function ClaudeView({
         </div>
       )}
 
-      {/* Input bar */}
-      <form onSubmit={handleSubmit} className="border-border bg-card flex gap-2 border-t px-4 py-3">
-        <Input
-          data-testid="claude-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={session.status === 'running' ? 'Send follow-up...' : 'Session ended'}
-          disabled={session.status !== 'running'}
-          className="text-sm"
-        />
-        <Button
-          data-testid="claude-send"
-          type="submit"
-          disabled={session.status !== 'running' || !input.trim()}
-          size="sm"
-        >
-          <Send className="size-3" />
-          Send
-        </Button>
-      </form>
+      {/* Input area */}
+      <div className="border-border bg-card border-t">
+        {/* Attached file chips */}
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+            {attachedFiles.map((f) => (
+              <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
+                {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
+                {f.path}
+                <button
+                  type="button"
+                  onClick={() => removeFile(f.path)}
+                  className="hover:text-destructive ml-0.5"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Input bar with popover */}
+        <form onSubmit={handleSubmit} className="relative flex gap-2 px-4 py-3">
+          {showMentionPopover && session.status === 'running' && (
+            <FileMentionPopover
+              sessionId={session.id}
+              initialQuery={mentionQuery}
+              onSelect={handleFileSelect}
+              onClose={() => setShowMentionPopover(false)}
+            />
+          )}
+          <Input
+            ref={inputRef}
+            data-testid="claude-input"
+            value={input}
+            onChange={handleInputChange}
+            placeholder={session.status === 'running' ? 'Send follow-up... (@ to attach files)' : 'Session ended'}
+            disabled={session.status !== 'running'}
+            className="text-sm"
+          />
+          <Button
+            data-testid="claude-send"
+            type="submit"
+            disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0)}
+            size="sm"
+          >
+            <Send className="size-3" />
+            Send
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

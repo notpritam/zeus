@@ -1,5 +1,6 @@
 import http from 'http';
 import fs from 'fs';
+import { stat as fsStat } from 'fs/promises';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
@@ -391,23 +392,8 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         auth: '',
       });
 
-      // Auto-start git watcher if enabled
-      if (opts.enableGitWatcher !== false) {
-        handleGit(ws, {
-          channel: 'git',
-          sessionId: envelope.sessionId,
-          payload: { type: 'start_watching', workingDir },
-          auth: '',
-        });
-      }
-
-      // Auto-start file tree watcher
-      handleFiles(ws, {
-        channel: 'files',
-        sessionId: envelope.sessionId,
-        payload: { type: 'start_watching', workingDir },
-        auth: '',
-      });
+      // Git and file tree watchers are started by the frontend explicitly
+      // (sent right after start_claude). No auto-start here to avoid race conditions.
     } catch (err) {
       sendError(ws, envelope.sessionId, `Failed to start Claude: ${(err as Error).message}`);
     }
@@ -438,17 +424,53 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       sendError(ws, envelope.sessionId, `Failed to resume Claude: ${(err as Error).message}`);
     }
   } else if (payload.type === 'send_message') {
-    const { content } = envelope.payload as ClaudeSendMessagePayload;
+    const { content, files } = envelope.payload as ClaudeSendMessagePayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
       adoptClaudeSession(ws, envelope.sessionId);
-      // Persist user message to DB
+      // Persist user message to DB (original content, not enhanced)
       upsertClaudeEntry(envelope.sessionId, {
         id: `user-${Date.now()}`,
         entryType: { type: 'user_message' },
         content,
+        metadata: files && files.length > 0 ? { files } : undefined,
       });
-      await session.sendMessage(content);
+
+      // Build enhanced message with file contents if files attached
+      let enhancedContent = content;
+      if (files && files.length > 0) {
+        const fileService = fileTreeManager.getService(envelope.sessionId);
+        if (fileService) {
+          const fileBlocks: string[] = [];
+          for (const filePath of files) {
+            try {
+              // Check if it's a directory or file
+              const resolved = path.resolve(fileService.getWorkingDir(), filePath);
+              const stats = await fsStat(resolved);
+              if (stats.isDirectory()) {
+                const dirFiles = await fileService.readDirectoryRecursive(filePath);
+                for (const f of dirFiles) {
+                  fileBlocks.push(`<file path="${f.path}">\n${f.content}\n</file>`);
+                }
+              } else {
+                const fileContent = await fileService.readFileContent(filePath);
+                if (fileContent !== null) {
+                  fileBlocks.push(`<file path="${filePath}">\n${fileContent}\n</file>`);
+                } else {
+                  fileBlocks.push(`<file path="${filePath}">\n[Binary or too large to include]\n</file>`);
+                }
+              }
+            } catch {
+              fileBlocks.push(`<file path="${filePath}">\n[Could not read file]\n</file>`);
+            }
+          }
+          if (fileBlocks.length > 0) {
+            enhancedContent = `<attached_files>\n${fileBlocks.join('\n')}\n</attached_files>\n\n${content}`;
+          }
+        }
+      }
+
+      await session.sendMessage(enhancedContent);
     } else {
       sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
     }
@@ -491,6 +513,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         prompt: s.prompt,
         name: s.name ?? undefined,
         notificationSound: s.notificationSound,
+        workingDir: s.workingDir ?? undefined,
         startedAt: s.startedAt,
       };
     });
@@ -591,6 +614,16 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           auth: '',
         });
       });
+
+      // The initial 'connected' and 'status' events fired during start() before
+      // listeners were wired. Send them now so the UI gets the initial state.
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_connected' },
+        auth: '',
+      });
+      await watcher.refresh();
     } catch (err) {
       sendError(_ws, sessionId, `Failed to start git watcher: ${(err as Error).message}`);
     }
@@ -781,6 +814,24 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           auth: '',
         });
       });
+
+      // The 'connected' event from chokidar 'ready' may fire before or after
+      // listeners are wired. Send connected + initial root listing now.
+      broadcastEnvelope({
+        channel: 'files',
+        sessionId,
+        payload: { type: 'files_connected' },
+        auth: '',
+      });
+      try {
+        const entries = await service.listDirectory('');
+        broadcastEnvelope({
+          channel: 'files',
+          sessionId,
+          payload: { type: 'directory_listing', dirPath: '', entries },
+          auth: '',
+        });
+      } catch { /* root listing will be retried by the client */ }
     } catch (err) {
       sendError(ws, sessionId, `Failed to start file watcher: ${(err as Error).message}`);
     }
@@ -831,6 +882,26 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
             filePath: payload.filePath,
             error: (err as Error).message,
           },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'search_files') {
+    const service = fileTreeManager.getService(sessionId);
+    if (service) {
+      try {
+        const results = await service.searchFiles(payload.query);
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'search_files_result', query: payload.query, results },
+          auth: '',
+        });
+      } catch (err) {
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_error', message: (err as Error).message },
           auth: '',
         });
       }

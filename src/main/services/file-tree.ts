@@ -37,6 +37,10 @@ export class FileTreeService extends EventEmitter {
     this.workingDir = workingDir;
   }
 
+  getWorkingDir(): string {
+    return this.workingDir;
+  }
+
   async start(): Promise<void> {
     this.watcher = chokidar.watch(this.workingDir, {
       ignored: [
@@ -133,6 +137,91 @@ export class FileTreeService extends EventEmitter {
 
     const content = await readFile(resolved, 'utf-8');
     return { content, language };
+  }
+
+  async searchFiles(query: string): Promise<Array<{ path: string; name: string; type: 'file' | 'directory' }>> {
+    if (!query) return [];
+    const results: Array<{ path: string; name: string; type: 'file' | 'directory'; matchIndex: number }> = [];
+    const lowerQuery = query.toLowerCase();
+    const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'build']);
+
+    const walk = async (dir: string, relPrefix: string): Promise<void> => {
+      if (results.length >= 100) return; // stop scanning early
+      let dirents;
+      try {
+        dirents = await readdir(dir, { withFileTypes: true });
+      } catch { return; }
+      for (const dirent of dirents) {
+        if (dirent.name.startsWith('.') && dirent.isDirectory()) continue;
+        if (ignoreDirs.has(dirent.name)) continue;
+        const relPath = relPrefix ? `${relPrefix}/${dirent.name}` : dirent.name;
+        const matchIndex = relPath.toLowerCase().indexOf(lowerQuery);
+        if (matchIndex !== -1) {
+          results.push({
+            path: relPath,
+            name: dirent.name,
+            type: dirent.isDirectory() ? 'directory' : 'file',
+            matchIndex,
+          });
+        }
+        if (dirent.isDirectory()) {
+          await walk(path.join(dir, dirent.name), relPath);
+        }
+      }
+    };
+
+    await walk(this.workingDir, '');
+
+    // Sort: directories first, then by match position (earlier = higher rank)
+    results.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.matchIndex - b.matchIndex;
+    });
+
+    return results.slice(0, 30).map(({ path: p, name, type }) => ({ path: p, name, type }));
+  }
+
+  async readFileContent(filePath: string): Promise<string | null> {
+    try {
+      const resolved = this.validatePath(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      if (BINARY_EXTENSIONS.has(ext)) return null;
+      const stats = await stat(resolved);
+      if (stats.size > MAX_FILE_SIZE) return null;
+      return await readFile(resolved, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  async readDirectoryRecursive(dirPath: string, maxDepth = 2, maxFiles = 20): Promise<Array<{ path: string; content: string }>> {
+    const results: Array<{ path: string; content: string }> = [];
+    const resolved = this.validatePath(dirPath);
+
+    const walk = async (dir: string, relPrefix: string, depth: number): Promise<void> => {
+      if (depth > maxDepth || results.length >= maxFiles) return;
+      let dirents;
+      try {
+        dirents = await readdir(dir, { withFileTypes: true });
+      } catch { return; }
+      for (const dirent of dirents) {
+        if (results.length >= maxFiles) return;
+        if (dirent.name.startsWith('.') && dirent.isDirectory()) continue;
+        if (['node_modules', '.git', '.next', 'dist', 'build'].includes(dirent.name)) continue;
+        const relPath = relPrefix ? `${relPrefix}/${dirent.name}` : dirent.name;
+        if (dirent.isDirectory()) {
+          await walk(path.join(dir, dirent.name), relPath, depth + 1);
+        } else if (dirent.isFile()) {
+          const content = await this.readFileContent(relPath);
+          if (content !== null) {
+            results.push({ path: relPath, content });
+          }
+        }
+      }
+    };
+
+    await walk(resolved, dirPath, 0);
+    return results;
   }
 
   async saveFile(filePath: string, content: string): Promise<{ success: boolean; error?: string }> {

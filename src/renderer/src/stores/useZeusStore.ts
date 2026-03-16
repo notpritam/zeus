@@ -98,7 +98,7 @@ interface ZeusState {
     notificationSound?: boolean;
     enableGitWatcher?: boolean;
   }) => void;
-  sendClaudeMessage: (content: string) => void;
+  sendClaudeMessage: (content: string, files?: string[]) => void;
   approveClaudeTool: (approvalId: string) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
   interruptClaude: () => void;
@@ -143,6 +143,10 @@ interface ZeusState {
   toggleFileTreeDir: (sessionId: string, dirPath: string) => void;
   openFileTab: (sessionId: string, filePath: string) => void;
   saveFileTab: (tabId: string) => void;
+
+  // Watcher reconnect
+  reconnectGitWatcher: () => void;
+  reconnectFileWatcher: () => void;
 
   // Right panel actions
   toggleRightPanel: () => void;
@@ -306,6 +310,24 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           ];
           return { claudeSessions: merged };
         });
+
+        // Re-request git/files watchers for running sessions on reconnect
+        for (const s of sessions) {
+          if (s.status === 'running' && s.workingDir) {
+            zeusWs.send({
+              channel: 'git',
+              sessionId: s.id,
+              payload: { type: 'start_watching', workingDir: s.workingDir },
+              auth: '',
+            });
+            zeusWs.send({
+              channel: 'files',
+              sessionId: s.id,
+              payload: { type: 'start_watching', workingDir: s.workingDir },
+              auth: '',
+            });
+          }
+        }
         return;
       }
 
@@ -752,17 +774,35 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       },
       auth: '',
     });
+
+    // Explicitly request git and file tree watchers from frontend side
+    // so we don't rely solely on backend auto-start (which has race conditions)
+    if (enableGitWatcher !== false) {
+      zeusWs.send({
+        channel: 'git',
+        sessionId: id,
+        payload: { type: 'start_watching', workingDir },
+        auth: '',
+      });
+    }
+    zeusWs.send({
+      channel: 'files',
+      sessionId: id,
+      payload: { type: 'start_watching', workingDir },
+      auth: '',
+    });
   },
 
-  sendClaudeMessage: (content: string) => {
+  sendClaudeMessage: (content: string, files?: string[]) => {
     const { activeClaudeId } = get();
     if (!activeClaudeId) return;
 
-    // Add optimistic user message entry
+    // Add optimistic user message entry (display original content, not file contents)
     const userEntry: NormalizedEntry = {
       id: `user-${Date.now()}`,
       entryType: { type: 'user_message' },
       content,
+      metadata: files && files.length > 0 ? { files } : undefined,
     };
     set((state) => ({
       claudeEntries: {
@@ -774,7 +814,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'claude',
       sessionId: activeClaudeId,
-      payload: { type: 'send_message', content },
+      payload: { type: 'send_message', content, files },
       auth: '',
     });
   },
@@ -1146,6 +1186,31 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'files',
       sessionId: tab.sessionId,
       payload: { type: 'save_file', filePath: tab.file, content: tab.modified },
+      auth: '',
+    });
+  },
+
+  // --- Watcher reconnect ---
+
+  reconnectGitWatcher: () => {
+    const session = get().claudeSessions.find((s) => s.id === get().activeClaudeId);
+    if (!session?.workingDir) return;
+    zeusWs.send({
+      channel: 'git',
+      sessionId: session.id,
+      payload: { type: 'start_watching', workingDir: session.workingDir },
+      auth: '',
+    });
+  },
+
+  reconnectFileWatcher: () => {
+    const session = get().claudeSessions.find((s) => s.id === get().activeClaudeId)
+      ?? get().claudeSessions.find((s) => s.workingDir);
+    if (!session?.workingDir) return;
+    zeusWs.send({
+      channel: 'files',
+      sessionId: session.id,
+      payload: { type: 'start_watching', workingDir: session.workingDir },
       auth: '',
     });
   },

@@ -54,6 +54,8 @@ export type FilesPayload =
   | { type: 'save_file'; filePath: string; content: string }
   | { type: 'save_file_result'; filePath: string; success: boolean; error?: string }
   | { type: 'files_changed'; directories: string[] }
+  | { type: 'search_files'; query: string }
+  | { type: 'search_files_result'; query: string; results: Array<{ path: string; name: string; type: 'file' | 'directory' }> }
   | { type: 'files_connected' }
   | { type: 'files_error'; message: string };
 
@@ -230,6 +232,7 @@ export interface ClaudeResumePayload {
 export interface ClaudeSendMessagePayload {
   type: 'send_message';
   content: string;
+  files?: string[];
 }
 
 export interface ClaudeApproveToolPayload {
