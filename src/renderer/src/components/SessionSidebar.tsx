@@ -1,22 +1,18 @@
 import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
 import SessionCard from '@/components/SessionCard';
-import StatusRow from '@/components/StatusRow';
 
 interface SessionSidebarProps {
   sessions: SessionRecord[];
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  powerBlock: boolean;
-  websocket: boolean;
-  tunnel: string | null;
   viewMode: 'terminal' | 'claude';
   onNewSession: () => void;
   onNewClaudeSession: () => void;
   onSelectSession: (id: string) => void;
   onStopSession: (id: string) => void;
   onSelectClaudeSession: (id: string) => void;
-  onTogglePower: () => void;
+  onOpenSettings: () => void;
 }
 
 // ─── Claude Session Card ───
@@ -73,16 +69,13 @@ function SessionSidebar({
   activeSessionId,
   claudeSessions,
   activeClaudeId,
-  powerBlock,
-  websocket,
-  tunnel,
   viewMode,
   onNewSession,
   onNewClaudeSession,
   onSelectSession,
   onStopSession,
   onSelectClaudeSession,
-  onTogglePower,
+  onOpenSettings,
 }: SessionSidebarProps) {
   const activeSessions = sessions.filter((s) => s.status === 'active');
   const completedSessions = sessions.filter((s) => s.status !== 'active');
@@ -171,26 +164,27 @@ function SessionSidebar({
         )}
       </div>
 
-      {/* Status Footer */}
-      <div className="border-border border-t px-4 py-2">
-        <button className="w-full [-webkit-app-region:no-drag]" onClick={onTogglePower}>
-          <StatusRow
-            label="Power Lock"
-            status={powerBlock ? 'ACTIVE' : 'OFF'}
-            active={powerBlock}
-          />
+      {/* Bottom Menu Bar — VS Code style */}
+      <div className="border-border flex items-center justify-between border-t px-3 py-2">
+        {/* Profile */}
+        <div className="flex items-center gap-2">
+          <div className="bg-info/20 text-info flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold">
+            Z
+          </div>
+          <span className="text-text-muted text-[11px]">Zeus</span>
+        </div>
+
+        {/* Settings */}
+        <button
+          className="text-text-ghost hover:text-text-secondary rounded p-1 transition-colors [-webkit-app-region:no-drag]"
+          onClick={onOpenSettings}
+          title="Settings (⌘,)"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <circle cx="8" cy="8" r="2.5" />
+            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" />
+          </svg>
         </button>
-        <StatusRow label="WebSocket" status={websocket ? 'ACTIVE' : 'OFFLINE'} active={websocket} />
-        <StatusRow label="Tunnel" status={tunnel ? 'ACTIVE' : 'OFF'} active={!!tunnel} />
-        {tunnel && (
-          <button
-            className="text-info hover:text-info/80 mt-1 w-full truncate text-left text-[10px] transition-colors [-webkit-app-region:no-drag]"
-            title={tunnel}
-            onClick={() => navigator.clipboard.writeText(tunnel)}
-          >
-            {tunnel.replace(/^https?:\/\//, '')}
-          </button>
-        )}
       </div>
     </div>
   );

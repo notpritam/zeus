@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
 import ClaudeView from '@/components/ClaudeView';
 import RightPanel from '@/components/RightPanel';
 import NewClaudeSessionModal from '@/components/NewClaudeSessionModal';
+import CommandPalette, { buildCommands } from '@/components/CommandPalette';
+import SettingsModal from '@/components/SettingsModal';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -53,6 +55,8 @@ function App() {
   } = useZeusStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   useEffect(() => {
     const cleanup = connect();
@@ -67,6 +71,49 @@ function App() {
   // Persist layout between page reloads
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: 'zeus-layout' });
 
+  // Command palette commands
+  const commands = useMemo(
+    () =>
+      buildCommands({
+        powerBlock,
+        tunnel,
+        togglePower,
+        startSession,
+        openNewClaudeModal,
+        toggleRightPanel,
+        openSettings: () => setShowSettings(true),
+      }),
+    [powerBlock, tunnel, togglePower, startSession, openNewClaudeModal, toggleRightPanel],
+  );
+
+  // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+
+      if (e.key === ',') {
+        e.preventDefault();
+        setShowSettings((v) => !v);
+      } else if (e.key === 't') {
+        e.preventDefault();
+        startSession();
+      } else if (e.key === 'n') {
+        e.preventDefault();
+        openNewClaudeModal();
+      } else if (e.key === 'b') {
+        e.preventDefault();
+        toggleRightPanel();
+      }
+    },
+    [startSession, openNewClaudeModal, toggleRightPanel],
+  );
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
     <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
       {/* macOS traffic light clearance */}
@@ -78,6 +125,8 @@ function App() {
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onToggleRightPanel={toggleRightPanel}
         rightPanelOpen={rightPanelOpen}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
       />
 
       {/* Mobile layout */}
@@ -94,9 +143,6 @@ function App() {
             activeSessionId={activeSessionId}
             claudeSessions={claudeSessions}
             activeClaudeId={activeClaudeId}
-            powerBlock={powerBlock}
-            websocket={websocket}
-            tunnel={tunnel}
             viewMode={viewMode}
             onNewSession={() => {
               startSession();
@@ -115,7 +161,7 @@ function App() {
               selectClaudeSession(id);
               setSidebarOpen(false);
             }}
-            onTogglePower={togglePower}
+            onOpenSettings={() => setShowSettings(true)}
           />
         </div>
 
@@ -158,16 +204,13 @@ function App() {
               activeSessionId={activeSessionId}
               claudeSessions={claudeSessions}
               activeClaudeId={activeClaudeId}
-              powerBlock={powerBlock}
-              websocket={websocket}
-              tunnel={tunnel}
               viewMode={viewMode}
               onNewSession={() => startSession()}
               onNewClaudeSession={() => openNewClaudeModal()}
               onSelectSession={(id) => selectSession(id)}
               onStopSession={stopSession}
               onSelectClaudeSession={(id) => selectClaudeSession(id)}
-              onTogglePower={togglePower}
+              onOpenSettings={() => setShowSettings(true)}
             />
           </ResizablePanel>
 
@@ -205,6 +248,23 @@ function App() {
           )}
         </ResizablePanelGroup>
       </div>
+
+      {/* Command Palette (shadcn/cmdk) */}
+      <CommandPalette
+        open={showCommandPalette}
+        onOpenChange={setShowCommandPalette}
+        commands={commands}
+      />
+
+      {/* Settings Modal (shadcn Dialog) */}
+      <SettingsModal
+        open={showSettings}
+        onOpenChange={setShowSettings}
+        powerBlock={powerBlock}
+        websocket={websocket}
+        tunnel={tunnel}
+        onTogglePower={togglePower}
+      />
 
       {/* New Claude Session Modal */}
       <NewClaudeSessionModal

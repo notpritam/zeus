@@ -26,6 +26,7 @@
   --color-accent: #22c55e;
   --color-accent-bg: #0d2818;
   --color-accent-border: rgba(34, 197, 94, 0.25);
+  --color-accent-foreground: #ffffff;
 
   /* Danger — Red (errors/destructive) */
   --color-danger: #ef4444;
@@ -41,6 +42,23 @@
   --color-info: #3b82f6;
   --color-info-bg: #0c1a2e;
   --color-info-border: rgba(59, 130, 246, 0.25);
+
+  /* ─── shadcn/ui token mapping ─── */
+  --color-background: #0a0a0a;
+  --color-foreground: #e0e0e0;
+  --color-card: #111111;
+  --color-card-foreground: #e0e0e0;
+  --color-popover: #111111;
+  --color-popover-foreground: #e0e0e0;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #1a1a1a;
+  --color-secondary-foreground: #e0e0e0;
+  --color-muted: #1a1a1a;
+  --color-muted-foreground: #888888;
+  --color-destructive: #ef4444;
+  --color-input: #222222;
+  --color-ring: #3b82f6;
 
   /* Radius */
   --radius-sm: 4px;

@@ -23,15 +23,13 @@ const defaultProps = {
   activeSessionId: null,
   claudeSessions: [],
   activeClaudeId: null,
-  powerBlock: true,
-  websocket: true,
   viewMode: 'terminal' as const,
   onNewSession: vi.fn(),
   onNewClaudeSession: vi.fn(),
   onSelectSession: vi.fn(),
   onStopSession: vi.fn(),
   onSelectClaudeSession: vi.fn(),
-  onTogglePower: vi.fn(),
+  onOpenSettings: vi.fn(),
 };
 
 describe('SessionSidebar', () => {
@@ -59,10 +57,10 @@ describe('SessionSidebar', () => {
     expect(screen.getByTestId('session-card-s2')).toBeInTheDocument();
   });
 
-  it('shows service status rows', () => {
+  it('shows bottom menu bar with settings', () => {
     render(<SessionSidebar {...defaultProps} />);
-    expect(screen.getByText('Power Lock')).toBeInTheDocument();
-    expect(screen.getByText('WebSocket')).toBeInTheDocument();
+    expect(screen.getByText('Zeus')).toBeInTheDocument();
+    expect(screen.getByTitle('Settings (⌘,)')).toBeInTheDocument();
   });
 
   it('renders new claude session button', () => {

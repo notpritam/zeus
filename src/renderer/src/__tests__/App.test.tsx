@@ -32,11 +32,10 @@ describe('App', () => {
     });
   });
 
-  it('renders service status rows in sidebar', async () => {
+  it('renders settings gear in sidebar bottom bar', async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getAllByText('Power Lock').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('WebSocket').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByTitle('Settings (⌘,)').length).toBeGreaterThanOrEqual(1);
     });
   });
 

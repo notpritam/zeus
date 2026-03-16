@@ -6,6 +6,8 @@ interface HeaderProps {
   sidebarOpen: boolean;
   onToggleRightPanel: () => void;
   rightPanelOpen: boolean;
+  onOpenSettings: () => void;
+  onOpenCommandPalette: () => void;
 }
 
 function Header({
@@ -14,6 +16,8 @@ function Header({
   sidebarOpen,
   onToggleRightPanel,
   rightPanelOpen,
+  onOpenSettings,
+  onOpenCommandPalette,
 }: HeaderProps) {
   return (
     <header
@@ -31,8 +35,30 @@ function Header({
 
       <div className="flex-1" />
 
-      {/* Connection Status + Right Panel Toggle */}
       <div className="flex items-center gap-3">
+        {/* Command Palette */}
+        <button
+          className="text-text-muted hover:text-text-secondary text-xs [-webkit-app-region:no-drag]"
+          onClick={onOpenCommandPalette}
+          title="Command Palette (⌘K)"
+        >
+          <kbd className="bg-bg-surface border-border rounded border px-1.5 py-0.5 font-mono text-[10px]">
+            ⌘K
+          </kbd>
+        </button>
+
+        {/* Settings */}
+        <button
+          className="text-text-muted hover:text-text-secondary [-webkit-app-region:no-drag]"
+          onClick={onOpenSettings}
+          title="Settings (⌘,)"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <circle cx="8" cy="8" r="2.5" />
+            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" />
+          </svg>
+        </button>
+
         {/* Right Panel Toggle (desktop only) */}
         <button
           data-testid="right-panel-toggle"
@@ -42,9 +68,8 @@ function Header({
               : 'text-text-muted hover:text-text-secondary'
           } transition-colors`}
           onClick={onToggleRightPanel}
-          title="Toggle Source Control Panel"
+          title="Toggle Source Control Panel (⌘B)"
         >
-          {/* Panel icon using box-drawing characters */}
           <svg
             width="16"
             height="16"

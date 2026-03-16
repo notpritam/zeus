@@ -117,8 +117,9 @@ function CopyButton({ text }: { text: string }) {
 function CodeBlock({
   className,
   children,
+  node: _node,
   ...props
-}: ComponentPropsWithoutRef<'code'> & { inline?: boolean }) {
+}: ComponentPropsWithoutRef<'code'> & { inline?: boolean; node?: unknown }) {
   const match = /language-(\w+)/.exec(className || '');
   const code = String(children).replace(/\n$/, '');
   const isInline = !match && !code.includes('\n');
@@ -165,6 +166,8 @@ const Markdown = memo(function Markdown({ content }: { content: string }) {
         remarkPlugins={[remarkGfm]}
         className="zeus-markdown"
         components={{
+          // Strip default <pre> wrapper — CodeBlock handles its own container
+          pre: ({ children }) => <>{children}</>,
           code: CodeBlock,
           a: ({ children, ...props }) => (
             <a
