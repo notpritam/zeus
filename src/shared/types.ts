@@ -296,6 +296,15 @@ export type ClaudePayload =
 
 export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived';
 
+// Fine-grained activity state for a running session
+export type SessionActivity =
+  | { state: 'idle' }
+  | { state: 'thinking' }
+  | { state: 'streaming' }
+  | { state: 'tool_running'; toolName: string; description: string }
+  | { state: 'waiting_approval'; toolName: string }
+  | { state: 'starting' };
+
 export interface ClaudeSessionInfo {
   id: string; // envelope sessionId (client-generated)
   claudeSessionId: string | null; // real Claude session ID (from stream)

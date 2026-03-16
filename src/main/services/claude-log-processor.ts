@@ -11,6 +11,7 @@ import type {
   StreamEvent,
   ContentBlockDelta,
 } from './claude-types';
+import type { SessionActivity } from '../../shared/types';
 
 export class ClaudeLogProcessor {
   // Map tool_use id → entry metadata for result matching
@@ -22,7 +23,30 @@ export class ClaudeLogProcessor {
   private streamingEntryId: string | null = null;
   private thinkingEntryId: string | null = null;
 
+  // Activity tracking
+  private _activity: SessionActivity = { state: 'starting' };
+  private _activityCallback: ((activity: SessionActivity) => void) | null = null;
+
   constructor(private worktreePath: string) {}
+
+  onActivity(cb: (activity: SessionActivity) => void): void {
+    this._activityCallback = cb;
+  }
+
+  get activity(): SessionActivity {
+    return this._activity;
+  }
+
+  private setActivity(activity: SessionActivity): void {
+    const prev = this._activity;
+    // Avoid emitting identical states
+    if (prev.state === activity.state) {
+      if (activity.state === 'tool_running' && prev.state === 'tool_running' && prev.toolName === activity.toolName) return;
+      if (activity.state !== 'tool_running' && activity.state !== 'waiting_approval') return;
+    }
+    this._activity = activity;
+    this._activityCallback?.(activity);
+  }
 
   /** Process a raw ClaudeJson message → 0 or more NormalizedEntry items */
   process(msg: ClaudeJson): NormalizedEntry[] {
@@ -72,6 +96,8 @@ export class ClaudeLogProcessor {
       this.toolMap.set(toolId, { entryId, toolName, content });
     }
 
+    this.setActivity({ state: 'tool_running', toolName, description: content });
+
     return {
       id: entryId,
       entryType: { type: 'tool_use', toolName, actionType, status: 'created' },
@@ -83,6 +109,8 @@ export class ClaudeLogProcessor {
     // Tool results update status of existing tool_use entries.
     // The UI should match by tool_use id and patch the status.
     // For now we don't emit new entries — the session emits 'entry_update' events.
+    // After tool completes, revert to streaming/idle
+    this.setActivity({ state: 'streaming' });
     return [];
   }
 
@@ -96,6 +124,7 @@ export class ClaudeLogProcessor {
         if (block.type === 'text') {
           this.streamingText = (block as { text?: string }).text || '';
           this.streamingEntryId = crypto.randomUUID();
+          this.setActivity({ state: 'streaming' });
           entries.push({
             id: this.streamingEntryId,
             entryType: { type: 'assistant_message' },
@@ -104,6 +133,7 @@ export class ClaudeLogProcessor {
         } else if (block.type === 'thinking') {
           this.streamingThinking = (block as { thinking?: string }).thinking || '';
           this.thinkingEntryId = crypto.randomUUID();
+          this.setActivity({ state: 'thinking' });
           entries.push({
             id: this.thinkingEntryId,
             entryType: { type: 'thinking' },
@@ -145,6 +175,7 @@ export class ClaudeLogProcessor {
   }
 
   private processResult(msg: ClaudeJson): NormalizedEntry[] {
+    this.setActivity({ state: 'idle' });
     const result = msg as { model_usage?: Record<string, Record<string, number>> };
     if (!result.model_usage) return [];
 

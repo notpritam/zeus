@@ -280,6 +280,16 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
   });
 
+  // Forward activity state changes
+  session.on('activity', (activity) => {
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'session_activity', activity },
+      auth: '',
+    });
+  });
+
   // Forward approval requests
   session.on('approval_needed', (approval) => {
     broadcastEnvelope({

@@ -49,6 +49,11 @@ function App() {
     denyClaudeTool,
     interruptClaude,
     resumeClaudeSession,
+    sessionActivity,
+    messageQueue,
+    queueMessage,
+    editQueuedMessage,
+    removeQueuedMessage,
     selectClaudeSession,
     deleteClaudeSession,
     archiveClaudeSession,
@@ -75,6 +80,8 @@ function App() {
 
   const activeClaudeSession = claudeSessions.find((s) => s.id === activeClaudeId) ?? null;
   const activeEntries = activeClaudeId ? (claudeEntries[activeClaudeId] ?? []) : [];
+  const activeActivity = activeClaudeId ? (sessionActivity[activeClaudeId] ?? { state: 'idle' as const }) : { state: 'idle' as const };
+  const activeQueue = activeClaudeId ? (messageQueue[activeClaudeId] ?? []) : [];
 
   // Filter diff tabs to current session for tab bar visibility
   const currentSessionId = activeClaudeId ?? activeSessionId;
@@ -196,11 +203,16 @@ function App() {
               session={activeClaudeSession}
               entries={activeEntries}
               approvals={pendingApprovals}
+              activity={activeActivity}
+              queue={activeQueue}
               onSendMessage={sendClaudeMessage}
               onApprove={approveClaudeTool}
               onDeny={denyClaudeTool}
               onInterrupt={interruptClaude}
               onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
+              onQueueMessage={queueMessage}
+              onEditQueued={editQueuedMessage}
+              onRemoveQueued={removeQueuedMessage}
             />
           ) : (
             <TerminalView sessionId={activeSessionId} />
@@ -253,11 +265,16 @@ function App() {
                     session={activeClaudeSession}
                     entries={activeEntries}
                     approvals={pendingApprovals}
+                    activity={activeActivity}
+                    queue={activeQueue}
                     onSendMessage={sendClaudeMessage}
                     onApprove={approveClaudeTool}
                     onDeny={denyClaudeTool}
                     onInterrupt={interruptClaude}
                     onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
+                    onQueueMessage={queueMessage}
+                    onEditQueued={editQueuedMessage}
+                    onRemoveQueued={removeQueuedMessage}
                   />
                 ) : (
                   <TerminalView sessionId={activeSessionId} />
@@ -266,15 +283,18 @@ function App() {
             </div>
           </ResizablePanel>
 
-          <ResizableHandle />
-          <ResizablePanel
-            id="right-panel"
-            defaultSize={activeRightTab ? '25%' : '40px'}
-            minSize={activeRightTab ? '200px' : '40px'}
-            maxSize={activeRightTab ? '40%' : '40px'}
-          >
-            <RightPanel />
-          </ResizablePanel>
+          {activeRightTab ? (
+            <>
+              <ResizableHandle />
+              <ResizablePanel id="right-panel" defaultSize="25%" minSize="200px" maxSize="40%">
+                <RightPanel />
+              </ResizablePanel>
+            </>
+          ) : (
+            <div className="shrink-0">
+              <RightPanel />
+            </div>
+          )}
         </ResizablePanelGroup>
       </div>
 

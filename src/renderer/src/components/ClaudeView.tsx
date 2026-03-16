@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import type {
@@ -11,6 +11,7 @@ import type {
   ActionType,
   ClaudeApprovalInfo,
   ClaudeSessionInfo,
+  SessionActivity,
 } from '../../../shared/types';
 
 // ─── Entry Renderers ───
@@ -297,6 +298,98 @@ function ApprovalBanner({
 
 // ─── Main ClaudeView ───
 
+// ─── Activity Indicator ───
+
+function ActivityIndicator({ activity }: { activity: SessionActivity }) {
+  if (activity.state === 'idle') return null;
+
+  const icon = (() => {
+    switch (activity.state) {
+      case 'thinking':
+        return <Brain className="text-primary size-3 animate-pulse" />;
+      case 'streaming':
+        return <Sparkles className="text-primary size-3 animate-pulse" />;
+      case 'tool_running':
+        return <Terminal className="text-primary size-3 animate-pulse" />;
+      case 'waiting_approval':
+        return <ShieldAlert className="text-warn size-3" />;
+      case 'starting':
+        return <Loader2 className="text-primary size-3 animate-spin" />;
+    }
+  })();
+
+  const label = (() => {
+    switch (activity.state) {
+      case 'thinking':
+        return 'Thinking...';
+      case 'streaming':
+        return 'Writing...';
+      case 'tool_running':
+        return activity.description;
+      case 'waiting_approval':
+        return `Waiting for approval: ${activity.toolName}`;
+      case 'starting':
+        return 'Starting...';
+    }
+  })();
+
+  return (
+    <div className="text-muted-foreground flex items-center gap-2 px-1 py-1 text-xs">
+      {icon}
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
+
+// ─── Queue Item ───
+
+function QueuedMessageItem({
+  msg,
+  onEdit,
+  onRemove,
+}: {
+  msg: { id: string; content: string };
+  onEdit: (id: string, content: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(msg.content);
+
+  const handleSave = () => {
+    onEdit(msg.id, editValue);
+    setEditing(false);
+  };
+
+  return (
+    <div className="bg-secondary/50 border-border flex items-start gap-2 rounded-lg border px-3 py-2">
+      <Badge variant="outline" className="text-[9px] shrink-0 mt-0.5">queued</Badge>
+      {editing ? (
+        <div className="flex min-w-0 flex-1 gap-1">
+          <Input
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="text-xs h-7"
+            autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
+          />
+          <Button size="xs" onClick={handleSave}><Check className="size-3" /></Button>
+          <Button size="xs" variant="ghost" onClick={() => setEditing(false)}><X className="size-3" /></Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-foreground min-w-0 flex-1 truncate text-xs">{msg.content}</p>
+          <button onClick={() => { setEditValue(msg.content); setEditing(true); }} className="text-muted-foreground hover:text-foreground shrink-0">
+            <Pencil className="size-3" />
+          </button>
+          <button onClick={() => onRemove(msg.id)} className="text-muted-foreground hover:text-destructive shrink-0">
+            <Trash2 className="size-3" />
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 interface ImageAttachmentLocal {
@@ -318,22 +411,32 @@ interface ClaudeViewProps {
   session: ClaudeSessionInfo | null;
   entries: NormalizedEntry[];
   approvals: ClaudeApprovalInfo[];
+  activity: SessionActivity;
+  queue: Array<{ id: string; content: string }>;
   onSendMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   onApprove: (approvalId: string) => void;
   onDeny: (approvalId: string) => void;
   onInterrupt: () => void;
   onResume: () => void;
+  onQueueMessage: (content: string) => void;
+  onEditQueued: (id: string, content: string) => void;
+  onRemoveQueued: (id: string) => void;
 }
 
 function ClaudeView({
   session,
   entries,
   approvals,
+  activity,
+  queue,
   onSendMessage,
   onApprove,
   onDeny,
   onInterrupt,
   onResume,
+  onQueueMessage,
+  onEditQueued,
+  onRemoveQueued,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
@@ -445,15 +548,23 @@ function ClaudeView({
 
   const sessionApprovals = approvals.filter((a) => a.sessionId === session.id);
 
+  const isBusy = session?.status === 'running' && activity.state !== 'idle';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed && attachedFiles.length === 0 && attachedImages.length === 0) return;
-    onSendMessage(
-      trimmed,
-      attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined,
-      attachedImages.length > 0 ? attachedImages.map((img) => ({ filename: img.filename, mediaType: img.mediaType, dataUrl: img.dataUrl })) : undefined,
-    );
+
+    if (isBusy && attachedFiles.length === 0 && attachedImages.length === 0) {
+      // Queue text-only messages when busy
+      onQueueMessage(trimmed);
+    } else {
+      onSendMessage(
+        trimmed,
+        attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined,
+        attachedImages.length > 0 ? attachedImages.map((img) => ({ filename: img.filename, mediaType: img.mediaType, dataUrl: img.dataUrl })) : undefined,
+      );
+    }
     setInput('');
     setAttachedFiles([]);
     setAttachedImages([]);
@@ -504,6 +615,20 @@ function ClaudeView({
         {entries.map((entry) => (
           <EntryItem key={entry.id} entry={entry} />
         ))}
+
+        {/* Activity indicator */}
+        {session.status === 'running' && entries.length > 0 && (
+          <ActivityIndicator activity={activity} />
+        )}
+
+        {/* Queued messages */}
+        {queue.length > 0 && (
+          <div className="space-y-2">
+            {queue.map((msg) => (
+              <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+            ))}
+          </div>
+        )}
 
         {entries.length === 0 && session.status === 'running' && (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -619,9 +744,10 @@ function ClaudeView({
                 type="submit"
                 disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0 && attachedImages.length === 0)}
                 size="sm"
+                variant={isBusy ? 'secondary' : 'default'}
               >
                 <Send className="size-3" />
-                Send
+                {isBusy ? 'Queue' : 'Send'}
               </Button>
             </form>
           </>

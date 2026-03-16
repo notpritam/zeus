@@ -57,6 +57,9 @@ export class ClaudeSession extends EventEmitter {
   constructor(private options: SessionOptions) {
     super();
     this.logProcessor = new ClaudeLogProcessor(options.workingDir);
+    this.logProcessor.onActivity((activity) => {
+      this.emit('activity', activity);
+    });
   }
 
   async start(prompt: string): Promise<void> {
@@ -276,6 +279,7 @@ export class ClaudeSession extends EventEmitter {
           toolInput: input,
           toolUseId: tool_use_id,
         });
+        this.emit('activity', { state: 'waiting_approval', toolName: tool_name });
         return;
       }
 
@@ -306,6 +310,7 @@ export class ClaudeSession extends EventEmitter {
         toolInput: input,
         toolUseId: tool_use_id,
       });
+      this.emit('activity', { state: 'waiting_approval', toolName: tool_name });
     } else if (request.subtype === 'hook_callback') {
       const { callback_id } = request;
 

@@ -19,6 +19,7 @@ import type {
   GitPayload,
   FilesPayload,
   FileTreeEntry,
+  SessionActivity,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
@@ -53,6 +54,8 @@ interface ZeusState {
   activeClaudeId: string | null;
   claudeEntries: Record<string, NormalizedEntry[]>;
   pendingApprovals: ClaudeApprovalInfo[];
+  sessionActivity: Record<string, SessionActivity>;
+  messageQueue: Record<string, Array<{ id: string; content: string }>>;
 
   // Git
   gitStatus: Record<string, GitStatusData>;
@@ -104,6 +107,9 @@ interface ZeusState {
   stopClaude: () => void;
   selectClaudeSession: (id: string | null) => void;
   resumeClaudeSession: (id: string) => void;
+  queueMessage: (content: string) => void;
+  editQueuedMessage: (msgId: string, content: string) => void;
+  removeQueuedMessage: (msgId: string) => void;
   deleteClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
@@ -172,6 +178,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   activeClaudeId: null,
   claudeEntries: {},
   pendingApprovals: [],
+  sessionActivity: {},
+  messageQueue: {},
 
   gitStatus: {},
   gitErrors: {},
@@ -382,12 +390,53 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      if (payload.type === 'session_activity') {
+        const { activity } = envelope.payload as { activity: SessionActivity };
+        set((state) => ({
+          sessionActivity: { ...state.sessionActivity, [sid]: activity },
+        }));
+
+        // Auto-send queued messages when session becomes idle
+        if (activity.state === 'idle') {
+          const queue = get().messageQueue[sid];
+          if (queue && queue.length > 0) {
+            const next = queue[0];
+            // Remove from queue
+            set((state) => ({
+              messageQueue: {
+                ...state.messageQueue,
+                [sid]: (state.messageQueue[sid] ?? []).slice(1),
+              },
+            }));
+            // Send the queued message
+            const userEntry: NormalizedEntry = {
+              id: `user-${Date.now()}`,
+              entryType: { type: 'user_message' },
+              content: next.content,
+            };
+            set((state) => ({
+              claudeEntries: {
+                ...state.claudeEntries,
+                [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
+              },
+            }));
+            zeusWs.send({
+              channel: 'claude',
+              sessionId: sid,
+              payload: { type: 'send_message', content: next.content },
+              auth: '',
+            });
+          }
+        }
+      }
+
       if (payload.type === 'done') {
         set((state) => ({
           claudeSessions: state.claudeSessions.map((s) =>
             s.id === sid ? { ...s, status: 'done' as const } : s,
           ),
           pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== sid),
+          sessionActivity: { ...state.sessionActivity, [sid]: { state: 'idle' } },
         }));
       }
 
@@ -396,6 +445,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           claudeSessions: state.claudeSessions.map((s) =>
             s.id === sid ? { ...s, status: 'error' as const } : s,
           ),
+          sessionActivity: { ...state.sessionActivity, [sid]: { state: 'idle' } },
         }));
       }
 
@@ -925,6 +975,42 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       notificationSound: session.notificationSound,
       enableGitWatcher: session.enableGitWatcher,
     });
+  },
+
+  queueMessage: (content: string) => {
+    const { activeClaudeId } = get();
+    if (!activeClaudeId) return;
+    const msg = { id: `q-${Date.now()}-${Math.random()}`, content };
+    set((state) => ({
+      messageQueue: {
+        ...state.messageQueue,
+        [activeClaudeId]: [...(state.messageQueue[activeClaudeId] ?? []), msg],
+      },
+    }));
+  },
+
+  editQueuedMessage: (msgId: string, content: string) => {
+    const { activeClaudeId } = get();
+    if (!activeClaudeId) return;
+    set((state) => ({
+      messageQueue: {
+        ...state.messageQueue,
+        [activeClaudeId]: (state.messageQueue[activeClaudeId] ?? []).map((m) =>
+          m.id === msgId ? { ...m, content } : m,
+        ),
+      },
+    }));
+  },
+
+  removeQueuedMessage: (msgId: string) => {
+    const { activeClaudeId } = get();
+    if (!activeClaudeId) return;
+    set((state) => ({
+      messageQueue: {
+        ...state.messageQueue,
+        [activeClaudeId]: (state.messageQueue[activeClaudeId] ?? []).filter((m) => m.id !== msgId),
+      },
+    }));
   },
 
   selectClaudeSession: (id: string | null) => {
