@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Plus, Sparkles, Settings } from 'lucide-react';
+import { Plus, Sparkles, Settings, Trash2, Archive } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
 
@@ -17,6 +17,10 @@ interface SessionSidebarProps {
   onSelectSession: (id: string) => void;
   onStopSession: (id: string) => void;
   onSelectClaudeSession: (id: string) => void;
+  onDeleteClaudeSession: (id: string) => void;
+  onArchiveClaudeSession: (id: string) => void;
+  onDeleteTerminalSession: (id: string) => void;
+  onArchiveTerminalSession: (id: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -26,10 +30,14 @@ function ClaudeCard({
   session,
   active,
   onSelect,
+  onDelete,
+  onArchive,
 }: {
   session: ClaudeSessionInfo;
   active: boolean;
   onSelect: () => void;
+  onDelete: () => void;
+  onArchive: () => void;
 }) {
   const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
     running: 'default',
@@ -40,7 +48,7 @@ function ClaudeCard({
   return (
     <button
       data-testid={`claude-card-${session.id}`}
-      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
+      className={`group flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
         active
           ? 'border-ring/50 bg-primary/10'
           : 'border-border hover:bg-secondary'
@@ -64,6 +72,28 @@ function ClaudeCard({
           <span className="text-muted-foreground text-[10px]">{session.id.slice(-6)}</span>
         </div>
       </div>
+      {session.status !== 'running' && (
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            title="Archive session"
+          >
+            <Archive className="size-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Delete session"
+          >
+            <Trash2 className="size-3" />
+          </Button>
+        </div>
+      )}
     </button>
   );
 }
@@ -81,6 +111,10 @@ function SessionSidebar({
   onSelectSession,
   onStopSession,
   onSelectClaudeSession,
+  onDeleteClaudeSession,
+  onArchiveClaudeSession,
+  onDeleteTerminalSession,
+  onArchiveTerminalSession,
   onOpenSettings,
 }: SessionSidebarProps) {
   const activeSessions = sessions.filter((s) => s.status === 'active');
@@ -133,6 +167,8 @@ function SessionSidebar({
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   onSelect={() => onSelectClaudeSession(s.id)}
+                  onDelete={() => onDeleteClaudeSession(s.id)}
+                  onArchive={() => onArchiveClaudeSession(s.id)}
                 />
               ))}
 
@@ -160,6 +196,8 @@ function SessionSidebar({
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   onSelect={() => onSelectClaudeSession(s.id)}
+                  onDelete={() => onDeleteClaudeSession(s.id)}
+                  onArchive={() => onArchiveClaudeSession(s.id)}
                 />
               ))}
 
@@ -171,6 +209,8 @@ function SessionSidebar({
                   active={viewMode === 'terminal' && s.id === activeSessionId}
                   onSelect={() => onSelectSession(s.id)}
                   onStop={() => onStopSession(s.id)}
+                  onDelete={() => onDeleteTerminalSession(s.id)}
+                  onArchive={() => onArchiveTerminalSession(s.id)}
                 />
               ))}
             </div>

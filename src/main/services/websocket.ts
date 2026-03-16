@@ -37,12 +37,17 @@ import {
   upsertClaudeEntry,
   getAllClaudeSessions,
   getClaudeEntries,
+  deleteClaudeSession,
+  archiveClaudeSession,
   insertTerminalSession,
   updateTerminalSession,
   getAllTerminalSessions,
+  deleteTerminalSession,
+  archiveTerminalSession,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload } from '../../shared/types';
 import { GitWatcherManager } from './git';
+import { FileTreeServiceManager } from './file-tree';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -58,6 +63,9 @@ const clientClaudeSessions = new Map<WebSocket, Set<string>>();
 
 // Git watcher manager (shared across all WebSocket clients)
 const gitManager = new GitWatcherManager();
+
+// File tree manager (shared across all WebSocket clients)
+const fileTreeManager = new FileTreeServiceManager();
 
 // Track authenticated clients
 const authenticatedClients = new WeakSet<WebSocket>();
@@ -161,11 +169,37 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     // Merge in-memory (active) with DB (historical), dedup by id (in-memory wins)
     const inMemory = getAllSessions();
     const inMemoryIds = new Set(inMemory.map((s) => s.id));
-    const fromDb = getAllTerminalSessions().filter((s) => !inMemoryIds.has(s.id));
+    const fromDb = getAllTerminalSessions().filter((s) => !inMemoryIds.has(s.id) && s.status !== 'archived');
     sendEnvelope(ws, {
       channel: 'control',
       sessionId: '',
       payload: { type: 'session_list', sessions: [...inMemory, ...fromDb] },
+      auth: '',
+    });
+  } else if (payload.type === 'delete_terminal_session') {
+    const sid = envelope.sessionId;
+    destroySession(sid);
+    markKilled(sid);
+    deleteTerminalSession(sid);
+    const owned = clientSessions.get(ws);
+    if (owned) owned.delete(sid);
+    broadcastEnvelope({
+      channel: 'control',
+      sessionId: sid,
+      payload: { type: 'terminal_session_deleted', deletedId: sid },
+      auth: '',
+    });
+  } else if (payload.type === 'archive_terminal_session') {
+    const sid = envelope.sessionId;
+    destroySession(sid);
+    markKilled(sid);
+    archiveTerminalSession(sid);
+    const owned = clientSessions.get(ws);
+    if (owned) owned.delete(sid);
+    broadcastEnvelope({
+      channel: 'control',
+      sessionId: sid,
+      payload: { type: 'terminal_session_archived', archivedId: sid },
       auth: '',
     });
   } else {
@@ -299,6 +333,15 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
   });
 }
 
+/** Auto-adopt a Claude session if the client doesn't own it yet (e.g. after reconnect) */
+function adoptClaudeSession(ws: WebSocket, sessionId: string): void {
+  if (!clientClaudeSessions.has(ws)) clientClaudeSessions.set(ws, new Set());
+  const owned = clientClaudeSessions.get(ws)!;
+  if (!owned.has(sessionId)) {
+    owned.add(sessionId);
+  }
+}
+
 async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   const payload = envelope.payload as { type: string };
 
@@ -328,6 +371,13 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         endedAt: null,
       });
 
+      // Persist initial user message
+      upsertClaudeEntry(envelope.sessionId, {
+        id: `user-${Date.now()}`,
+        entryType: { type: 'user_message' },
+        content: opts.prompt,
+      });
+
       // Track ownership
       if (!clientClaudeSessions.has(ws)) clientClaudeSessions.set(ws, new Set());
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);
@@ -350,6 +400,14 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
           auth: '',
         });
       }
+
+      // Auto-start file tree watcher
+      handleFiles(ws, {
+        channel: 'files',
+        sessionId: envelope.sessionId,
+        payload: { type: 'start_watching', workingDir },
+        auth: '',
+      });
     } catch (err) {
       sendError(ws, envelope.sessionId, `Failed to start Claude: ${(err as Error).message}`);
     }
@@ -383,6 +441,13 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     const { content } = envelope.payload as ClaudeSendMessagePayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
+      // Persist user message to DB
+      upsertClaudeEntry(envelope.sessionId, {
+        id: `user-${Date.now()}`,
+        entryType: { type: 'user_message' },
+        content,
+      });
       await session.sendMessage(content);
     } else {
       sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
@@ -391,35 +456,44 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     const { approvalId } = envelope.payload as ClaudeApproveToolPayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
       await session.approveTool(approvalId);
     }
   } else if (payload.type === 'deny_tool') {
     const { approvalId, reason } = envelope.payload as ClaudeDenyToolPayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
       await session.denyTool(approvalId, reason);
     }
   } else if (payload.type === 'interrupt') {
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
       await session.interrupt();
     }
   } else if (payload.type === 'stop_claude') {
+    adoptClaudeSession(ws, envelope.sessionId);
     claudeManager.killSession(envelope.sessionId);
     updateClaudeSessionStatus(envelope.sessionId, 'done', Date.now());
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
   } else if (payload.type === 'list_claude_sessions') {
-    const dbSessions = getAllClaudeSessions();
-    const sessions: ClaudeSessionInfo[] = dbSessions.map((s) => ({
-      id: s.id,
-      claudeSessionId: s.claudeSessionId,
-      status: s.status as ClaudeSessionInfo['status'],
-      prompt: s.prompt,
-      name: s.name ?? undefined,
-      notificationSound: s.notificationSound,
-      startedAt: s.startedAt,
-    }));
+    const dbSessions = getAllClaudeSessions().filter((s) => s.status !== 'archived');
+    const sessions: ClaudeSessionInfo[] = dbSessions.map((s) => {
+      // Cross-reference in-memory manager for accurate running status
+      const live = claudeManager.getSession(s.id);
+      const status = live?.isRunning ? 'running' : (s.status as ClaudeSessionInfo['status']);
+      return {
+        id: s.id,
+        claudeSessionId: s.claudeSessionId,
+        status,
+        prompt: s.prompt,
+        name: s.name ?? undefined,
+        notificationSound: s.notificationSound,
+        startedAt: s.startedAt,
+      };
+    });
     sendEnvelope(ws, {
       channel: 'claude',
       sessionId: '',
@@ -432,6 +506,32 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       channel: 'claude',
       sessionId: envelope.sessionId,
       payload: { type: 'claude_history', entries },
+      auth: '',
+    });
+  } else if (payload.type === 'delete_claude_session') {
+    // Kill if still running, stop git watcher, then delete from DB
+    claudeManager.killSession(envelope.sessionId);
+    gitManager.stopWatching(envelope.sessionId);
+    deleteClaudeSession(envelope.sessionId);
+    const owned = clientClaudeSessions.get(ws);
+    if (owned) owned.delete(envelope.sessionId);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_session_deleted', deletedId: envelope.sessionId },
+      auth: '',
+    });
+  } else if (payload.type === 'archive_claude_session') {
+    // Kill if still running, stop git watcher, then archive in DB
+    claudeManager.killSession(envelope.sessionId);
+    gitManager.stopWatching(envelope.sessionId);
+    archiveClaudeSession(envelope.sessionId);
+    const owned = clientClaudeSessions.get(ws);
+    if (owned) owned.delete(envelope.sessionId);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_session_archived', archivedId: envelope.sessionId },
       auth: '',
     });
   } else {
@@ -579,7 +679,6 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     }
   } else if (payload.type === 'git_file_contents') {
     const watcher = gitManager.getWatcher(sessionId);
-    console.log('[git_file_contents]', { sessionId, file: payload.file, staged: payload.staged, hasWatcher: !!watcher });
     if (watcher) {
       try {
         const result = await watcher.getFileContents(payload.file, payload.staged);
@@ -645,6 +744,115 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     }
   } else {
     sendError(_ws, sessionId, `Unknown git type: ${(payload as { type: string }).type}`);
+  }
+}
+
+async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as FilesPayload;
+  const sessionId = envelope.sessionId;
+
+  if (payload.type === 'start_watching') {
+    try {
+      const service = await fileTreeManager.startWatching(sessionId, payload.workingDir);
+
+      service.on('connected', () => {
+        broadcastEnvelope({
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_connected' },
+          auth: '',
+        });
+      });
+
+      service.on('files_changed', (data: { directories: string[] }) => {
+        broadcastEnvelope({
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_changed', directories: data.directories },
+          auth: '',
+        });
+      });
+
+      service.on('error', (err: Error) => {
+        broadcastEnvelope({
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_error', message: err.message },
+          auth: '',
+        });
+      });
+    } catch (err) {
+      sendError(ws, sessionId, `Failed to start file watcher: ${(err as Error).message}`);
+    }
+  } else if (payload.type === 'stop_watching') {
+    await fileTreeManager.stopWatching(sessionId);
+  } else if (payload.type === 'list_directory') {
+    const service = fileTreeManager.getService(sessionId);
+    if (service) {
+      try {
+        const entries = await service.listDirectory(payload.dirPath);
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'directory_listing', dirPath: payload.dirPath, entries },
+          auth: '',
+        });
+      } catch (err) {
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'read_file') {
+    const service = fileTreeManager.getService(sessionId);
+    if (service) {
+      try {
+        const result = await service.readFile(payload.filePath);
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: {
+            type: 'read_file_result',
+            filePath: payload.filePath,
+            content: result.content,
+            language: result.language,
+          },
+          auth: '',
+        });
+      } catch (err) {
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: {
+            type: 'read_file_error',
+            filePath: payload.filePath,
+            error: (err as Error).message,
+          },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'save_file') {
+    const service = fileTreeManager.getService(sessionId);
+    if (service) {
+      const result = await service.saveFile(payload.filePath, payload.content);
+      sendEnvelope(ws, {
+        channel: 'files',
+        sessionId,
+        payload: {
+          type: 'save_file_result',
+          filePath: payload.filePath,
+          success: result.success,
+          error: result.error,
+        },
+        auth: '',
+      });
+    }
+  } else {
+    sendError(ws, sessionId, `Unknown files type: ${(payload as { type: string }).type}`);
   }
 }
 
@@ -726,6 +934,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
     case 'git':
       handleGit(ws, envelope);
       break;
+    case 'files':
+      handleFiles(ws, envelope);
+      break;
     case 'qa':
       sendError(ws, envelope.sessionId, `Channel "${envelope.channel}" not yet implemented`);
       break;
@@ -747,16 +958,8 @@ function handleClose(ws: WebSocket): void {
     clientSessions.delete(ws);
   }
 
-  // Clean up Claude sessions and their git watchers
-  const claudeOwned = clientClaudeSessions.get(ws);
-  if (claudeOwned) {
-    for (const sid of claudeOwned) {
-      claudeManager.killSession(sid);
-      updateClaudeSessionStatus(sid, 'done', Date.now());
-      gitManager.stopWatching(sid);
-    }
-    clientClaudeSessions.delete(ws);
-  }
+  // Claude sessions: just clear ownership, keep processes + git watchers alive
+  clientClaudeSessions.delete(ws);
 }
 
 export async function startWebSocketServer(port = 3000): Promise<void> {
@@ -821,9 +1024,10 @@ export async function startWebSocketServer(port = 3000): Promise<void> {
 export async function stopWebSocketServer(): Promise<void> {
   if (!wss || !server) return;
 
-  // Kill all Claude sessions and git watchers
+  // Kill all Claude sessions, git watchers, and file tree watchers
   claudeManager.killAll();
   await gitManager.stopAll();
+  await fileTreeManager.stopAll();
 
   // Close all client connections
   for (const ws of wss.clients) {

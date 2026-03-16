@@ -49,6 +49,10 @@ function App() {
     denyClaudeTool,
     interruptClaude,
     selectClaudeSession,
+    deleteClaudeSession,
+    archiveClaudeSession,
+    deleteTerminalSession,
+    archiveTerminalSession,
     openNewClaudeModal,
     closeNewClaudeModal,
     toggleRightPanel,
@@ -164,6 +168,10 @@ function App() {
               selectClaudeSession(id);
               setSidebarOpen(false);
             }}
+            onDeleteClaudeSession={deleteClaudeSession}
+            onArchiveClaudeSession={archiveClaudeSession}
+            onDeleteTerminalSession={deleteTerminalSession}
+            onArchiveTerminalSession={archiveTerminalSession}
             onOpenSettings={() => setShowSettings(true)}
           />
         </div>
@@ -213,6 +221,10 @@ function App() {
               onSelectSession={(id) => selectSession(id)}
               onStopSession={stopSession}
               onSelectClaudeSession={(id) => selectClaudeSession(id)}
+              onDeleteClaudeSession={deleteClaudeSession}
+              onArchiveClaudeSession={archiveClaudeSession}
+              onDeleteTerminalSession={deleteTerminalSession}
+              onArchiveTerminalSession={archiveTerminalSession}
               onOpenSettings={() => setShowSettings(true)}
             />
           </ResizablePanel>

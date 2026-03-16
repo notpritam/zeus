@@ -9,7 +9,7 @@ import type { GitStatusData, GitFileChange, GitFileStatus } from '../../shared/t
 const execFileAsync = promisify(execFile);
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
-  '.ts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.jsx': 'javascriptreact',
+  '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
   '.css': 'css', '.html': 'html', '.json': 'json', '.md': 'markdown',
   '.py': 'python', '.rs': 'rust', '.go': 'go', '.yaml': 'yaml', '.yml': 'yaml',
   '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.sql': 'sql',

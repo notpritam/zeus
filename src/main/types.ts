@@ -41,4 +41,6 @@ export type {
   GitFileChange,
   GitStatusData,
   GitPayload,
+  FileTreeEntry,
+  FilesPayload,
 } from '../shared/types';

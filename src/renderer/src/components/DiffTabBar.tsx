@@ -1,6 +1,7 @@
 import { X, MessageSquare, TerminalSquare, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useZeusStore } from '@/stores/useZeusStore';
+import { getFileIcon } from '@/lib/file-icons';
 import type { GitFileStatus } from '../../../../shared/types';
 
 const STATUS_STYLES: Record<string, { label: string; color: string }> = {
@@ -67,11 +68,22 @@ export default function DiffTabBar() {
         )}
       </button>
 
-      {/* Diff tabs */}
+      {/* Diff / Edit tabs */}
       {openDiffTabs.map((tab) => {
         const isActive = viewMode === 'diff' && tab.id === activeDiffTabId;
         const fileName = tab.file.split('/').pop() || tab.file;
-        const style = getFileStatus(tab.file, tab.sessionId, gitStatus);
+        const isEdit = tab.mode === 'edit';
+
+        // For edit mode: show file icon; for diff mode: show git status badge
+        let badge: React.ReactNode;
+        if (isEdit) {
+          const iconInfo = getFileIcon(fileName);
+          const IconComp = iconInfo.icon;
+          badge = <IconComp className={`size-3 ${iconInfo.color}`} />;
+        } else {
+          const style = getFileStatus(tab.file, tab.sessionId, gitStatus);
+          badge = <span className={`${style.color} text-[10px] font-bold`}>{style.label}</span>;
+        }
 
         return (
           <div
@@ -86,7 +98,7 @@ export default function DiffTabBar() {
               className="flex items-center gap-1 truncate"
               onClick={() => setActiveDiffTab(tab.id)}
             >
-              <span className={`${style.color} text-[10px] font-bold`}>{style.label}</span>
+              {badge}
               <span className="max-w-[120px] truncate">{fileName}</span>
               {tab.isDirty && (
                 <span className="bg-primary ml-0.5 inline-block size-1.5 rounded-full" />

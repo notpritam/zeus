@@ -34,6 +34,29 @@ export type SettingsPayload =
   | { type: 'set_last_used_project'; id: string | null }
   | { type: 'settings_error'; message: string };
 
+// ─── File Tree Types ───
+
+export interface FileTreeEntry {
+  name: string;        // "App.tsx"
+  path: string;        // relative: "src/renderer/src/App.tsx"
+  type: 'file' | 'directory';
+  size?: number;       // bytes, files only
+}
+
+export type FilesPayload =
+  | { type: 'start_watching'; workingDir: string }
+  | { type: 'stop_watching' }
+  | { type: 'list_directory'; dirPath: string }
+  | { type: 'directory_listing'; dirPath: string; entries: FileTreeEntry[] }
+  | { type: 'read_file'; filePath: string }
+  | { type: 'read_file_result'; filePath: string; content: string; language: string }
+  | { type: 'read_file_error'; filePath: string; error: string }
+  | { type: 'save_file'; filePath: string; content: string }
+  | { type: 'save_file_result'; filePath: string; success: boolean; error?: string }
+  | { type: 'files_changed'; directories: string[] }
+  | { type: 'files_connected' }
+  | { type: 'files_error'; message: string };
+
 // ─── Git Payloads ───
 
 export type GitFileStatus = 'M' | 'A' | 'D' | 'R' | '??' | 'MM' | 'AM' | 'UU';
@@ -77,7 +100,7 @@ export type GitPayload =
 
 // ─── Session ───
 
-export type SessionStatus = 'active' | 'exited' | 'killed';
+export type SessionStatus = 'active' | 'exited' | 'killed' | 'archived';
 
 export interface SessionRecord {
   id: string;
@@ -94,7 +117,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -261,7 +284,7 @@ export type ClaudePayload =
 
 // ─── Claude UI Types (renderer-side) ───
 
-export type ClaudeSessionStatus = 'running' | 'done' | 'error';
+export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived';
 
 export interface ClaudeSessionInfo {
   id: string; // envelope sessionId (client-generated)

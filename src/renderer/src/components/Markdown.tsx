@@ -162,40 +162,41 @@ const Markdown = memo(function Markdown({ content }: { content: string }) {
 
   return (
     <MarkdownErrorBoundary content={content}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        className="zeus-markdown"
-        components={{
-          // Strip default <pre> wrapper — CodeBlock handles its own container
-          pre: ({ children }) => <>{children}</>,
-          code: CodeBlock,
-          a: ({ children, ...props }) => (
-            <a
-              className="text-info hover:text-info/80 underline underline-offset-2"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...props}
-            >
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div className="my-2 overflow-x-auto">
-              <table className="border-border w-full border-collapse text-sm">{children}</table>
-            </div>
-          ),
-          th: ({ children }) => (
-            <th className="bg-bg-surface border-border border px-3 py-1.5 text-left text-xs font-semibold">
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td className="border-border border px-3 py-1.5 text-xs">{children}</td>
-          ),
-        }}
-      >
-        {safeContent}
-      </ReactMarkdown>
+      <div className="zeus-markdown">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // Strip default <pre> wrapper — CodeBlock handles its own container
+            pre: ({ children }) => <>{children}</>,
+            code: CodeBlock,
+            a: ({ children, ...props }) => (
+              <a
+                className="text-info hover:text-info/80 underline underline-offset-2"
+                target="_blank"
+                rel="noopener noreferrer"
+                {...props}
+              >
+                {children}
+              </a>
+            ),
+            table: ({ children }) => (
+              <div className="my-2 overflow-x-auto">
+                <table className="border-border w-full border-collapse text-sm">{children}</table>
+              </div>
+            ),
+            th: ({ children }) => (
+              <th className="bg-bg-surface border-border border px-3 py-1.5 text-left text-xs font-semibold">
+                {children}
+              </th>
+            ),
+            td: ({ children }) => (
+              <td className="border-border border px-3 py-1.5 text-xs">{children}</td>
+            ),
+          }}
+        >
+          {safeContent}
+        </ReactMarkdown>
+      </div>
     </MarkdownErrorBoundary>
   );
 });

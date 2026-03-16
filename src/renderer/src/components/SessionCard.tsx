@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Square } from 'lucide-react';
+import { Square, Trash2, Archive } from 'lucide-react';
 import type { SessionRecord } from '../../../shared/types';
 
 interface SessionCardProps {
@@ -8,6 +8,8 @@ interface SessionCardProps {
   active: boolean;
   onSelect: () => void;
   onStop: () => void;
+  onDelete?: () => void;
+  onArchive?: () => void;
 }
 
 function formatTime(ts: number): string {
@@ -23,11 +25,11 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
   killed: 'destructive',
 };
 
-function SessionCard({ session, active, onSelect, onStop }: SessionCardProps) {
+function SessionCard({ session, active, onSelect, onStop, onDelete, onArchive }: SessionCardProps) {
   return (
     <button
       data-testid={`session-card-${session.id}`}
-      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
+      className={`group flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
         active
           ? 'border-ring/50 bg-primary/10'
           : 'border-border hover:bg-secondary'
@@ -51,7 +53,7 @@ function SessionCard({ session, active, onSelect, onStop }: SessionCardProps) {
           {session.shell.split('/').pop()} &middot; {formatTime(session.startedAt)}
         </div>
       </div>
-      {session.status === 'active' && (
+      {session.status === 'active' ? (
         <Button
           data-testid={`session-stop-${session.id}`}
           variant="ghost"
@@ -65,6 +67,31 @@ function SessionCard({ session, active, onSelect, onStop }: SessionCardProps) {
         >
           <Square className="size-3" />
         </Button>
+      ) : (
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          {onArchive && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={(e) => { e.stopPropagation(); onArchive(); }}
+              title="Archive session"
+            >
+              <Archive className="size-3" />
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              title="Delete session"
+            >
+              <Trash2 className="size-3" />
+            </Button>
+          )}
+        </div>
       )}
     </button>
   );

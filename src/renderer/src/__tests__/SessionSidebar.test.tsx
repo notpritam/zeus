@@ -29,6 +29,10 @@ const defaultProps = {
   onSelectSession: vi.fn(),
   onStopSession: vi.fn(),
   onSelectClaudeSession: vi.fn(),
+  onDeleteClaudeSession: vi.fn(),
+  onArchiveClaudeSession: vi.fn(),
+  onDeleteTerminalSession: vi.fn(),
+  onArchiveTerminalSession: vi.fn(),
   onOpenSettings: vi.fn(),
 };
 

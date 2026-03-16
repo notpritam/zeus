@@ -17,6 +17,8 @@ import type {
   ZeusSettings,
   GitStatusData,
   GitPayload,
+  FilesPayload,
+  FileTreeEntry,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
@@ -30,6 +32,7 @@ interface DiffTab {
   modified: string;
   language: string;
   isDirty: boolean;
+  mode: 'diff' | 'edit';       // 'diff' for git diffs, 'edit' for file explorer
 }
 
 interface ZeusState {
@@ -55,6 +58,11 @@ interface ZeusState {
   gitStatus: Record<string, GitStatusData>;
   gitErrors: Record<string, string>;
   gitWatcherConnected: Record<string, boolean>;
+
+  // File tree
+  fileTree: Record<string, Record<string, FileTreeEntry[]>>;  // sessionId → dirPath → entries
+  fileTreeExpanded: Record<string, string[]>;                  // sessionId → expanded paths
+  fileTreeConnected: Record<string, boolean>;
 
   // Settings
   savedProjects: SavedProject[];
@@ -96,6 +104,10 @@ interface ZeusState {
   interruptClaude: () => void;
   stopClaude: () => void;
   selectClaudeSession: (id: string | null) => void;
+  deleteClaudeSession: (id: string) => void;
+  archiveClaudeSession: (id: string) => void;
+  deleteTerminalSession: (id: string) => void;
+  archiveTerminalSession: (id: string) => void;
   setViewMode: (mode: ViewMode) => void;
 
   // Modal actions
@@ -126,6 +138,11 @@ interface ZeusState {
   updateDiffContent: (tabId: string, content: string) => void;
   saveDiffFile: (tabId: string) => void;
   returnToHome: () => void;
+
+  // File tree actions
+  toggleFileTreeDir: (sessionId: string, dirPath: string) => void;
+  openFileTab: (sessionId: string, filePath: string) => void;
+  saveFileTab: (tabId: string) => void;
 
   // Right panel actions
   toggleRightPanel: () => void;
@@ -158,6 +175,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   openDiffTabs: [],
   activeDiffTabId: null,
   previousViewMode: 'terminal' as const,
+
+  fileTree: {},
+  fileTreeExpanded: {},
+  fileTreeConnected: {},
 
   savedProjects: [],
   claudeDefaults: {
@@ -248,6 +269,22 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           }
           return { sessions: [...state.sessions, p.session] };
         });
+      }
+
+      if (payload.type === 'terminal_session_deleted') {
+        const { deletedId } = envelope.payload as { deletedId: string };
+        set((state) => ({
+          sessions: state.sessions.filter((s) => s.id !== deletedId),
+          activeSessionId: state.activeSessionId === deletedId ? null : state.activeSessionId,
+        }));
+      }
+
+      if (payload.type === 'terminal_session_archived') {
+        const { archivedId } = envelope.payload as { archivedId: string };
+        set((state) => ({
+          sessions: state.sessions.filter((s) => s.id !== archivedId),
+          activeSessionId: state.activeSessionId === archivedId ? null : state.activeSessionId,
+        }));
       }
     });
 
@@ -340,6 +377,27 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           ),
         }));
       }
+
+      if (payload.type === 'claude_session_deleted') {
+        const { deletedId } = envelope.payload as { deletedId: string };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.filter((s) => s.id !== deletedId),
+          claudeEntries: Object.fromEntries(
+            Object.entries(state.claudeEntries).filter(([k]) => k !== deletedId),
+          ),
+          pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== deletedId),
+          activeClaudeId: state.activeClaudeId === deletedId ? null : state.activeClaudeId,
+        }));
+      }
+
+      if (payload.type === 'claude_session_archived') {
+        const { archivedId } = envelope.payload as { archivedId: string };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.filter((s) => s.id !== archivedId),
+          pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== archivedId),
+          activeClaudeId: state.activeClaudeId === archivedId ? null : state.activeClaudeId,
+        }));
+      }
     });
 
     // Subscribe to settings channel
@@ -364,8 +422,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const unsubGit = zeusWs.on('git', (envelope: WsEnvelope) => {
       const payload = envelope.payload as GitPayload;
       const sid = envelope.sessionId;
-      console.log('[git-ws]', payload.type, payload);
-
       if (payload.type === 'git_connected') {
         set((state) => ({
           gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
@@ -424,6 +480,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             modified: payload.modified,
             language: payload.language,
             isDirty: false,
+            mode: 'diff',
           };
           set((state) => ({
             openDiffTabs: [...state.openDiffTabs, newTab],
@@ -480,6 +537,111 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to files channel
+    const unsubFiles = zeusWs.on('files', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as FilesPayload;
+      const sid = envelope.sessionId;
+
+      if (payload.type === 'files_connected') {
+        set((state) => ({
+          fileTreeConnected: { ...state.fileTreeConnected, [sid]: true },
+        }));
+        // Auto-request root directory listing
+        zeusWs.send({
+          channel: 'files',
+          sessionId: sid,
+          payload: { type: 'list_directory', dirPath: '' },
+          auth: '',
+        });
+      }
+
+      if (payload.type === 'directory_listing') {
+        set((state) => ({
+          fileTree: {
+            ...state.fileTree,
+            [sid]: {
+              ...(state.fileTree[sid] || {}),
+              [payload.dirPath]: payload.entries,
+            },
+          },
+        }));
+      }
+
+      if (payload.type === 'files_changed') {
+        // Re-fetch expanded directories
+        const expanded = get().fileTreeExpanded[sid] || [];
+        // Always re-fetch root
+        const dirsToRefresh = ['', ...expanded.filter((d) => payload.directories.includes(d) || payload.directories.some((changed) => changed.startsWith(d)))];
+        const unique = [...new Set(dirsToRefresh)];
+        for (const dirPath of unique) {
+          zeusWs.send({
+            channel: 'files',
+            sessionId: sid,
+            payload: { type: 'list_directory', dirPath },
+            auth: '',
+          });
+        }
+      }
+
+      if (payload.type === 'read_file_result') {
+        const tabId = `${sid}:edit:${payload.filePath}`;
+        const existing = get().openDiffTabs.find((t) => t.id === tabId);
+        if (existing) {
+          // Update existing tab
+          set((state) => ({
+            openDiffTabs: state.openDiffTabs.map((t) =>
+              t.id === tabId
+                ? { ...t, original: payload.content, modified: payload.content, language: payload.language, isDirty: false }
+                : t,
+            ),
+            activeDiffTabId: tabId,
+            viewMode: 'diff' as ViewMode,
+          }));
+        } else {
+          const newTab: DiffTab = {
+            id: tabId,
+            sessionId: sid,
+            file: payload.filePath,
+            staged: false,
+            original: payload.content,
+            modified: payload.content,
+            language: payload.language,
+            isDirty: false,
+            mode: 'edit',
+          };
+          set((state) => ({
+            openDiffTabs: [...state.openDiffTabs, newTab],
+            activeDiffTabId: tabId,
+            viewMode: 'diff' as ViewMode,
+            previousViewMode:
+              state.viewMode !== 'diff'
+                ? (state.viewMode as 'terminal' | 'claude')
+                : state.previousViewMode,
+          }));
+        }
+      }
+
+      if (payload.type === 'read_file_error') {
+        // Could show error toast in the future
+        console.error(`[files] read error: ${payload.error}`);
+      }
+
+      if (payload.type === 'save_file_result') {
+        const saveTabId = `${sid}:edit:${payload.filePath}`;
+        if (payload.success) {
+          set((state) => ({
+            openDiffTabs: state.openDiffTabs.map((t) =>
+              t.id === saveTabId ? { ...t, isDirty: false, original: t.modified } : t,
+            ),
+          }));
+        }
+      }
+
+      if (payload.type === 'files_error') {
+        console.error(`[files] error: ${payload.message}`);
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -489,6 +651,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubClaude();
       unsubSettings();
       unsubGit();
+      unsubFiles();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -692,6 +855,42 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     }
   },
 
+  deleteClaudeSession: (id: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: id,
+      payload: { type: 'delete_claude_session' },
+      auth: '',
+    });
+  },
+
+  archiveClaudeSession: (id: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: id,
+      payload: { type: 'archive_claude_session' },
+      auth: '',
+    });
+  },
+
+  deleteTerminalSession: (id: string) => {
+    zeusWs.send({
+      channel: 'control',
+      sessionId: id,
+      payload: { type: 'delete_terminal_session' },
+      auth: '',
+    });
+  },
+
+  archiveTerminalSession: (id: string) => {
+    zeusWs.send({
+      channel: 'control',
+      sessionId: id,
+      payload: { type: 'archive_terminal_session' },
+      auth: '',
+    });
+  },
+
   setViewMode: (mode: ViewMode) => {
     set({ viewMode: mode });
   },
@@ -776,7 +975,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   openDiffTab: (sessionId: string, file: string, staged: boolean) => {
-    console.log('[openDiffTab]', { sessionId, file, staged });
     const tabId = `${sessionId}:${file}`;
     const existing = get().openDiffTabs.find((t) => t.id === tabId);
     if (existing) {
@@ -853,12 +1051,23 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   saveDiffFile: (tabId: string) => {
     const tab = get().openDiffTabs.find((t) => t.id === tabId);
     if (!tab) return;
-    zeusWs.send({
-      channel: 'git',
-      sessionId: tab.sessionId,
-      payload: { type: 'git_save_file', file: tab.file, content: tab.modified },
-      auth: '',
-    });
+    if (tab.mode === 'edit') {
+      // Save via files channel
+      zeusWs.send({
+        channel: 'files',
+        sessionId: tab.sessionId,
+        payload: { type: 'save_file', filePath: tab.file, content: tab.modified },
+        auth: '',
+      });
+    } else {
+      // Save via git channel (existing behavior)
+      zeusWs.send({
+        channel: 'git',
+        sessionId: tab.sessionId,
+        payload: { type: 'git_save_file', file: tab.file, content: tab.modified },
+        auth: '',
+      });
+    }
   },
 
   returnToHome: () => {
@@ -872,6 +1081,71 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'git',
       sessionId,
       payload: { type: 'git_commit', message },
+      auth: '',
+    });
+  },
+
+  // --- File tree actions ---
+
+  toggleFileTreeDir: (sessionId: string, dirPath: string) => {
+    const expanded = get().fileTreeExpanded[sessionId] || [];
+    const isExpanded = expanded.includes(dirPath);
+
+    if (isExpanded) {
+      set((state) => ({
+        fileTreeExpanded: {
+          ...state.fileTreeExpanded,
+          [sessionId]: expanded.filter((p) => p !== dirPath),
+        },
+      }));
+    } else {
+      set((state) => ({
+        fileTreeExpanded: {
+          ...state.fileTreeExpanded,
+          [sessionId]: [...expanded, dirPath],
+        },
+      }));
+      const cached = get().fileTree[sessionId]?.[dirPath];
+      if (!cached) {
+        zeusWs.send({
+          channel: 'files',
+          sessionId,
+          payload: { type: 'list_directory', dirPath },
+          auth: '',
+        });
+      }
+    }
+  },
+
+  openFileTab: (sessionId: string, filePath: string) => {
+    const tabId = `${sessionId}:edit:${filePath}`;
+    const existing = get().openDiffTabs.find((t) => t.id === tabId);
+    if (existing) {
+      set((state) => ({
+        activeDiffTabId: tabId,
+        viewMode: 'diff' as ViewMode,
+        previousViewMode:
+          state.viewMode !== 'diff'
+            ? (state.viewMode as 'terminal' | 'claude')
+            : state.previousViewMode,
+      }));
+      return;
+    }
+    zeusWs.send({
+      channel: 'files',
+      sessionId,
+      payload: { type: 'read_file', filePath },
+      auth: '',
+    });
+  },
+
+  saveFileTab: (tabId: string) => {
+    const tab = get().openDiffTabs.find((t) => t.id === tabId);
+    if (!tab || tab.mode !== 'edit') return;
+    zeusWs.send({
+      channel: 'files',
+      sessionId: tab.sessionId,
+      payload: { type: 'save_file', filePath: tab.file, content: tab.modified },
       auth: '',
     });
   },

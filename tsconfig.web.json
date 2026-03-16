@@ -11,6 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "composite": true,
+    "types": ["vite/client"],
     "baseUrl": "src/renderer/src",
     "paths": {
       "@/*": ["./*"]

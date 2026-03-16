@@ -195,6 +195,17 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
   }));
 }
 
+export function deleteClaudeSession(id: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM claude_entries WHERE session_id = ?`).run(id);
+  db.prepare(`DELETE FROM claude_sessions WHERE id = ?`).run(id);
+}
+
+export function archiveClaudeSession(id: string): void {
+  if (!db) return;
+  db.prepare(`UPDATE claude_sessions SET status = 'archived' WHERE id = ?`).run(id);
+}
+
 // ─── Claude Entries CRUD ───
 
 export function upsertClaudeEntry(sessionId: string, entry: NormalizedEntry): void {
@@ -326,4 +337,14 @@ export function getAllTerminalSessions(): SessionRecord[] {
     endedAt: r.ended_at,
     exitCode: r.exit_code,
   }));
+}
+
+export function deleteTerminalSession(id: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM terminal_sessions WHERE id = ?`).run(id);
+}
+
+export function archiveTerminalSession(id: string): void {
+  if (!db) return;
+  db.prepare(`UPDATE terminal_sessions SET status = 'archived' WHERE id = ?`).run(id);
 }
