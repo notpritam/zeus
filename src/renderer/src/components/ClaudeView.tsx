@@ -1,4 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import type {
   NormalizedEntry,
@@ -13,8 +17,8 @@ import type {
 function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-end">
-      <div className="bg-accent/15 border-accent-border max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
-        <p className="text-text-secondary text-sm whitespace-pre-wrap">{content}</p>
+      <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
+        <p className="text-foreground text-sm whitespace-pre-wrap">{content}</p>
       </div>
     </div>
   );
@@ -23,7 +27,7 @@ function UserBubble({ content }: { content: string }) {
 function AssistantBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-start">
-      <div className="bg-bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
+      <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
         <Markdown content={content} />
       </div>
     </div>
@@ -36,20 +40,20 @@ function ThinkingBlock({ content }: { content: string }) {
 
   return (
     <button
-      className="bg-bg-surface border-border w-full rounded-lg border px-3 py-2 text-left"
+      className="bg-secondary border-border w-full rounded-lg border px-3 py-2 text-left"
       onClick={() => setExpanded(!expanded)}
     >
-      <div className="text-text-dim flex items-center gap-2 text-xs">
-        <span className="text-info">&#9672;</span>
+      <div className="text-muted-foreground flex items-center gap-2 text-xs">
+        <Brain className="text-primary size-3" />
         <span className="font-medium">Thinking</span>
-        <span className="text-text-ghost text-[10px]">{expanded ? 'collapse' : 'expand'}</span>
+        <span className="text-muted-foreground/50 text-[10px]">{expanded ? 'collapse' : 'expand'}</span>
       </div>
       {expanded ? (
-        <div className="text-text-faint mt-1 text-xs">
+        <div className="text-muted-foreground mt-1 text-xs">
           <Markdown content={content} />
         </div>
       ) : (
-        <p className="text-text-faint mt-1 text-xs whitespace-pre-wrap">
+        <p className="text-muted-foreground mt-1 text-xs whitespace-pre-wrap">
           {preview + (content.length > 120 ? '...' : '')}
         </p>
       )}
@@ -83,30 +87,33 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
   const { toolName, actionType, status } = entryType;
 
   const statusLabel = typeof status === 'string' ? status : status.status;
-  const statusColor =
-    statusLabel === 'success'
-      ? 'text-accent'
-      : statusLabel === 'failed' || statusLabel === 'denied'
-        ? 'text-danger'
-        : statusLabel === 'pending_approval'
-          ? 'text-warn'
-          : 'text-text-dim';
+  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
+    success: 'default',
+    pending_approval: 'secondary',
+    failed: 'destructive',
+    denied: 'destructive',
+  };
 
   return (
-    <div className="bg-bg-surface border-border rounded-lg border px-3 py-2">
+    <div className="bg-secondary border-border rounded-lg border px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="bg-info-bg text-info rounded px-1.5 py-0.5 text-[10px] font-semibold">
+          <Badge variant="outline" className="text-primary text-[10px] font-semibold">
             {toolName}
-          </span>
-          <span className="text-text-muted truncate font-mono text-xs">
+          </Badge>
+          <span className="text-muted-foreground truncate font-mono text-xs">
             {toolActionLabel(actionType)}
           </span>
         </div>
-        <span className={`text-[10px] font-semibold uppercase ${statusColor}`}>{statusLabel}</span>
+        <Badge
+          variant={statusVariant[statusLabel] ?? 'secondary'}
+          className="text-[9px] uppercase tracking-wider"
+        >
+          {statusLabel}
+        </Badge>
       </div>
       {content && !content.startsWith(toolName) && (
-        <p className="text-text-dim mt-1 truncate text-xs">{content}</p>
+        <p className="text-muted-foreground mt-1 truncate text-xs">{content}</p>
       )}
     </div>
   );
@@ -117,16 +124,16 @@ function TokenUsageBar({ entryType }: { entryType: NormalizedEntryType }) {
   const pct = Math.min((entryType.totalTokens / entryType.contextWindow) * 100, 100);
 
   return (
-    <div className="bg-bg-surface border-border rounded-lg border px-3 py-2">
+    <div className="bg-secondary border-border rounded-lg border px-3 py-2">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-text-dim">Tokens used</span>
-        <span className="text-text-muted font-mono">
+        <span className="text-muted-foreground">Tokens used</span>
+        <span className="text-foreground font-mono">
           {entryType.totalTokens.toLocaleString()} / {entryType.contextWindow.toLocaleString()}
         </span>
       </div>
-      <div className="bg-bg-elevated mt-1.5 h-1 overflow-hidden rounded-full">
+      <div className="bg-muted mt-1.5 h-1 overflow-hidden rounded-full">
         <div
-          className="bg-accent h-full rounded-full transition-all"
+          className="bg-primary h-full rounded-full transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -147,17 +154,17 @@ function EntryItem({ entry }: { entry: NormalizedEntry }) {
     case 'token_usage':
       return <TokenUsageBar entryType={entry.entryType} />;
     case 'system_message':
-      return <div className="text-text-dim text-center text-xs italic">{entry.content}</div>;
+      return <div className="text-muted-foreground text-center text-xs italic">{entry.content}</div>;
     case 'error_message':
       return (
-        <div className="bg-danger-bg border-danger-border text-danger rounded-lg border px-3 py-2 text-sm">
+        <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-lg border px-3 py-2 text-sm">
           {entry.content}
         </div>
       );
     case 'loading':
       return (
-        <div className="text-text-dim flex items-center gap-2 text-sm">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="size-3 animate-spin" />
           Working...
         </div>
       );
@@ -180,22 +187,25 @@ function ApprovalBanner({
   return (
     <div className="bg-warn-bg border-warn-border flex items-center justify-between rounded-lg border px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="text-warn text-xs font-semibold">Tool Approval Required</p>
-        <p className="text-text-muted mt-0.5 truncate font-mono text-xs">{approval.toolName}</p>
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="text-warn size-4 shrink-0" />
+          <p className="text-warn text-xs font-semibold">Tool Approval Required</p>
+        </div>
+        <p className="text-muted-foreground mt-0.5 truncate font-mono text-xs">{approval.toolName}</p>
       </div>
       <div className="flex gap-2">
-        <button
-          className="bg-accent hover:bg-accent/90 rounded px-3 py-1 text-xs font-semibold text-white transition-colors"
+        <Button
+          size="xs"
+          className="bg-accent text-white hover:bg-accent/90"
           onClick={onApprove}
         >
+          <Check className="size-3" />
           Allow
-        </button>
-        <button
-          className="bg-danger hover:bg-danger/90 rounded px-3 py-1 text-xs font-semibold text-white transition-colors"
-          onClick={onDeny}
-        >
+        </Button>
+        <Button size="xs" variant="destructive" onClick={onDeny}>
+          <X className="size-3" />
           Deny
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -236,13 +246,19 @@ function ClaudeView({
     return (
       <div
         data-testid="claude-empty"
-        className="bg-bg text-text-dim flex h-full flex-col items-center justify-center gap-2"
+        className="bg-background text-muted-foreground flex h-full flex-col items-center justify-center gap-2"
       >
         <p className="text-lg font-semibold">Claude Code</p>
         <p className="text-sm">Start a new Claude session from the sidebar</p>
       </div>
     );
   }
+
+  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
+    running: 'default',
+    done: 'secondary',
+    error: 'destructive',
+  };
 
   const sessionApprovals = approvals.filter((a) => a.sessionId === session.id);
 
@@ -255,30 +271,28 @@ function ClaudeView({
   };
 
   return (
-    <div data-testid="claude-view" className="bg-bg flex h-full flex-col">
+    <div data-testid="claude-view" className="bg-background flex h-full flex-col">
       {/* Header bar */}
-      <div className="border-border bg-bg-card flex items-center justify-between border-b px-4 py-2">
+      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-info text-sm font-bold">Claude</span>
-          <span
-            className={`rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-wider uppercase ${
-              session.status === 'running'
-                ? 'bg-accent-bg text-accent'
-                : session.status === 'done'
-                  ? 'bg-bg-surface text-text-faint'
-                  : 'bg-danger-bg text-danger'
-            }`}
+          <span className="text-primary text-sm font-bold">Claude</span>
+          <Badge
+            variant={statusVariant[session.status] ?? 'secondary'}
+            className="text-[9px] uppercase tracking-wider"
           >
             {session.status}
-          </span>
+          </Badge>
         </div>
         {session.status === 'running' && (
-          <button
-            className="text-text-faint hover:text-danger text-xs transition-colors"
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground hover:text-destructive"
             onClick={onInterrupt}
           >
+            <StopCircle className="size-3" />
             Interrupt
-          </button>
+          </Button>
         )}
       </div>
 
@@ -289,8 +303,8 @@ function ClaudeView({
         ))}
 
         {entries.length === 0 && session.status === 'running' && (
-          <div className="text-text-dim flex items-center gap-2 text-sm">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <Loader2 className="size-3 animate-spin" />
             Starting Claude session...
           </div>
         )}
@@ -311,27 +325,24 @@ function ClaudeView({
       )}
 
       {/* Input bar */}
-      <form
-        onSubmit={handleSubmit}
-        className="border-border bg-bg-card flex gap-2 border-t px-4 py-3"
-      >
-        <input
+      <form onSubmit={handleSubmit} className="border-border bg-card flex gap-2 border-t px-4 py-3">
+        <Input
           data-testid="claude-input"
-          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={session.status === 'running' ? 'Send follow-up...' : 'Session ended'}
           disabled={session.status !== 'running'}
-          className="bg-bg-surface border-border text-text-secondary placeholder:text-text-ghost focus:border-info min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none disabled:opacity-50"
+          className="text-sm"
         />
-        <button
+        <Button
           data-testid="claude-send"
           type="submit"
           disabled={session.status !== 'running' || !input.trim()}
-          className="bg-info hover:bg-info/90 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-40"
+          size="sm"
         >
+          <Send className="size-3" />
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );

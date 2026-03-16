@@ -13,7 +13,7 @@ function TerminalView({ sessionId }: TerminalViewProps) {
     return (
       <div
         data-testid="terminal-empty"
-        className="bg-bg text-text-dim flex h-full items-center justify-center"
+        className="bg-background text-muted-foreground flex h-full items-center justify-center"
       >
         <p className="text-sm">No session selected &mdash; click New Session</p>
       </div>
@@ -24,7 +24,7 @@ function TerminalView({ sessionId }: TerminalViewProps) {
     <div
       ref={containerRef}
       data-testid="terminal-container"
-      className="bg-bg h-full w-full overflow-hidden p-1"
+      className="bg-background h-full w-full overflow-hidden p-1"
     />
   );
 }

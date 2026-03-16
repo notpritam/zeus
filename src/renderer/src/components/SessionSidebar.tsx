@@ -1,12 +1,17 @@
-import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Plus, Sparkles, Settings } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
+import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
 
 interface SessionSidebarProps {
   sessions: SessionRecord[];
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude';
+  viewMode: 'terminal' | 'claude' | 'diff';
   onNewSession: () => void;
   onNewClaudeSession: () => void;
   onSelectSession: (id: string) => void;
@@ -26,10 +31,10 @@ function ClaudeCard({
   active: boolean;
   onSelect: () => void;
 }) {
-  const statusColors: Record<string, string> = {
-    running: 'bg-accent-bg text-accent',
-    done: 'bg-bg-surface text-text-faint',
-    error: 'bg-danger-bg text-danger',
+  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
+    running: 'default',
+    done: 'secondary',
+    error: 'destructive',
   };
 
   return (
@@ -37,25 +42,26 @@ function ClaudeCard({
       data-testid={`claude-card-${session.id}`}
       className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
         active
-          ? 'border-info-border bg-info-bg'
-          : 'border-border hover:border-border-dim bg-bg-card hover:bg-bg-surface'
+          ? 'border-ring/50 bg-primary/10'
+          : 'border-border hover:bg-secondary'
       }`}
       onClick={onSelect}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-info text-[10px] font-bold">AI</span>
-          <span className="text-text-secondary truncate text-xs">
+          <Sparkles className="text-primary size-3 shrink-0" />
+          <span className="text-foreground truncate text-xs">
             {session.name || session.prompt}
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-2">
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-wider uppercase ${statusColors[session.status]}`}
+          <Badge
+            variant={statusVariant[session.status] ?? 'secondary'}
+            className="text-[9px] uppercase tracking-wider"
           >
             {session.status}
-          </span>
-          <span className="text-text-ghost text-[10px]">{session.id.slice(-6)}</span>
+          </Badge>
+          <span className="text-muted-foreground text-[10px]">{session.id.slice(-6)}</span>
         </div>
       </div>
     </button>
@@ -85,106 +91,114 @@ function SessionSidebar({
   return (
     <div
       data-testid="session-sidebar"
-      className="bg-bg-card border-border flex h-full flex-col border-r"
+      className="bg-card border-border flex h-full flex-col border-r"
     >
       {/* Action Buttons */}
-      <div className="border-border flex flex-col gap-2 border-b p-3">
-        <button
+      <div className="flex flex-col gap-2 p-3">
+        <Button
           data-testid="new-session-btn"
-          className="bg-accent hover:bg-accent/90 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors [-webkit-app-region:no-drag]"
+          size="sm"
+          className="w-full bg-accent text-white hover:bg-accent/90 [-webkit-app-region:no-drag]"
           onClick={onNewSession}
         >
-          + New Session
-        </button>
-        <button
+          <Plus className="size-3" />
+          New Session
+        </Button>
+        <Button
           data-testid="new-claude-btn"
-          className="bg-info hover:bg-info/90 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors [-webkit-app-region:no-drag]"
+          size="sm"
+          className="w-full [-webkit-app-region:no-drag]"
           onClick={onNewClaudeSession}
         >
-          + Claude Session
-        </button>
+          <Sparkles className="size-3" />
+          Claude Session
+        </Button>
       </div>
+
+      <Separator />
 
       {/* Session List */}
-      <div className="flex-1 overflow-y-auto p-3">
-        {sessions.length === 0 && claudeSessions.length === 0 ? (
-          <p data-testid="no-sessions" className="text-text-dim py-4 text-center text-xs">
-            No sessions yet
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {/* Claude sessions — running */}
-            {runningClaude.map((s) => (
-              <ClaudeCard
-                key={s.id}
-                session={s}
-                active={viewMode === 'claude' && s.id === activeClaudeId}
-                onSelect={() => onSelectClaudeSession(s.id)}
-              />
-            ))}
+      <ScrollArea className="flex-1">
+        <div className="p-3">
+          {sessions.length === 0 && claudeSessions.length === 0 ? (
+            <p data-testid="no-sessions" className="text-muted-foreground py-4 text-center text-xs">
+              No sessions yet
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {/* Claude sessions — running */}
+              {runningClaude.map((s) => (
+                <ClaudeCard
+                  key={s.id}
+                  session={s}
+                  active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
+                  onSelect={() => onSelectClaudeSession(s.id)}
+                />
+              ))}
 
-            {/* Terminal sessions — active */}
-            {activeSessions.map((s) => (
-              <SessionCard
-                key={s.id}
-                session={s}
-                active={viewMode === 'terminal' && s.id === activeSessionId}
-                onSelect={() => onSelectSession(s.id)}
-                onStop={() => onStopSession(s.id)}
-              />
-            ))}
+              {/* Terminal sessions — active */}
+              {activeSessions.map((s) => (
+                <SessionCard
+                  key={s.id}
+                  session={s}
+                  active={viewMode === 'terminal' && s.id === activeSessionId}
+                  onSelect={() => onSelectSession(s.id)}
+                  onStop={() => onStopSession(s.id)}
+                />
+              ))}
 
-            {/* Divider */}
-            {(runningClaude.length > 0 || activeSessions.length > 0) &&
-              (doneClaude.length > 0 || completedSessions.length > 0) && (
-                <div className="border-border my-1 border-t" />
-              )}
+              {/* Divider */}
+              {(runningClaude.length > 0 || activeSessions.length > 0) &&
+                (doneClaude.length > 0 || completedSessions.length > 0) && (
+                  <Separator className="my-1" />
+                )}
 
-            {/* Claude sessions — done */}
-            {doneClaude.map((s) => (
-              <ClaudeCard
-                key={s.id}
-                session={s}
-                active={viewMode === 'claude' && s.id === activeClaudeId}
-                onSelect={() => onSelectClaudeSession(s.id)}
-              />
-            ))}
+              {/* Claude sessions — done */}
+              {doneClaude.map((s) => (
+                <ClaudeCard
+                  key={s.id}
+                  session={s}
+                  active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
+                  onSelect={() => onSelectClaudeSession(s.id)}
+                />
+              ))}
 
-            {/* Terminal sessions — completed */}
-            {completedSessions.map((s) => (
-              <SessionCard
-                key={s.id}
-                session={s}
-                active={viewMode === 'terminal' && s.id === activeSessionId}
-                onSelect={() => onSelectSession(s.id)}
-                onStop={() => onStopSession(s.id)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+              {/* Terminal sessions — completed */}
+              {completedSessions.map((s) => (
+                <SessionCard
+                  key={s.id}
+                  session={s}
+                  active={viewMode === 'terminal' && s.id === activeSessionId}
+                  onSelect={() => onSelectSession(s.id)}
+                  onStop={() => onStopSession(s.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
 
       {/* Bottom Menu Bar — VS Code style */}
-      <div className="border-border flex items-center justify-between border-t px-3 py-2">
+      <Separator />
+      <div className="flex items-center justify-between px-3 py-2">
         {/* Profile */}
         <div className="flex items-center gap-2">
-          <div className="bg-info/20 text-info flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold">
+          <div className="bg-primary/20 text-primary flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold">
             Z
           </div>
-          <span className="text-text-muted text-[11px]">Zeus</span>
+          <span className="text-muted-foreground text-[11px]">Zeus</span>
         </div>
 
         {/* Settings */}
-        <button
-          className="text-text-ghost hover:text-text-secondary rounded p-1 transition-colors [-webkit-app-region:no-drag]"
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="[-webkit-app-region:no-drag]"
           onClick={onOpenSettings}
           title="Settings (⌘,)"
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <circle cx="8" cy="8" r="2.5" />
-            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" />
-          </svg>
-        </button>
+          <Settings className="size-4" />
+        </Button>
       </div>
     </div>
   );

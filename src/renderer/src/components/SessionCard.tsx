@@ -1,3 +1,6 @@
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Square } from 'lucide-react';
 import type { SessionRecord } from '../../../shared/types';
 
 interface SessionCardProps {
@@ -14,10 +17,10 @@ function formatTime(ts: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const statusColors: Record<string, string> = {
-  active: 'bg-accent text-white',
-  exited: 'bg-bg-surface text-text-faint',
-  killed: 'bg-danger-bg text-danger',
+const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
+  active: 'default',
+  exited: 'secondary',
+  killed: 'destructive',
 };
 
 function SessionCard({ session, active, onSelect, onStop }: SessionCardProps) {
@@ -26,39 +29,42 @@ function SessionCard({ session, active, onSelect, onStop }: SessionCardProps) {
       data-testid={`session-card-${session.id}`}
       className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
         active
-          ? 'border-accent-border bg-accent-bg'
-          : 'border-border hover:border-border-dim bg-bg-card hover:bg-bg-surface'
+          ? 'border-ring/50 bg-primary/10'
+          : 'border-border hover:bg-secondary'
       }`}
       onClick={onSelect}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-text-secondary truncate font-mono text-xs">
+          <span className="text-foreground truncate font-mono text-xs">
             {session.id.slice(0, 8)}
           </span>
-          <span
+          <Badge
             data-testid={`session-status-${session.id}`}
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-wider uppercase ${statusColors[session.status]}`}
+            variant={statusVariant[session.status] ?? 'secondary'}
+            className="text-[9px] uppercase tracking-wider"
           >
             {session.status}
-          </span>
+          </Badge>
         </div>
-        <div className="text-text-dim mt-0.5 text-[10px]">
+        <div className="text-muted-foreground mt-0.5 text-[10px]">
           {session.shell.split('/').pop()} &middot; {formatTime(session.startedAt)}
         </div>
       </div>
       {session.status === 'active' && (
-        <button
+        <Button
           data-testid={`session-stop-${session.id}`}
-          className="text-text-faint hover:text-danger shrink-0 rounded p-1 text-xs transition-colors [-webkit-app-region:no-drag]"
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground hover:text-destructive [-webkit-app-region:no-drag]"
           onClick={(e) => {
             e.stopPropagation();
             onStop();
           }}
           title="Stop session"
         >
-          &#x25A0;
-        </button>
+          <Square className="size-3" />
+        </Button>
       )}
     </button>
   );

@@ -46,7 +46,8 @@ export interface GitFileChange {
 
 export interface GitStatusData {
   branch: string;
-  changes: GitFileChange[];
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
   ahead: number;
   behind: number;
 }
@@ -54,7 +55,20 @@ export interface GitStatusData {
 export type GitPayload =
   | { type: 'start_watching'; workingDir: string }
   | { type: 'stop_watching' }
+  | { type: 'git_connected' }
+  | { type: 'git_disconnected' }
+  | { type: 'git_heartbeat' }
   | { type: 'git_status'; data: GitStatusData }
+  | { type: 'git_stage'; files: string[] }
+  | { type: 'git_unstage'; files: string[] }
+  | { type: 'git_stage_all' }
+  | { type: 'git_unstage_all' }
+  | { type: 'git_discard'; files: string[] }
+  | { type: 'git_file_contents'; file: string; staged: boolean }
+  | { type: 'git_file_contents_result'; file: string; staged: boolean; original: string; modified: string; language: string }
+  | { type: 'git_file_contents_error'; file: string; error: string }
+  | { type: 'git_save_file'; file: string; content: string }
+  | { type: 'git_save_file_result'; file: string; success: boolean; error?: string }
   | { type: 'git_commit'; message: string }
   | { type: 'git_commit_result'; success: boolean; error?: string; commitHash?: string }
   | { type: 'refresh' }

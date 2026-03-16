@@ -1,4 +1,6 @@
-import StatusIndicator from '@/components/StatusIndicator';
+import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
+import { Menu, X, Settings, PanelRight } from 'lucide-react';
 
 interface HeaderProps {
   connected: boolean;
@@ -22,68 +24,65 @@ function Header({
   return (
     <header
       data-testid="header"
-      className="bg-bg-card border-border flex h-10 shrink-0 items-center justify-between border-b px-4 pl-20 [-webkit-app-region:drag]"
+      className="bg-card border-border flex h-10 shrink-0 items-center justify-between border-b px-4 pl-20 [-webkit-app-region:drag]"
     >
       {/* Hamburger (mobile only) */}
-      <button
+      <Button
         data-testid="sidebar-toggle"
-        className="text-text-muted hover:text-text-secondary mr-3 text-sm [-webkit-app-region:no-drag] md:hidden"
+        variant="ghost"
+        size="icon-xs"
+        className="[-webkit-app-region:no-drag] md:hidden"
         onClick={onToggleSidebar}
       >
-        {sidebarOpen ? '\u2715' : '\u2630'}
-      </button>
+        {sidebarOpen ? <X /> : <Menu />}
+      </Button>
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {/* Command Palette */}
-        <button
-          className="text-text-muted hover:text-text-secondary text-xs [-webkit-app-region:no-drag]"
+        <Button
+          variant="ghost"
+          size="xs"
+          className="[-webkit-app-region:no-drag]"
           onClick={onOpenCommandPalette}
           title="Command Palette (⌘K)"
         >
-          <kbd className="bg-bg-surface border-border rounded border px-1.5 py-0.5 font-mono text-[10px]">
-            ⌘K
-          </kbd>
-        </button>
+          <Kbd>⌘K</Kbd>
+        </Button>
 
         {/* Settings */}
-        <button
-          className="text-text-muted hover:text-text-secondary [-webkit-app-region:no-drag]"
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="[-webkit-app-region:no-drag]"
           onClick={onOpenSettings}
           title="Settings (⌘,)"
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <circle cx="8" cy="8" r="2.5" />
-            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41" />
-          </svg>
-        </button>
+          <Settings />
+        </Button>
 
         {/* Right Panel Toggle (desktop only) */}
-        <button
+        <Button
           data-testid="right-panel-toggle"
-          className={`hidden text-sm [-webkit-app-region:no-drag] md:block ${
-            rightPanelOpen
-              ? 'text-info'
-              : 'text-text-muted hover:text-text-secondary'
-          } transition-colors`}
+          variant="ghost"
+          size="icon-xs"
+          className={`hidden [-webkit-app-region:no-drag] md:inline-flex ${rightPanelOpen ? 'text-primary' : ''}`}
           onClick={onToggleRightPanel}
           title="Toggle Source Control Panel (⌘B)"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.2"
-          >
-            <rect x="1" y="2" width="14" height="12" rx="1" />
-            <line x1="10" y1="2" x2="10" y2="14" />
-          </svg>
-        </button>
+          <PanelRight />
+        </Button>
 
-        <StatusIndicator active={connected} />
+        {/* Connection indicator */}
+        <span className="relative flex h-2 w-2">
+          {connected && (
+            <span className="bg-accent absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
+          )}
+          <span
+            className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-accent' : 'bg-muted-foreground/30'}`}
+          />
+        </span>
       </div>
     </header>
   );

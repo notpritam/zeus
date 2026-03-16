@@ -19,7 +19,18 @@ import type {
   GitPayload,
 } from '../../../shared/types';
 
-type ViewMode = 'terminal' | 'claude';
+type ViewMode = 'terminal' | 'claude' | 'diff';
+
+interface DiffTab {
+  id: string;                   // unique: `${sessionId}:${file}`
+  sessionId: string;
+  file: string;
+  staged: boolean;
+  original: string;
+  modified: string;
+  language: string;
+  isDirty: boolean;
+}
 
 interface ZeusState {
   // Connection
@@ -43,6 +54,7 @@ interface ZeusState {
   // Git
   gitStatus: Record<string, GitStatusData>;
   gitErrors: Record<string, string>;
+  gitWatcherConnected: Record<string, boolean>;
 
   // Settings
   savedProjects: SavedProject[];
@@ -94,7 +106,26 @@ interface ZeusState {
   startGitWatching: (sessionId: string, workingDir: string) => void;
   stopGitWatching: (sessionId: string) => void;
   refreshGitStatus: (sessionId: string) => void;
+  stageFiles: (sessionId: string, files: string[]) => void;
+  unstageFiles: (sessionId: string, files: string[]) => void;
+  stageAll: (sessionId: string) => void;
+  unstageAll: (sessionId: string) => void;
+  discardFiles: (sessionId: string, files: string[]) => void;
   commitChanges: (sessionId: string, message: string) => void;
+
+  // Diff tab state
+  openDiffTabs: DiffTab[];
+  activeDiffTabId: string | null;
+  previousViewMode: 'terminal' | 'claude';
+
+  // Diff tab actions
+  openDiffTab: (sessionId: string, file: string, staged: boolean) => void;
+  closeDiffTab: (tabId: string) => void;
+  closeAllDiffTabs: () => void;
+  setActiveDiffTab: (tabId: string) => void;
+  updateDiffContent: (tabId: string, content: string) => void;
+  saveDiffFile: (tabId: string) => void;
+  returnToHome: () => void;
 
   // Right panel actions
   toggleRightPanel: () => void;
@@ -123,6 +154,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   gitStatus: {},
   gitErrors: {},
+  gitWatcherConnected: {},
+  openDiffTabs: [],
+  activeDiffTabId: null,
+  previousViewMode: 'terminal' as const,
 
   savedProjects: [],
   claudeDefaults: {
@@ -329,15 +364,97 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const unsubGit = zeusWs.on('git', (envelope: WsEnvelope) => {
       const payload = envelope.payload as GitPayload;
       const sid = envelope.sessionId;
+      console.log('[git-ws]', payload.type, payload);
+
+      if (payload.type === 'git_connected') {
+        set((state) => ({
+          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
+        }));
+      }
+
+      if (payload.type === 'git_disconnected') {
+        set((state) => ({
+          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: false },
+        }));
+      }
+
+      if (payload.type === 'git_heartbeat') {
+        // Keep connection alive — mark as connected if not already
+        const current = get().gitWatcherConnected[sid];
+        if (!current) {
+          set((state) => ({
+            gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
+          }));
+        }
+      }
 
       if (payload.type === 'git_status') {
         set((state) => ({
           gitStatus: { ...state.gitStatus, [sid]: payload.data },
           gitErrors: { ...state.gitErrors, [sid]: undefined as unknown as string },
+          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
         }));
-        // Auto-open right panel on first status
-        if (!get().rightPanelOpen && payload.data.changes.length > 0) {
+        // Auto-open right panel on first status with changes
+        const totalChanges = payload.data.staged.length + payload.data.unstaged.length;
+        if (!get().rightPanelOpen && totalChanges > 0) {
           set({ rightPanelOpen: true });
+        }
+      }
+
+      if (payload.type === 'git_file_contents_result') {
+        const tabId = `${sid}:${payload.file}`;
+        const existing = get().openDiffTabs.find((t) => t.id === tabId);
+        if (existing) {
+          set((state) => ({
+            openDiffTabs: state.openDiffTabs.map((t) =>
+              t.id === tabId
+                ? { ...t, staged: payload.staged, original: payload.original, modified: payload.modified, language: payload.language, isDirty: false }
+                : t,
+            ),
+            activeDiffTabId: tabId,
+            viewMode: 'diff' as ViewMode,
+          }));
+        } else {
+          const newTab: DiffTab = {
+            id: tabId,
+            sessionId: sid,
+            file: payload.file,
+            staged: payload.staged,
+            original: payload.original,
+            modified: payload.modified,
+            language: payload.language,
+            isDirty: false,
+          };
+          set((state) => ({
+            openDiffTabs: [...state.openDiffTabs, newTab],
+            activeDiffTabId: tabId,
+            viewMode: 'diff' as ViewMode,
+            previousViewMode:
+              state.viewMode !== 'diff'
+                ? (state.viewMode as 'terminal' | 'claude')
+                : state.previousViewMode,
+          }));
+        }
+      }
+
+      if (payload.type === 'git_file_contents_error') {
+        set((state) => ({
+          gitErrors: { ...state.gitErrors, [sid]: payload.error },
+        }));
+      }
+
+      if (payload.type === 'git_save_file_result') {
+        const saveTabId = `${sid}:${payload.file}`;
+        if (payload.success) {
+          set((state) => ({
+            openDiffTabs: state.openDiffTabs.map((t) =>
+              t.id === saveTabId ? { ...t, isDirty: false } : t,
+            ),
+          }));
+        } else if (payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
         }
       }
 
@@ -358,6 +475,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'not_a_repo') {
         set((state) => ({
           gitErrors: { ...state.gitErrors, [sid]: 'Not a git repository' },
+          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: false },
         }));
       }
     });
@@ -610,6 +728,143 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: { type: 'refresh' },
       auth: '',
     });
+  },
+
+  stageFiles: (sessionId: string, files: string[]) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_stage', files },
+      auth: '',
+    });
+  },
+
+  unstageFiles: (sessionId: string, files: string[]) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_unstage', files },
+      auth: '',
+    });
+  },
+
+  stageAll: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_stage_all' },
+      auth: '',
+    });
+  },
+
+  unstageAll: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_unstage_all' },
+      auth: '',
+    });
+  },
+
+  discardFiles: (sessionId: string, files: string[]) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_discard', files },
+      auth: '',
+    });
+  },
+
+  openDiffTab: (sessionId: string, file: string, staged: boolean) => {
+    console.log('[openDiffTab]', { sessionId, file, staged });
+    const tabId = `${sessionId}:${file}`;
+    const existing = get().openDiffTabs.find((t) => t.id === tabId);
+    if (existing) {
+      set((state) => ({
+        activeDiffTabId: tabId,
+        viewMode: 'diff' as ViewMode,
+        previousViewMode:
+          state.viewMode !== 'diff'
+            ? (state.viewMode as 'terminal' | 'claude')
+            : state.previousViewMode,
+      }));
+      return;
+    }
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_file_contents', file, staged },
+      auth: '',
+    });
+  },
+
+  closeDiffTab: (tabId: string) => {
+    set((state) => {
+      const remaining = state.openDiffTabs.filter((t) => t.id !== tabId);
+      let newActiveId = state.activeDiffTabId;
+      let newViewMode = state.viewMode;
+
+      if (state.activeDiffTabId === tabId) {
+        if (remaining.length > 0) {
+          const closedIdx = state.openDiffTabs.findIndex((t) => t.id === tabId);
+          const nextIdx = Math.min(closedIdx, remaining.length - 1);
+          newActiveId = remaining[nextIdx].id;
+        } else {
+          newActiveId = null;
+          newViewMode = state.previousViewMode;
+        }
+      }
+
+      return {
+        openDiffTabs: remaining,
+        activeDiffTabId: newActiveId,
+        viewMode: newViewMode,
+      };
+    });
+  },
+
+  closeAllDiffTabs: () => {
+    set((state) => ({
+      openDiffTabs: [],
+      activeDiffTabId: null,
+      viewMode: state.previousViewMode,
+    }));
+  },
+
+  setActiveDiffTab: (tabId: string) => {
+    set((state) => ({
+      activeDiffTabId: tabId,
+      viewMode: 'diff' as ViewMode,
+      previousViewMode:
+        state.viewMode !== 'diff'
+          ? (state.viewMode as 'terminal' | 'claude')
+          : state.previousViewMode,
+    }));
+  },
+
+  updateDiffContent: (tabId: string, content: string) => {
+    set((state) => ({
+      openDiffTabs: state.openDiffTabs.map((t) =>
+        t.id === tabId ? { ...t, modified: content, isDirty: true } : t,
+      ),
+    }));
+  },
+
+  saveDiffFile: (tabId: string) => {
+    const tab = get().openDiffTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    zeusWs.send({
+      channel: 'git',
+      sessionId: tab.sessionId,
+      payload: { type: 'git_save_file', file: tab.file, content: tab.modified },
+      auth: '',
+    });
+  },
+
+  returnToHome: () => {
+    set((state) => ({
+      viewMode: state.previousViewMode,
+    }));
   },
 
   commitChanges: (sessionId: string, message: string) => {

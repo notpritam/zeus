@@ -447,6 +447,24 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     try {
       const watcher = await gitManager.startWatching(sessionId, payload.workingDir);
 
+      watcher.on('connected', () => {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_connected' },
+          auth: '',
+        });
+      });
+
+      watcher.on('heartbeat', () => {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_heartbeat' },
+          auth: '',
+        });
+      });
+
       watcher.on('status', (data) => {
         broadcastEnvelope({
           channel: 'git',
@@ -478,10 +496,134 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     }
   } else if (payload.type === 'stop_watching') {
     await gitManager.stopWatching(sessionId);
+    broadcastEnvelope({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_disconnected' },
+      auth: '',
+    });
   } else if (payload.type === 'refresh') {
     const watcher = gitManager.getWatcher(sessionId);
     if (watcher) {
       await watcher.refresh();
+    }
+  } else if (payload.type === 'git_stage') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        await watcher.stageFiles(payload.files);
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_unstage') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        await watcher.unstageFiles(payload.files);
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_stage_all') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        await watcher.stageAll();
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_unstage_all') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        await watcher.unstageAll();
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_discard') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        await watcher.discardFiles(payload.files);
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_file_contents') {
+    const watcher = gitManager.getWatcher(sessionId);
+    console.log('[git_file_contents]', { sessionId, file: payload.file, staged: payload.staged, hasWatcher: !!watcher });
+    if (watcher) {
+      try {
+        const result = await watcher.getFileContents(payload.file, payload.staged);
+        sendEnvelope(_ws, {
+          channel: 'git',
+          sessionId,
+          payload: {
+            type: 'git_file_contents_result',
+            file: payload.file,
+            staged: payload.staged,
+            original: result.original,
+            modified: result.modified,
+            language: result.language,
+          },
+          auth: '',
+        });
+      } catch (err) {
+        sendEnvelope(_ws, {
+          channel: 'git',
+          sessionId,
+          payload: {
+            type: 'git_file_contents_error',
+            file: payload.file,
+            error: (err as Error).message,
+          },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_save_file') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.saveFile(payload.file, payload.content);
+      sendEnvelope(_ws, {
+        channel: 'git',
+        sessionId,
+        payload: {
+          type: 'git_save_file_result',
+          file: payload.file,
+          success: result.success,
+          error: result.error,
+        },
+        auth: '',
+      });
     }
   } else if (payload.type === 'git_commit') {
     const watcher = gitManager.getWatcher(sessionId);

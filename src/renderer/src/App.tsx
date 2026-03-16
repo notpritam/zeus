@@ -4,6 +4,8 @@ import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
 import ClaudeView from '@/components/ClaudeView';
 import RightPanel from '@/components/RightPanel';
+import DiffTabBar from '@/components/DiffTabBar';
+import DiffView from '@/components/DiffView';
 import NewClaudeSessionModal from '@/components/NewClaudeSessionModal';
 import CommandPalette, { buildCommands } from '@/components/CommandPalette';
 import SettingsModal from '@/components/SettingsModal';
@@ -35,6 +37,7 @@ function App() {
     lastUsedProjectId,
     showNewClaudeModal,
     rightPanelOpen,
+    openDiffTabs,
     connect,
     togglePower,
     startSession,
@@ -221,20 +224,26 @@ function App() {
             defaultSize={rightPanelOpen ? '60%' : '85%'}
             minSize="30%"
           >
-            <div data-testid="main-area-desktop" className="h-full">
-              {viewMode === 'claude' ? (
-                <ClaudeView
-                  session={activeClaudeSession}
-                  entries={activeEntries}
-                  approvals={pendingApprovals}
-                  onSendMessage={sendClaudeMessage}
-                  onApprove={approveClaudeTool}
-                  onDeny={denyClaudeTool}
-                  onInterrupt={interruptClaude}
-                />
-              ) : (
-                <TerminalView sessionId={activeSessionId} />
-              )}
+            <div data-testid="main-area-desktop" className="flex h-full flex-col">
+              {openDiffTabs.length > 0 && <DiffTabBar />}
+
+              <div className="min-h-0 flex-1">
+                {viewMode === 'diff' ? (
+                  <DiffView />
+                ) : viewMode === 'claude' ? (
+                  <ClaudeView
+                    session={activeClaudeSession}
+                    entries={activeEntries}
+                    approvals={pendingApprovals}
+                    onSendMessage={sendClaudeMessage}
+                    onApprove={approveClaudeTool}
+                    onDeny={denyClaudeTool}
+                    onInterrupt={interruptClaude}
+                  />
+                ) : (
+                  <TerminalView sessionId={activeSessionId} />
+                )}
+              </div>
             </div>
           </ResizablePanel>
 

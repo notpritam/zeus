@@ -1,20 +1,26 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { GitFileChange } from '../../../shared/types';
+
+// ─── Status badge styles ───
 
 const STATUS_STYLES: Record<string, { label: string; color: string }> = {
   M: { label: 'M', color: 'text-warn' },
   MM: { label: 'M', color: 'text-warn' },
   A: { label: 'A', color: 'text-accent' },
   AM: { label: 'A', color: 'text-accent' },
-  D: { label: 'D', color: 'text-danger' },
-  R: { label: 'R', color: 'text-info' },
-  '??': { label: 'U', color: 'text-text-muted' },
-  UU: { label: 'C', color: 'text-danger' },
+  D: { label: 'D', color: 'text-destructive' },
+  R: { label: 'R', color: 'text-primary' },
+  '??': { label: 'U', color: 'text-muted-foreground' },
+  UU: { label: 'C', color: 'text-destructive' },
 };
 
 function getStatusStyle(status: string) {
-  return STATUS_STYLES[status] ?? { label: status, color: 'text-text-muted' };
+  return STATUS_STYLES[status] ?? { label: status, color: 'text-muted-foreground' };
 }
 
 function getFileName(filePath: string): { name: string; dir: string } {
@@ -24,32 +30,104 @@ function getFileName(filePath: string): { name: string; dir: string } {
   return { name, dir };
 }
 
-function FileEntry({ change }: { change: GitFileChange }) {
+// ─── File entry with action buttons ───
+
+function FileEntry({
+  change,
+  variant,
+  sessionId,
+}: {
+  change: GitFileChange;
+  variant: 'staged' | 'unstaged';
+  sessionId: string;
+}) {
+  const stageFiles = useZeusStore((s) => s.stageFiles);
+  const unstageFiles = useZeusStore((s) => s.unstageFiles);
+  const discardFiles = useZeusStore((s) => s.discardFiles);
+  const openDiffTab = useZeusStore((s) => s.openDiffTab);
+
   const style = getStatusStyle(change.status);
   const { name, dir } = getFileName(change.file);
 
   return (
-    <div className="group flex items-center gap-2 px-3 py-1 hover:bg-bg-surface">
-      <span className={`w-4 text-center text-[10px] font-bold ${style.color}`}>{style.label}</span>
-      <span className="text-text-secondary truncate text-xs">{name}</span>
-      {dir && <span className="text-text-ghost truncate text-[10px]">{dir}</span>}
+    <div className="group hover:bg-secondary flex items-center gap-1 px-3 py-0.5">
+      <span className={`w-4 shrink-0 text-center text-[10px] font-bold ${style.color}`}>
+        {style.label}
+      </span>
+      <button
+        className="text-foreground min-w-0 flex-1 truncate text-left text-xs hover:underline"
+        onClick={() => openDiffTab(sessionId, change.file, variant === 'staged')}
+        title={`View diff: ${change.file}`}
+      >
+        {name}
+        {dir && <span className="text-muted-foreground/50 ml-1 text-[10px]">{dir}</span>}
+      </button>
+
+      {/* Action buttons — visible on hover */}
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {variant === 'unstaged' && change.status !== 'D' && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-destructive size-5"
+            onClick={() => discardFiles(sessionId, [change.file])}
+            title="Discard changes"
+          >
+            <Undo2 className="size-3" />
+          </Button>
+        )}
+        {variant === 'unstaged' ? (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-accent size-5"
+            onClick={() => stageFiles(sessionId, [change.file])}
+            title="Stage file"
+          >
+            <Plus className="size-3" />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-warn size-5"
+            onClick={() => unstageFiles(sessionId, [change.file])}
+            title="Unstage file"
+          >
+            <Minus className="size-3" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
 
+// ─── Main GitPanel ───
+
 function GitPanel() {
   const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
+  const activeSession = useZeusStore((s) =>
+    s.claudeSessions.find((cs) => cs.id === s.activeClaudeId),
+  );
   const gitStatus = useZeusStore((s) => (activeClaudeId ? s.gitStatus[activeClaudeId] : undefined));
   const gitError = useZeusStore((s) => (activeClaudeId ? s.gitErrors[activeClaudeId] : undefined));
+  const isConnected = useZeusStore((s) =>
+    activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false,
+  );
   const refreshGitStatus = useZeusStore((s) => s.refreshGitStatus);
+  const stageAll = useZeusStore((s) => s.stageAll);
+  const unstageAll = useZeusStore((s) => s.unstageAll);
   const commitChanges = useZeusStore((s) => s.commitChanges);
 
   const [commitMessage, setCommitMessage] = useState('');
-  const [changesOpen, setChangesOpen] = useState(true);
+  const [stagedOpen, setStagedOpen] = useState(true);
+  const [unstagedOpen, setUnstagedOpen] = useState(true);
 
-  const changes = gitStatus?.changes ?? [];
-  const hasChanges = changes.length > 0;
-  const canCommit = commitMessage.trim() && hasChanges;
+  const stagedChanges = gitStatus?.staged ?? [];
+  const unstagedChanges = gitStatus?.unstaged ?? [];
+  const totalChanges = stagedChanges.length + unstagedChanges.length;
+  const hasStagedChanges = stagedChanges.length > 0;
+  const canCommit = commitMessage.trim() && hasStagedChanges;
 
   const handleCommit = () => {
     if (!canCommit || !activeClaudeId) return;
@@ -57,52 +135,92 @@ function GitPanel() {
     setCommitMessage('');
   };
 
+  // No active Claude session
   if (!activeClaudeId) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
-        <p className="text-text-ghost text-xs">No active session</p>
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+        <GitBranch className="text-muted-foreground size-6" />
+        <p className="text-muted-foreground text-xs">No active session</p>
+        <p className="text-muted-foreground/60 text-center text-[10px]">
+          Start a Claude session to enable source control
+        </p>
       </div>
     );
   }
 
-  if (!gitStatus) {
+  // Git watcher disabled for this session
+  if (activeSession && activeSession.enableGitWatcher === false) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
-        <p className="text-text-ghost text-xs">No git watcher active</p>
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+        <GitBranch className="text-muted-foreground size-6" />
+        <p className="text-muted-foreground text-xs">Git watcher disabled</p>
+        <p className="text-muted-foreground/60 text-center text-[10px]">
+          Enable git watcher when starting a session
+        </p>
+      </div>
+    );
+  }
+
+  // Watcher connecting (no status received yet)
+  if (!gitStatus && !gitError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+        <Loader2 className="text-primary size-5 animate-spin" />
+        <p className="text-muted-foreground text-xs">Connecting to git...</p>
+      </div>
+    );
+  }
+
+  // Error only (e.g. not a repo), no status data
+  if (!gitStatus && gitError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+        <GitBranch className="text-destructive size-6" />
+        <p className="text-destructive text-xs">{gitError}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="border-border flex shrink-0 items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-text-secondary text-xs font-semibold">Source Control</span>
-          {hasChanges && (
-            <span className="bg-info/20 text-info rounded-full px-1.5 py-0.5 text-[10px] font-bold">
-              {changes.length}
-            </span>
+          <span className="text-foreground text-xs font-semibold">Source Control</span>
+          {/* Connection indicator */}
+          <span className="relative flex h-1.5 w-1.5">
+            {isConnected && (
+              <span className="bg-accent absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
+            )}
+            <span
+              className={`relative inline-flex h-1.5 w-1.5 rounded-full ${isConnected ? 'bg-accent' : 'bg-muted-foreground/30'}`}
+            />
+          </span>
+          {totalChanges > 0 && (
+            <Badge variant="secondary" className="text-primary text-[10px] font-bold">
+              {totalChanges}
+            </Badge>
           )}
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={() => activeClaudeId && refreshGitStatus(activeClaudeId)}
-          className="text-text-muted hover:text-text-secondary text-xs transition-colors"
           title="Refresh"
         >
-          &#x21bb;
-        </button>
+          <RefreshCw className="size-3" />
+        </Button>
       </div>
 
       {/* Branch info */}
       <div className="border-border shrink-0 border-b px-3 py-1.5">
         <div className="flex items-center gap-1.5">
-          <span className="text-text-muted text-[10px]">&#9671;</span>
-          <span className="text-text-secondary text-[11px] font-medium">{gitStatus.branch}</span>
-          {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
-            <span className="text-text-faint text-[10px]">
-              {gitStatus.ahead > 0 && `↑${gitStatus.ahead}`}
-              {gitStatus.behind > 0 && ` ↓${gitStatus.behind}`}
+          <GitBranch className="text-muted-foreground size-3" />
+          <span className="text-foreground text-[11px] font-medium">{gitStatus!.branch}</span>
+          {(gitStatus!.ahead > 0 || gitStatus!.behind > 0) && (
+            <span className="text-muted-foreground text-[10px]">
+              {gitStatus!.ahead > 0 && `↑${gitStatus!.ahead}`}
+              {gitStatus!.behind > 0 && ` ↓${gitStatus!.behind}`}
             </span>
           )}
         </div>
@@ -110,58 +228,145 @@ function GitPanel() {
 
       {/* Error */}
       {gitError && (
-        <div className="bg-danger-bg border-danger-border shrink-0 border-b px-3 py-1.5">
-          <p className="text-danger text-[10px]">{gitError}</p>
+        <div className="bg-destructive/10 border-destructive/20 shrink-0 border-b px-3 py-1.5">
+          <p className="text-destructive text-[10px]">{gitError}</p>
         </div>
       )}
 
-      {/* Commit area */}
-      <div className="border-border shrink-0 border-b p-3">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && canCommit) handleCommit();
-            }}
-            placeholder="Commit message"
-            className="bg-bg-surface border-border text-text-secondary placeholder:text-text-ghost focus:border-info min-w-0 flex-1 rounded-md border px-2 py-1 text-xs outline-none"
-          />
-          <button
-            disabled={!canCommit}
-            onClick={handleCommit}
-            className="bg-info hover:bg-info/90 shrink-0 rounded-md px-3 py-1 text-[11px] font-semibold text-white transition-colors disabled:opacity-40"
-          >
-            Commit
-          </button>
+      {/* Clean working tree */}
+      {totalChanges === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+          <CheckCircle2 className="text-accent size-5" />
+          <p className="text-foreground text-xs font-medium">Working tree clean</p>
+          <p className="text-muted-foreground text-center text-[10px]">
+            No pending changes on {gitStatus!.branch}
+          </p>
         </div>
-      </div>
-
-      {/* Changes list */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <button
-          onClick={() => setChangesOpen(!changesOpen)}
-          className="hover:bg-bg-surface flex w-full items-center gap-1.5 px-3 py-1.5 text-left"
-        >
-          <span className="text-text-muted text-[10px]">{changesOpen ? '▾' : '▸'}</span>
-          <span className="text-text-secondary text-[11px] font-semibold">Changes</span>
-          <span className="text-text-faint text-[10px]">{changes.length}</span>
-        </button>
-
-        {changesOpen && (
-          <div>
-            {changes.map((change, i) => (
-              <FileEntry key={`${change.file}-${i}`} change={change} />
-            ))}
-            {!hasChanges && (
-              <div className="px-3 py-2">
-                <p className="text-text-ghost text-[10px]">No changes</p>
-              </div>
-            )}
+      ) : (
+        <>
+          {/* Commit area */}
+          <div className="border-border shrink-0 border-b p-3">
+            <textarea
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canCommit) {
+                  e.preventDefault();
+                  handleCommit();
+                }
+              }}
+              placeholder={hasStagedChanges ? 'Commit message (⌘↵ to commit)' : 'Stage changes to commit'}
+              rows={2}
+              className="border-input bg-transparent text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full resize-none rounded-md border px-2 py-1.5 text-xs shadow-xs outline-none transition-shadow focus-visible:ring-[3px]"
+            />
+            <Button
+              disabled={!canCommit}
+              onClick={handleCommit}
+              size="sm"
+              className="mt-2 w-full"
+            >
+              Commit{hasStagedChanges ? ` (${stagedChanges.length})` : ''}
+            </Button>
           </div>
-        )}
-      </div>
+
+          {/* Changes lists */}
+          <ScrollArea className="min-h-0 flex-1">
+            {/* Staged Changes */}
+            <div>
+              <div className="hover:bg-secondary flex items-center justify-between px-3 py-1.5">
+                <button
+                  onClick={() => setStagedOpen(!stagedOpen)}
+                  className="flex items-center gap-1.5 text-left"
+                >
+                  {stagedOpen ? (
+                    <ChevronDown className="text-muted-foreground size-3" />
+                  ) : (
+                    <ChevronRight className="text-muted-foreground size-3" />
+                  )}
+                  <span className="text-foreground text-[11px] font-semibold">Staged Changes</span>
+                  <span className="text-muted-foreground text-[10px]">{stagedChanges.length}</span>
+                </button>
+                {hasStagedChanges && (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-warn size-5"
+                    onClick={() => unstageAll(activeClaudeId)}
+                    title="Unstage all"
+                  >
+                    <Minus className="size-3" />
+                  </Button>
+                )}
+              </div>
+
+              {stagedOpen && (
+                <div>
+                  {stagedChanges.map((change, i) => (
+                    <FileEntry
+                      key={`staged-${change.file}-${i}`}
+                      change={change}
+                      variant="staged"
+                      sessionId={activeClaudeId}
+                    />
+                  ))}
+                  {!hasStagedChanges && (
+                    <div className="px-3 py-1.5">
+                      <p className="text-muted-foreground text-[10px]">No staged changes</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Unstaged Changes */}
+            <div>
+              <div className="hover:bg-secondary flex items-center justify-between px-3 py-1.5">
+                <button
+                  onClick={() => setUnstagedOpen(!unstagedOpen)}
+                  className="flex items-center gap-1.5 text-left"
+                >
+                  {unstagedOpen ? (
+                    <ChevronDown className="text-muted-foreground size-3" />
+                  ) : (
+                    <ChevronRight className="text-muted-foreground size-3" />
+                  )}
+                  <span className="text-foreground text-[11px] font-semibold">Changes</span>
+                  <span className="text-muted-foreground text-[10px]">{unstagedChanges.length}</span>
+                </button>
+                {unstagedChanges.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-accent size-5"
+                    onClick={() => stageAll(activeClaudeId)}
+                    title="Stage all"
+                  >
+                    <Plus className="size-3" />
+                  </Button>
+                )}
+              </div>
+
+              {unstagedOpen && (
+                <div>
+                  {unstagedChanges.map((change, i) => (
+                    <FileEntry
+                      key={`unstaged-${change.file}-${i}`}
+                      change={change}
+                      variant="unstaged"
+                      sessionId={activeClaudeId}
+                    />
+                  ))}
+                  {unstagedChanges.length === 0 && (
+                    <div className="px-3 py-1.5">
+                      <p className="text-muted-foreground text-[10px]">No changes</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </>
+      )}
     </div>
   );
 }
