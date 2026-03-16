@@ -492,13 +492,56 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
 
       if (payload.type === 'done') {
-        set((state) => ({
-          claudeSessions: state.claudeSessions.map((s) =>
-            s.id === sid ? { ...s, status: 'done' as const } : s,
-          ),
-          pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== sid),
-          sessionActivity: { ...state.sessionActivity, [sid]: { state: 'idle' } },
-        }));
+        // Check for queued messages before marking done
+        const queue = get().messageQueue[sid];
+        const session = get().claudeSessions.find((s) => s.id === sid);
+
+        if (queue && queue.length > 0 && session?.claudeSessionId) {
+          // Drain the next queued message by resuming the session
+          const next = queue[0];
+          set((state) => ({
+            messageQueue: {
+              ...state.messageQueue,
+              [sid]: (state.messageQueue[sid] ?? []).slice(1),
+            },
+            // Keep session as running since we're auto-resuming
+            claudeSessions: state.claudeSessions.map((s) =>
+              s.id === sid ? { ...s, status: 'running' as const } : s,
+            ),
+            sessionActivity: { ...state.sessionActivity, [sid]: { state: 'starting' } },
+          }));
+          // Add optimistic user entry
+          const userEntry: NormalizedEntry = {
+            id: `user-${Date.now()}`,
+            entryType: { type: 'user_message' },
+            content: next.content,
+          };
+          set((state) => ({
+            claudeEntries: {
+              ...state.claudeEntries,
+              [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
+            },
+          }));
+          zeusWs.send({
+            channel: 'claude',
+            sessionId: sid,
+            payload: {
+              type: 'resume_claude',
+              claudeSessionId: session.claudeSessionId,
+              prompt: next.content,
+              workingDir: session.workingDir || '/',
+            },
+            auth: '',
+          });
+        } else {
+          set((state) => ({
+            claudeSessions: state.claudeSessions.map((s) =>
+              s.id === sid ? { ...s, status: 'done' as const } : s,
+            ),
+            pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== sid),
+            sessionActivity: { ...state.sessionActivity, [sid]: { state: 'idle' } },
+          }));
+        }
       }
 
       if (payload.type === 'error') {

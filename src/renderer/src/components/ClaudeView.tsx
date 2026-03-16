@@ -554,17 +554,6 @@ function ClaudeView({
           <span className="text-primary text-sm font-bold">Claude</span>
         </div>
         <div className="flex items-center gap-2">
-          {session.status === 'running' && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={onInterrupt}
-            >
-              <StopCircle className="size-3" />
-              Interrupt
-            </Button>
-          )}
           {(session.status === 'error' || session.status === 'done') && (
             <Button
               variant="ghost"
@@ -728,6 +717,17 @@ function ClaudeView({
                 disabled={session.status !== 'running'}
                 className="text-sm"
               />
+              {isBusy && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="destructive"
+                  onClick={onInterrupt}
+                  className="size-8 shrink-0"
+                >
+                  <StopCircle className="size-4" />
+                </Button>
+              )}
               <Button
                 data-testid="claude-send"
                 type="submit"
