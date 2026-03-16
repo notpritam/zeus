@@ -6,6 +6,14 @@ import { resolve } from 'path';
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          'mcp-qa-server': resolve(__dirname, 'src/main/mcp/qa-server.ts'),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
