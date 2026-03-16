@@ -24,6 +24,7 @@ import type {
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
+  QaAgentLogEntry,
   SystemMetrics,
   PerfPayload,
 } from '../../../shared/types';
@@ -98,6 +99,11 @@ interface ZeusState {
   qaConsoleLogs: Array<{ level: string; message: string; timestamp: number }>;
   qaNetworkRequests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }>;
   qaJsErrors: Array<{ message: string; stack: string; timestamp: number }>;
+
+  // QA Agent
+  qaAgentRunning: boolean;
+  qaAgentSessionId: string | null;
+  qaAgentEntries: QaAgentLogEntry[];
 
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
@@ -193,6 +199,12 @@ interface ZeusState {
   extractQAText: () => void;
   fetchQATabs: () => void;
   clearQAError: () => void;
+
+  // QA Agent actions
+  startQAAgent: (task: string, workingDir: string, targetUrl?: string) => void;
+  stopQAAgent: () => void;
+  sendQAAgentMessage: (text: string) => void;
+  clearQAAgentEntries: () => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
@@ -337,6 +349,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaConsoleLogs: [],
   qaNetworkRequests: [],
   qaJsErrors: [],
+
+  qaAgentRunning: false,
+  qaAgentSessionId: null,
+  qaAgentEntries: [],
 
   perfMetrics: null,
   perfMonitoring: false,
@@ -493,6 +509,20 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           claudeEntries: { ...state.claudeEntries, [sid]: entries },
         }));
         return;
+      }
+
+      if (payload.type === 'claude_started') {
+        set((state) => ({
+          sessionActivity: { ...state.sessionActivity, [sid]: { state: 'starting' } },
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sid ? { ...s, status: 'running' as const } : s,
+          ),
+        }));
+      }
+
+      if (payload.type === 'turn_complete') {
+        // Turn finished — session stays alive for follow-ups.
+        // Activity will be set to idle by the session_activity event.
       }
 
       if (payload.type === 'entry') {
@@ -850,6 +880,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
           qaText: null, qaLoading: false, qaError: null,
           qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
+          qaAgentRunning: false, qaAgentSessionId: null,
         });
       }
       if (payload.type === 'qa_status') {
@@ -905,6 +936,17 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'cdp_error') {
         set((state) => ({
           qaJsErrors: [...state.qaJsErrors, ...payload.errors].slice(-500),
+        }));
+      }
+      if (payload.type === 'qa_agent_started') {
+        set({ qaAgentRunning: true, qaAgentSessionId: payload.sessionId });
+      }
+      if (payload.type === 'qa_agent_stopped') {
+        set({ qaAgentRunning: false, qaAgentSessionId: null });
+      }
+      if (payload.type === 'qa_agent_entry') {
+        set((state) => ({
+          qaAgentEntries: [...state.qaAgentEntries, payload.entry].slice(-500),
         }));
       }
     });
@@ -1019,6 +1061,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       claudeSessions: [...state.claudeSessions, session],
       activeClaudeId: id,
       claudeEntries: { ...state.claudeEntries, [id]: [userEntry] },
+      sessionActivity: { ...state.sessionActivity, [id]: { state: 'starting' } },
       viewMode: 'claude',
     }));
 
@@ -1079,6 +1122,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         ...state.claudeEntries,
         [activeClaudeId]: [...(state.claudeEntries[activeClaudeId] ?? []), userEntry],
       },
+      sessionActivity: { ...state.sessionActivity, [activeClaudeId]: { state: 'starting' } },
     }));
 
     zeusWs.send({
@@ -1178,6 +1222,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       claudeSessions: [...state.claudeSessions, newSession],
       activeClaudeId: newId,
       claudeEntries: { ...state.claudeEntries, [newId]: [...existingEntries] },
+      sessionActivity: { ...state.sessionActivity, [newId]: { state: 'starting' } },
       viewMode: 'claude',
     }));
 
@@ -1728,6 +1773,34 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   clearQAError: () => {
     set({ qaError: null });
+  },
+
+  // --- QA Agent actions ---
+
+  startQAAgent: (task: string, workingDir: string, targetUrl?: string) => {
+    set({ qaAgentEntries: [], qaError: null });
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'start_qa_agent', task, workingDir, targetUrl },
+    });
+  },
+
+  stopQAAgent: () => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'stop_qa_agent' },
+    });
+  },
+
+  sendQAAgentMessage: (text: string) => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_message', text },
+    });
+  },
+
+  clearQAAgentEntries: () => {
+    set({ qaAgentEntries: [] });
   },
 
   // --- Right panel actions ---
