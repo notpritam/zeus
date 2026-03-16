@@ -438,6 +438,18 @@ export type QaAgentLogEntry =
   | { kind: 'error'; message: string; timestamp: number }
   | { kind: 'user_message'; content: string; timestamp: number };
 
+export type QaAgentStatus = 'running' | 'stopped' | 'error';
+
+export interface QaAgentSessionInfo {
+  qaAgentId: string;
+  parentSessionId: string;        // terminal or claude session id
+  parentSessionType: 'terminal' | 'claude';
+  task: string;
+  targetUrl?: string;
+  status: QaAgentStatus;
+  startedAt: number;
+}
+
 export type QaPayload =
   // Client → Server
   | { type: 'start_qa' }
@@ -468,11 +480,13 @@ export type QaPayload =
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; workingDir: string; targetUrl?: string }
-  | { type: 'stop_qa_agent' }
-  | { type: 'qa_agent_message'; text: string }
+  | { type: 'start_qa_agent'; task: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude' }
+  | { type: 'stop_qa_agent'; qaAgentId: string }
+  | { type: 'qa_agent_message'; qaAgentId: string; text: string }
+  | { type: 'list_qa_agents'; parentSessionId: string }
   // Server → Client (QA Agent)
-  | { type: 'qa_agent_started'; sessionId: string }
-  | { type: 'qa_agent_stopped' }
-  | { type: 'qa_agent_entry'; entry: QaAgentLogEntry }
+  | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; task: string; targetUrl?: string }
+  | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
+  | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: QaAgentLogEntry }
+  | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
   | { type: 'qa_error'; message: string };

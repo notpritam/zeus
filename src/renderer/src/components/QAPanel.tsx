@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -21,6 +21,7 @@ import {
   Trash2,
   Bot,
   Send,
+  Plus,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { QaAgentLogEntry } from '../../../shared/types';
@@ -73,6 +74,32 @@ function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
   return null;
 }
 
+function useCurrentSessionContext() {
+  const viewMode = useZeusStore((s) => s.viewMode);
+  const activeSessionId = useZeusStore((s) => s.activeSessionId);
+  const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
+  const claudeSessions = useZeusStore((s) => s.claudeSessions);
+  const sessions = useZeusStore((s) => s.sessions);
+
+  if (viewMode === 'claude' && activeClaudeId) {
+    const cs = claudeSessions.find((s) => s.id === activeClaudeId);
+    return {
+      parentSessionId: activeClaudeId,
+      parentSessionType: 'claude' as const,
+      workingDir: cs?.workingDir || '/',
+    };
+  }
+  if (activeSessionId) {
+    const ts = sessions.find((s) => s.id === activeSessionId);
+    return {
+      parentSessionId: activeSessionId,
+      parentSessionType: 'terminal' as const,
+      workingDir: ts?.cwd || '/',
+    };
+  }
+  return null;
+}
+
 function QAPanel() {
   const qaRunning = useZeusStore((s) => s.qaRunning);
   const qaInstances = useZeusStore((s) => s.qaInstances);
@@ -97,14 +124,15 @@ function QAPanel() {
   const extractQAText = useZeusStore((s) => s.extractQAText);
   const clearQAError = useZeusStore((s) => s.clearQAError);
 
-  const qaAgentRunning = useZeusStore((s) => s.qaAgentRunning);
-  const qaAgentEntries = useZeusStore((s) => s.qaAgentEntries);
+  const qaAgents = useZeusStore((s) => s.qaAgents);
+  const activeQaAgentId = useZeusStore((s) => s.activeQaAgentId);
   const startQAAgent = useZeusStore((s) => s.startQAAgent);
   const stopQAAgent = useZeusStore((s) => s.stopQAAgent);
   const sendQAAgentMessage = useZeusStore((s) => s.sendQAAgentMessage);
   const clearQAAgentEntries = useZeusStore((s) => s.clearQAAgentEntries);
-  const savedProjects = useZeusStore((s) => s.savedProjects);
-  const lastUsedProjectId = useZeusStore((s) => s.lastUsedProjectId);
+  const selectQaAgent = useZeusStore((s) => s.selectQaAgent);
+
+  const sessionCtx = useCurrentSessionContext();
 
   const [viewTab, setViewTab] = useState<QAViewTab>('snapshot');
   const [url, setUrl] = useState('http://localhost:5173');
@@ -116,596 +144,691 @@ function QAPanel() {
   const [agentTask, setAgentTask] = useState('');
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [agentTargetUrl, setAgentTargetUrl] = useState('http://localhost:5173');
+  const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
+
+  // Session-scoped agents
+  const parentSessionId = sessionCtx?.parentSessionId ?? '';
+  const parentSessionType = sessionCtx?.parentSessionType ?? 'terminal';
+  const sessionAgents = useMemo(
+    () => qaAgents[parentSessionId] ?? [],
+    [qaAgents, parentSessionId],
+  );
+  const selectedAgentId = activeQaAgentId[parentSessionId] ?? null;
+  const selectedAgent = sessionAgents.find((a) => a.info.qaAgentId === selectedAgentId) ?? null;
+  const hasRunningAgent = sessionAgents.some((a) => a.info.status === 'running');
+  const hasAnyAgent = sessionAgents.length > 0;
 
   useEffect(() => {
     if (agentLogRef.current) {
       agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
     }
-  }, [qaAgentEntries]);
+  }, [selectedAgent?.entries]);
 
-  const getWorkingDir = () => {
-    if (lastUsedProjectId && savedProjects?.length) {
-      const project = savedProjects.find((p: any) => p.id === lastUsedProjectId);
-      if (project?.path) return project.path;
+  // Auto-select first running agent when switching sessions
+  useEffect(() => {
+    if (!parentSessionId) return;
+    if (selectedAgentId && sessionAgents.find((a) => a.info.qaAgentId === selectedAgentId)) return;
+    const running = sessionAgents.find((a) => a.info.status === 'running');
+    if (running) {
+      selectQaAgent(parentSessionId, running.info.qaAgentId);
+    } else if (sessionAgents.length > 0) {
+      selectQaAgent(parentSessionId, sessionAgents[sessionAgents.length - 1].info.qaAgentId);
     }
-    return '/';
+  }, [parentSessionId, sessionAgents.length]);
+
+  const handleStartAgent = () => {
+    if (!agentTask.trim() || !parentSessionId) return;
+    startQAAgent(agentTask.trim(), sessionCtx?.workingDir || '/', parentSessionId, parentSessionType, agentTargetUrl);
+    setAgentTask('');
+    setShowNewAgentForm(false);
   };
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header — always visible */}
+      {/* Header */}
       <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
         <span className={`size-2 shrink-0 rounded-full ${qaRunning ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
         <span className="text-foreground flex-1 text-xs font-medium">QA Preview</span>
+        {sessionCtx && (
+          <span className="text-muted-foreground truncate text-[9px]">
+            {parentSessionType === 'claude' ? 'Claude' : 'Term'}: {parentSessionId.slice(0, 8)}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="icon-xs"
           className="text-muted-foreground hover:text-destructive size-5"
           onClick={stopQA}
-          disabled={qaAgentRunning}
-          title={qaAgentRunning ? 'Stop agent first' : 'Stop PinchTab'}
+          disabled={hasRunningAgent}
+          title={hasRunningAgent ? 'Stop agents first' : 'Stop PinchTab'}
         >
           <Square className="size-3" />
         </Button>
       </div>
 
-      {/* Mode toggle — always visible */}
-      <div className="border-border flex shrink-0 border-b">
-        <button
-          onClick={() => setQaMode('browser')}
-          className={`flex-1 py-1.5 text-[10px] font-medium transition-colors ${
-            qaMode === 'browser'
-              ? 'border-primary text-foreground border-b-2'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Browser
-        </button>
-        <button
-          onClick={() => setQaMode('agent')}
-          className={`relative flex-1 py-1.5 text-[10px] font-medium transition-colors ${
-            qaMode === 'agent'
-              ? 'border-primary text-foreground border-b-2'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Agent
-          {qaAgentRunning && (
-            <span className="ml-1 inline-block size-1.5 rounded-full bg-green-500" />
-          )}
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {qaError && (
-        <div className="bg-destructive/10 border-destructive/20 flex items-start gap-2 border-b px-3 py-1.5">
-          <AlertCircle className="text-destructive mt-0.5 size-3 shrink-0" />
-          <span className="text-destructive flex-1 text-[10px]">{qaError}</span>
-          <button onClick={clearQAError} className="text-destructive/60 hover:text-destructive">
-            <X className="size-3" />
-          </button>
+      {/* No session selected */}
+      {!sessionCtx && (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+          <AlertCircle className="text-muted-foreground/40 size-6" />
+          <p className="text-muted-foreground text-[10px]">Select a terminal or Claude session first</p>
         </div>
       )}
 
-      {/* Browser mode — not running */}
-      {qaMode === 'browser' && !qaRunning && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <Eye className="text-muted-foreground/40 size-10" />
-          <p className="text-muted-foreground text-xs">QA service not running</p>
-          <Button size="sm" onClick={startQA} disabled={qaLoading} className="gap-1.5">
-            {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
-            Start PinchTab
-          </Button>
-        </div>
-      )}
-
-      {/* Browser mode — running */}
-      {qaMode === 'browser' && qaRunning && (
+      {sessionCtx && (
         <>
-          {/* Instance controls */}
-          {qaInstances.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-3 py-4">
-              <Monitor className="text-muted-foreground/40 size-6" />
-              <p className="text-muted-foreground text-[10px]">No browser instances</p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => launchQAInstance(false)}
-                disabled={qaLoading}
-                className="gap-1.5 text-xs"
-              >
+          {/* Mode toggle */}
+          <div className="border-border flex shrink-0 border-b">
+            <button
+              onClick={() => setQaMode('browser')}
+              className={`flex-1 py-1.5 text-[10px] font-medium transition-colors ${
+                qaMode === 'browser'
+                  ? 'border-primary text-foreground border-b-2'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Browser
+            </button>
+            <button
+              onClick={() => setQaMode('agent')}
+              className={`relative flex-1 py-1.5 text-[10px] font-medium transition-colors ${
+                qaMode === 'agent'
+                  ? 'border-primary text-foreground border-b-2'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Agent
+              {hasRunningAgent && (
+                <span className="ml-1 inline-block size-1.5 rounded-full bg-green-500" />
+              )}
+              {sessionAgents.length > 0 && (
+                <span className="bg-muted-foreground/40 ml-1 inline-block min-w-[14px] rounded-full px-1 text-[8px] font-bold leading-[14px] text-white">
+                  {sessionAgents.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Error banner */}
+          {qaError && (
+            <div className="bg-destructive/10 border-destructive/20 flex items-start gap-2 border-b px-3 py-1.5">
+              <AlertCircle className="text-destructive mt-0.5 size-3 shrink-0" />
+              <span className="text-destructive flex-1 text-[10px]">{qaError}</span>
+              <button onClick={clearQAError} className="text-destructive/60 hover:text-destructive">
+                <X className="size-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Browser mode — not running */}
+          {qaMode === 'browser' && !qaRunning && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+              <Eye className="text-muted-foreground/40 size-10" />
+              <p className="text-muted-foreground text-xs">QA service not running</p>
+              <Button size="sm" onClick={startQA} disabled={qaLoading} className="gap-1.5">
                 {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
-                Launch Browser
+                Start PinchTab
               </Button>
             </div>
-          ) : (
+          )}
+
+          {/* Browser mode — running */}
+          {qaMode === 'browser' && qaRunning && (
             <>
-              {/* Instance bar */}
-              <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-                <Monitor className="text-muted-foreground size-3" />
-                <span className="text-muted-foreground flex-1 truncate text-[10px]">
-                  {qaInstances.length} instance{qaInstances.length > 1 ? 's' : ''}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-5"
-                  onClick={() => launchQAInstance(false)}
-                  title="Launch another instance"
-                >
-                  <Play className="size-2.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground hover:text-destructive size-5"
-                  onClick={() => stopQAInstance(qaInstances[0].instanceId)}
-                  title="Stop instance"
-                >
-                  <Square className="size-2.5" />
-                </Button>
-              </div>
-
-              {/* URL bar */}
-              <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
-                <Globe className="text-muted-foreground size-3 shrink-0" />
-                <input
-                  type="text"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') navigateQA(url);
-                  }}
-                  className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
-                  placeholder="http://localhost:5173"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-5 shrink-0"
-                  onClick={() => navigateQA(url)}
-                  disabled={qaLoading}
-                  title="Navigate"
-                >
-                  {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <ChevronRight className="size-3" />}
-                </Button>
-              </div>
-
-              {/* View tabs */}
-              <div className="border-border flex shrink-0 flex-wrap border-b">
-                {(['snapshot', 'screenshot', 'text', 'console', 'network', 'errors'] as QAViewTab[]).map((tab) => {
-                  const badge = tab === 'console' ? qaConsoleLogs.length
-                    : tab === 'network' ? qaNetworkRequests.length
-                    : tab === 'errors' ? qaJsErrors.length
-                    : 0;
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => {
-                        setViewTab(tab);
-                        if (tab === 'snapshot') takeSnapshot('interactive');
-                        if (tab === 'screenshot') takeScreenshot();
-                        if (tab === 'text') extractQAText();
-                      }}
-                      className={`relative flex-1 py-1.5 text-[10px] font-medium capitalize transition-colors ${
-                        viewTab === tab
-                          ? 'border-primary text-foreground border-b-2'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {tab}
-                      {badge > 0 && (
-                        <span className={`ml-0.5 inline-block min-w-[14px] rounded-full px-1 text-[8px] font-bold leading-[14px] text-white ${
-                          tab === 'errors' ? 'bg-red-500' : 'bg-muted-foreground/60'
-                        }`}>
-                          {badge > 99 ? '99+' : badge}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* View content */}
-              <ScrollArea className="min-h-0 flex-1">
-                {viewTab === 'snapshot' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="size-5"
-                        onClick={() => takeSnapshot('interactive')}
-                        disabled={qaLoading}
-                        title="Refresh snapshot"
-                      >
-                        {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-                      </Button>
-                      <span className="text-muted-foreground text-[10px]">
-                        {qaSnapshot ? `${qaSnapshot.length} elements` : 'No snapshot'}
-                      </span>
-                    </div>
-                    {qaSnapshot && qaSnapshot.length > 0 ? (
-                      <div className="space-y-0.5">
-                        {qaSnapshot.map((node) => (
-                          <button
-                            key={node.ref}
-                            onClick={() => setActionRef(node.ref)}
-                            className={`hover:bg-secondary flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left ${
-                              actionRef === node.ref ? 'bg-primary/10 ring-primary/30 ring-1' : ''
-                            }`}
-                          >
-                            <span className="text-primary shrink-0 font-mono text-[10px]">{node.ref}</span>
-                            <span className="text-muted-foreground shrink-0 text-[9px]">{node.role}</span>
-                            <span className="text-foreground min-w-0 flex-1 truncate text-[10px]">{node.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : qaSnapshotRaw ? (
-                      <pre className="text-muted-foreground whitespace-pre-wrap text-[10px] leading-relaxed">
-                        {qaSnapshotRaw}
-                      </pre>
-                    ) : !qaLoading ? (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        Navigate to a page, then take a snapshot
-                      </p>
-                    ) : null}
-                  </div>
-                )}
-
-                {viewTab === 'screenshot' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="size-5"
-                        onClick={takeScreenshot}
-                        disabled={qaLoading}
-                        title="Refresh screenshot"
-                      >
-                        {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <Camera className="size-3" />}
-                      </Button>
-                      <span className="text-muted-foreground text-[10px]">Screenshot</span>
-                    </div>
-                    {qaScreenshot ? (
-                      <img
-                        src={qaScreenshot}
-                        alt="Page screenshot"
-                        className="border-border w-full rounded border"
-                      />
-                    ) : !qaLoading ? (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        No screenshot yet
-                      </p>
-                    ) : null}
-                  </div>
-                )}
-
-                {viewTab === 'text' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="size-5"
-                        onClick={extractQAText}
-                        disabled={qaLoading}
-                        title="Refresh text"
-                      >
-                        {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <FileText className="size-3" />}
-                      </Button>
-                      <span className="text-muted-foreground text-[10px]">Page Text</span>
-                    </div>
-                    {qaText ? (
-                      <pre className="bg-secondary text-foreground whitespace-pre-wrap rounded p-2 text-[10px] leading-relaxed">
-                        {qaText}
-                      </pre>
-                    ) : !qaLoading ? (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        No text extracted yet
-                      </p>
-                    ) : null}
-                  </div>
-                )}
-
-                {viewTab === 'console' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Terminal className="text-muted-foreground size-3" />
-                      <span className="text-muted-foreground flex-1 text-[10px]">
-                        {qaConsoleLogs.length} log{qaConsoleLogs.length !== 1 ? 's' : ''}
-                      </span>
-                      {qaConsoleLogs.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5"
-                          onClick={() => useZeusStore.setState({ qaConsoleLogs: [] })}
-                          title="Clear logs"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
-                      )}
-                    </div>
-                    {qaConsoleLogs.length > 0 ? (
-                      <div className="space-y-0.5">
-                        {qaConsoleLogs.slice(-200).map((log, i) => (
-                          <div
-                            key={i}
-                            className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                              log.level === 'error'
-                                ? 'bg-red-500/10 text-red-400'
-                                : log.level === 'warning'
-                                  ? 'bg-yellow-500/10 text-yellow-400'
-                                  : 'bg-secondary text-foreground'
-                            }`}
-                          >
-                            <span className="text-muted-foreground mr-1 text-[9px]">
-                              {new Date(log.timestamp).toLocaleTimeString()}
-                            </span>
-                            {log.message}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        No console logs captured
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {viewTab === 'network' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Network className="text-muted-foreground size-3" />
-                      <span className="text-muted-foreground flex-1 text-[10px]">
-                        {qaNetworkRequests.length} request{qaNetworkRequests.length !== 1 ? 's' : ''}
-                      </span>
-                      {qaNetworkRequests.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5"
-                          onClick={() => useZeusStore.setState({ qaNetworkRequests: [] })}
-                          title="Clear requests"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
-                      )}
-                    </div>
-                    {qaNetworkRequests.length > 0 ? (
-                      <div className="space-y-0.5">
-                        {qaNetworkRequests.slice(-200).map((req, i) => (
-                          <div
-                            key={i}
-                            className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                              req.failed
-                                ? 'bg-red-500/10 text-red-400'
-                                : req.status >= 400
-                                  ? 'bg-yellow-500/10 text-yellow-400'
-                                  : 'bg-secondary text-foreground'
-                            }`}
-                          >
-                            <span className="text-muted-foreground shrink-0 text-[9px] uppercase">{req.method}</span>
-                            <span className={`shrink-0 text-[9px] font-bold ${
-                              req.failed ? 'text-red-400' : req.status >= 400 ? 'text-yellow-400' : 'text-green-400'
-                            }`}>
-                              {req.failed ? 'ERR' : req.status}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate">{req.url}</span>
-                            {req.duration > 0 && (
-                              <span className="text-muted-foreground shrink-0 text-[9px]">{req.duration}ms</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        No network requests captured
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {viewTab === 'errors' && (
-                  <div className="p-2">
-                    <div className="mb-2 flex items-center gap-1">
-                      <Bug className="text-muted-foreground size-3" />
-                      <span className="text-muted-foreground flex-1 text-[10px]">
-                        {qaJsErrors.length} error{qaJsErrors.length !== 1 ? 's' : ''}
-                      </span>
-                      {qaJsErrors.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5"
-                          onClick={() => useZeusStore.setState({ qaJsErrors: [] })}
-                          title="Clear errors"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
-                      )}
-                    </div>
-                    {qaJsErrors.length > 0 ? (
-                      <div className="space-y-1">
-                        {qaJsErrors.slice(-100).map((err, i) => (
-                          <div key={i} className="rounded bg-red-500/10 px-1.5 py-1 font-mono text-[10px] text-red-400">
-                            <div className="font-bold">{err.message}</div>
-                            {err.stack && (
-                              <pre className="mt-0.5 whitespace-pre-wrap text-[9px] text-red-400/70">
-                                {err.stack}
-                              </pre>
-                            )}
-                            <span className="text-red-400/50 text-[9px]">
-                              {new Date(err.timestamp).toLocaleTimeString()}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground py-4 text-center text-[10px]">
-                        No JavaScript errors captured
-                      </p>
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-
-              {/* Action bar */}
-              <div className="border-border shrink-0 space-y-1.5 border-t px-2 py-2">
-                <div className="flex items-center gap-1">
-                  <select
-                    value={actionKind}
-                    onChange={(e) => setActionKind(e.target.value)}
-                    className="bg-secondary text-foreground rounded px-1.5 py-0.5 text-[10px] outline-none"
-                  >
-                    <option value="click">click</option>
-                    <option value="type">type</option>
-                    <option value="fill">fill</option>
-                    <option value="press">press</option>
-                    <option value="scroll">scroll</option>
-                    <option value="hover">hover</option>
-                    <option value="select">select</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={actionRef}
-                    onChange={(e) => setActionRef(e.target.value)}
-                    className="bg-secondary text-foreground placeholder:text-muted-foreground w-14 rounded px-1.5 py-0.5 text-[10px] outline-none"
-                    placeholder="ref"
-                  />
-                  {(actionKind === 'type' || actionKind === 'fill' || actionKind === 'press' || actionKind === 'select') && (
-                    <input
-                      type="text"
-                      value={actionValue}
-                      onChange={(e) => setActionValue(e.target.value)}
-                      className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
-                      placeholder="value"
-                    />
-                  )}
+              {qaInstances.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-3 py-4">
+                  <Monitor className="text-muted-foreground/40 size-6" />
+                  <p className="text-muted-foreground text-[10px]">No browser instances</p>
                   <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="size-5 shrink-0"
-                    onClick={() => performQAAction(actionKind, actionRef || undefined, actionValue || undefined)}
-                    disabled={qaLoading || !actionRef}
-                    title="Execute action"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => launchQAInstance(false)}
+                    disabled={qaLoading}
+                    className="gap-1.5 text-xs"
                   >
-                    {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <MousePointer className="size-3" />}
+                    {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+                    Launch Browser
                   </Button>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Instance bar */}
+                  <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
+                    <Monitor className="text-muted-foreground size-3" />
+                    <span className="text-muted-foreground flex-1 truncate text-[10px]">
+                      {qaInstances.length} instance{qaInstances.length > 1 ? 's' : ''}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5"
+                      onClick={() => launchQAInstance(false)}
+                      title="Launch another instance"
+                    >
+                      <Play className="size-2.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-destructive size-5"
+                      onClick={() => stopQAInstance(qaInstances[0].instanceId)}
+                      title="Stop instance"
+                    >
+                      <Square className="size-2.5" />
+                    </Button>
+                  </div>
+
+                  {/* URL bar */}
+                  <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+                    <Globe className="text-muted-foreground size-3 shrink-0" />
+                    <input
+                      type="text"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') navigateQA(url);
+                      }}
+                      className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
+                      placeholder="http://localhost:5173"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5 shrink-0"
+                      onClick={() => navigateQA(url)}
+                      disabled={qaLoading}
+                      title="Navigate"
+                    >
+                      {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <ChevronRight className="size-3" />}
+                    </Button>
+                  </div>
+
+                  {/* View tabs */}
+                  <div className="border-border flex shrink-0 flex-wrap border-b">
+                    {(['snapshot', 'screenshot', 'text', 'console', 'network', 'errors'] as QAViewTab[]).map((tab) => {
+                      const badge = tab === 'console' ? qaConsoleLogs.length
+                        : tab === 'network' ? qaNetworkRequests.length
+                        : tab === 'errors' ? qaJsErrors.length
+                        : 0;
+                      return (
+                        <button
+                          key={tab}
+                          onClick={() => {
+                            setViewTab(tab);
+                            if (tab === 'snapshot') takeSnapshot('interactive');
+                            if (tab === 'screenshot') takeScreenshot();
+                            if (tab === 'text') extractQAText();
+                          }}
+                          className={`relative flex-1 py-1.5 text-[10px] font-medium capitalize transition-colors ${
+                            viewTab === tab
+                              ? 'border-primary text-foreground border-b-2'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {tab}
+                          {badge > 0 && (
+                            <span className={`ml-0.5 inline-block min-w-[14px] rounded-full px-1 text-[8px] font-bold leading-[14px] text-white ${
+                              tab === 'errors' ? 'bg-red-500' : 'bg-muted-foreground/60'
+                            }`}>
+                              {badge > 99 ? '99+' : badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* View content */}
+                  <ScrollArea className="min-h-0 flex-1">
+                    {viewTab === 'snapshot' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="size-5"
+                            onClick={() => takeSnapshot('interactive')}
+                            disabled={qaLoading}
+                            title="Refresh snapshot"
+                          >
+                            {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                          </Button>
+                          <span className="text-muted-foreground text-[10px]">
+                            {qaSnapshot ? `${qaSnapshot.length} elements` : 'No snapshot'}
+                          </span>
+                        </div>
+                        {qaSnapshot && qaSnapshot.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {qaSnapshot.map((node) => (
+                              <button
+                                key={node.ref}
+                                onClick={() => setActionRef(node.ref)}
+                                className={`hover:bg-secondary flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left ${
+                                  actionRef === node.ref ? 'bg-primary/10 ring-primary/30 ring-1' : ''
+                                }`}
+                              >
+                                <span className="text-primary shrink-0 font-mono text-[10px]">{node.ref}</span>
+                                <span className="text-muted-foreground shrink-0 text-[9px]">{node.role}</span>
+                                <span className="text-foreground min-w-0 flex-1 truncate text-[10px]">{node.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : qaSnapshotRaw ? (
+                          <pre className="text-muted-foreground whitespace-pre-wrap text-[10px] leading-relaxed">
+                            {qaSnapshotRaw}
+                          </pre>
+                        ) : !qaLoading ? (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            Navigate to a page, then take a snapshot
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+
+                    {viewTab === 'screenshot' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="size-5"
+                            onClick={takeScreenshot}
+                            disabled={qaLoading}
+                            title="Refresh screenshot"
+                          >
+                            {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <Camera className="size-3" />}
+                          </Button>
+                          <span className="text-muted-foreground text-[10px]">Screenshot</span>
+                        </div>
+                        {qaScreenshot ? (
+                          <img
+                            src={qaScreenshot}
+                            alt="Page screenshot"
+                            className="border-border w-full rounded border"
+                          />
+                        ) : !qaLoading ? (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            No screenshot yet
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+
+                    {viewTab === 'text' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="size-5"
+                            onClick={extractQAText}
+                            disabled={qaLoading}
+                            title="Refresh text"
+                          >
+                            {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <FileText className="size-3" />}
+                          </Button>
+                          <span className="text-muted-foreground text-[10px]">Page Text</span>
+                        </div>
+                        {qaText ? (
+                          <pre className="bg-secondary text-foreground whitespace-pre-wrap rounded p-2 text-[10px] leading-relaxed">
+                            {qaText}
+                          </pre>
+                        ) : !qaLoading ? (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            No text extracted yet
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+
+                    {viewTab === 'console' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Terminal className="text-muted-foreground size-3" />
+                          <span className="text-muted-foreground flex-1 text-[10px]">
+                            {qaConsoleLogs.length} log{qaConsoleLogs.length !== 1 ? 's' : ''}
+                          </span>
+                          {qaConsoleLogs.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-5"
+                              onClick={() => useZeusStore.setState({ qaConsoleLogs: [] })}
+                              title="Clear logs"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
+                        {qaConsoleLogs.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {qaConsoleLogs.slice(-200).map((log, i) => (
+                              <div
+                                key={i}
+                                className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                                  log.level === 'error'
+                                    ? 'bg-red-500/10 text-red-400'
+                                    : log.level === 'warning'
+                                      ? 'bg-yellow-500/10 text-yellow-400'
+                                      : 'bg-secondary text-foreground'
+                                }`}
+                              >
+                                <span className="text-muted-foreground mr-1 text-[9px]">
+                                  {new Date(log.timestamp).toLocaleTimeString()}
+                                </span>
+                                {log.message}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            No console logs captured
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {viewTab === 'network' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Network className="text-muted-foreground size-3" />
+                          <span className="text-muted-foreground flex-1 text-[10px]">
+                            {qaNetworkRequests.length} request{qaNetworkRequests.length !== 1 ? 's' : ''}
+                          </span>
+                          {qaNetworkRequests.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-5"
+                              onClick={() => useZeusStore.setState({ qaNetworkRequests: [] })}
+                              title="Clear requests"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
+                        {qaNetworkRequests.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {qaNetworkRequests.slice(-200).map((req, i) => (
+                              <div
+                                key={i}
+                                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                                  req.failed
+                                    ? 'bg-red-500/10 text-red-400'
+                                    : req.status >= 400
+                                      ? 'bg-yellow-500/10 text-yellow-400'
+                                      : 'bg-secondary text-foreground'
+                                }`}
+                              >
+                                <span className="text-muted-foreground shrink-0 text-[9px] uppercase">{req.method}</span>
+                                <span className={`shrink-0 text-[9px] font-bold ${
+                                  req.failed ? 'text-red-400' : req.status >= 400 ? 'text-yellow-400' : 'text-green-400'
+                                }`}>
+                                  {req.failed ? 'ERR' : req.status}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate">{req.url}</span>
+                                {req.duration > 0 && (
+                                  <span className="text-muted-foreground shrink-0 text-[9px]">{req.duration}ms</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            No network requests captured
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {viewTab === 'errors' && (
+                      <div className="p-2">
+                        <div className="mb-2 flex items-center gap-1">
+                          <Bug className="text-muted-foreground size-3" />
+                          <span className="text-muted-foreground flex-1 text-[10px]">
+                            {qaJsErrors.length} error{qaJsErrors.length !== 1 ? 's' : ''}
+                          </span>
+                          {qaJsErrors.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-5"
+                              onClick={() => useZeusStore.setState({ qaJsErrors: [] })}
+                              title="Clear errors"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
+                        {qaJsErrors.length > 0 ? (
+                          <div className="space-y-1">
+                            {qaJsErrors.slice(-100).map((err, i) => (
+                              <div key={i} className="rounded bg-red-500/10 px-1.5 py-1 font-mono text-[10px] text-red-400">
+                                <div className="font-bold">{err.message}</div>
+                                {err.stack && (
+                                  <pre className="mt-0.5 whitespace-pre-wrap text-[9px] text-red-400/70">
+                                    {err.stack}
+                                  </pre>
+                                )}
+                                <span className="text-red-400/50 text-[9px]">
+                                  {new Date(err.timestamp).toLocaleTimeString()}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            No JavaScript errors captured
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </ScrollArea>
+
+                  {/* Action bar */}
+                  <div className="border-border shrink-0 space-y-1.5 border-t px-2 py-2">
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={actionKind}
+                        onChange={(e) => setActionKind(e.target.value)}
+                        className="bg-secondary text-foreground rounded px-1.5 py-0.5 text-[10px] outline-none"
+                      >
+                        <option value="click">click</option>
+                        <option value="type">type</option>
+                        <option value="fill">fill</option>
+                        <option value="press">press</option>
+                        <option value="scroll">scroll</option>
+                        <option value="hover">hover</option>
+                        <option value="select">select</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={actionRef}
+                        onChange={(e) => setActionRef(e.target.value)}
+                        className="bg-secondary text-foreground placeholder:text-muted-foreground w-14 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                        placeholder="ref"
+                      />
+                      {(actionKind === 'type' || actionKind === 'fill' || actionKind === 'press' || actionKind === 'select') && (
+                        <input
+                          type="text"
+                          value={actionValue}
+                          onChange={(e) => setActionValue(e.target.value)}
+                          className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                          placeholder="value"
+                        />
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="size-5 shrink-0"
+                        onClick={() => performQAAction(actionKind, actionRef || undefined, actionValue || undefined)}
+                        disabled={qaLoading || !actionRef}
+                        title="Execute action"
+                      >
+                        {qaLoading ? <Loader2 className="size-3 animate-spin" /> : <MousePointer className="size-3" />}
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </>
+          )}
+
+          {/* Agent mode */}
+          {qaMode === 'agent' && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* Agent list bar — shows when there are agents for this session */}
+              {hasAnyAgent && !showNewAgentForm && (
+                <>
+                  <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1">
+                    <Bot className="text-muted-foreground size-3 shrink-0" />
+                    <select
+                      value={selectedAgentId ?? ''}
+                      onChange={(e) => selectQaAgent(parentSessionId, e.target.value || null)}
+                      className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                    >
+                      {sessionAgents.map((a) => (
+                        <option key={a.info.qaAgentId} value={a.info.qaAgentId}>
+                          {a.info.status === 'running' ? '\u25CF ' : '\u25CB '}
+                          {a.info.task.slice(0, 50)}{a.info.task.length > 50 ? '...' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5 shrink-0"
+                      onClick={() => setShowNewAgentForm(true)}
+                      title="New agent"
+                    >
+                      <Plus className="size-3" />
+                    </Button>
+                  </div>
+
+                  {/* Selected agent view */}
+                  {selectedAgent && (
+                    <>
+                      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+                        <span className={`size-2 shrink-0 rounded-full ${
+                          selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
+                        }`} />
+                        <span className="text-foreground flex-1 truncate text-[10px] font-medium">
+                          {selectedAgent.info.status === 'running' ? 'Agent running' : 'Agent stopped'}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="size-5"
+                          onClick={() => clearQAAgentEntries(selectedAgent.info.qaAgentId)}
+                          title="Clear log"
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                        {selectedAgent.info.status === 'running' && (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground hover:text-destructive size-5"
+                            onClick={() => stopQAAgent(selectedAgent.info.qaAgentId)}
+                            title="Stop agent"
+                          >
+                            <Square className="size-3" />
+                          </Button>
+                        )}
+                      </div>
+                      <div ref={agentLogRef} className="min-h-0 flex-1 overflow-y-auto p-2 space-y-1">
+                        {selectedAgent.entries.length === 0 ? (
+                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                            {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
+                          </p>
+                        ) : (
+                          selectedAgent.entries.map((entry, i) => (
+                            <AgentLogEntry key={i} entry={entry} />
+                          ))
+                        )}
+                      </div>
+                      {selectedAgent.info.status === 'running' && (
+                        <div className="border-border flex shrink-0 items-center gap-1.5 border-t px-2 py-1.5">
+                          <input
+                            type="text"
+                            value={agentFollowUp}
+                            onChange={(e) => setAgentFollowUp(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && agentFollowUp.trim()) {
+                                sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
+                                setAgentFollowUp('');
+                              }
+                            }}
+                            className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-1 text-[10px] outline-none"
+                            placeholder="Follow-up instruction..."
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="size-5 shrink-0"
+                            onClick={() => {
+                              if (agentFollowUp.trim()) {
+                                sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
+                                setAgentFollowUp('');
+                              }
+                            }}
+                            title="Send"
+                          >
+                            <Send className="size-3" />
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* New agent form — shown when no agents exist or user clicked + */}
+              {(!hasAnyAgent || showNewAgentForm) && (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
+                  {showNewAgentForm && (
+                    <button
+                      onClick={() => setShowNewAgentForm(false)}
+                      className="text-muted-foreground hover:text-foreground self-start text-[10px]"
+                    >
+                      &larr; Back to agents
+                    </button>
+                  )}
+                  <Bot className="text-muted-foreground/40 size-8" />
+                  <p className="text-muted-foreground text-[10px]">Describe a task for the QA agent</p>
+                  <input
+                    type="text"
+                    value={agentTargetUrl}
+                    onChange={(e) => setAgentTargetUrl(e.target.value)}
+                    className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
+                    placeholder="Target URL"
+                  />
+                  <textarea
+                    value={agentTask}
+                    onChange={(e) => setAgentTask(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && agentTask.trim()) {
+                        e.preventDefault();
+                        handleStartAgent();
+                      }
+                    }}
+                    className="bg-secondary text-foreground placeholder:text-muted-foreground h-20 w-full resize-none rounded px-2 py-1.5 text-[10px] outline-none"
+                    placeholder="e.g. Test the login flow with valid and invalid credentials..."
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleStartAgent}
+                    disabled={!agentTask.trim()}
+                    className="gap-1.5"
+                  >
+                    <Play className="size-3" />
+                    Start Agent
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </>
-      )}
-
-      {/* Agent mode */}
-      {qaMode === 'agent' && (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {!qaAgentRunning ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-              <Bot className="text-muted-foreground/40 size-8" />
-              <p className="text-muted-foreground text-[10px]">Describe a task for the QA agent</p>
-              <input
-                type="text"
-                value={agentTargetUrl}
-                onChange={(e) => setAgentTargetUrl(e.target.value)}
-                className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
-                placeholder="Target URL"
-              />
-              <textarea
-                value={agentTask}
-                onChange={(e) => setAgentTask(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && agentTask.trim()) {
-                    e.preventDefault();
-                    startQAAgent(agentTask.trim(), getWorkingDir(), agentTargetUrl);
-                    setAgentTask('');
-                  }
-                }}
-                className="bg-secondary text-foreground placeholder:text-muted-foreground h-20 w-full resize-none rounded px-2 py-1.5 text-[10px] outline-none"
-                placeholder="e.g. Test the login flow with valid and invalid credentials..."
-              />
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (agentTask.trim()) {
-                    startQAAgent(agentTask.trim(), getWorkingDir(), agentTargetUrl);
-                    setAgentTask('');
-                  }
-                }}
-                disabled={!agentTask.trim()}
-                className="gap-1.5"
-              >
-                <Play className="size-3" />
-                Start Agent
-              </Button>
-            </div>
-          ) : (
-            <>
-              <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-                <span className="size-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-foreground flex-1 text-[10px] font-medium">Agent running</span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-5"
-                  onClick={clearQAAgentEntries}
-                  title="Clear log"
-                >
-                  <Trash2 className="size-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground hover:text-destructive size-5"
-                  onClick={stopQAAgent}
-                  title="Stop agent"
-                >
-                  <Square className="size-3" />
-                </Button>
-              </div>
-              <div ref={agentLogRef} className="min-h-0 flex-1 overflow-y-auto p-2 space-y-1">
-                {qaAgentEntries.map((entry, i) => (
-                  <AgentLogEntry key={i} entry={entry} />
-                ))}
-              </div>
-              <div className="border-border flex shrink-0 items-center gap-1.5 border-t px-2 py-1.5">
-                <input
-                  type="text"
-                  value={agentFollowUp}
-                  onChange={(e) => setAgentFollowUp(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && agentFollowUp.trim()) {
-                      sendQAAgentMessage(agentFollowUp.trim());
-                      setAgentFollowUp('');
-                    }
-                  }}
-                  className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-1 text-[10px] outline-none"
-                  placeholder="Follow-up instruction..."
-                />
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-5 shrink-0"
-                  onClick={() => {
-                    if (agentFollowUp.trim()) {
-                      sendQAAgentMessage(agentFollowUp.trim());
-                      setAgentFollowUp('');
-                    }
-                  }}
-                  title="Send"
-                >
-                  <Send className="size-3" />
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
       )}
     </div>
   );
