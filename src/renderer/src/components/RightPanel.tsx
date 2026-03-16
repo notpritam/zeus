@@ -1,7 +1,8 @@
-import { GitBranch, FolderOpen, RefreshCw } from 'lucide-react';
+import { GitBranch, FolderOpen, Eye, RefreshCw } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
+import QAPanel from '@/components/QAPanel';
 import {
   Tooltip,
   TooltipTrigger,
@@ -74,7 +75,7 @@ function ActivityBarIcon({
   tooltip,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer';
+  tab: 'source-control' | 'explorer' | 'qa';
   tooltip: string;
 }) {
   const activeRightTab = useZeusStore((s) => s.activeRightTab);
@@ -122,7 +123,7 @@ function RightPanel() {
         {activeRightTab && (
           <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
             <div className="min-h-0 flex-1 overflow-hidden">
-              {activeRightTab === 'source-control' ? <GitPanel /> : <FileExplorer />}
+              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : <QAPanel />}
             </div>
             <WatcherStatusBar />
           </div>
@@ -132,6 +133,7 @@ function RightPanel() {
         <div className="bg-bg border-border w-10 shrink-0 flex flex-col items-center border-l pt-2 gap-3">
           <ActivityBarIcon icon={GitBranch} tab="source-control" tooltip="Source Control" />
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
+          <ActivityBarIcon icon={Eye} tab="qa" tooltip="QA Preview" />
         </div>
       </div>
     </TooltipProvider>

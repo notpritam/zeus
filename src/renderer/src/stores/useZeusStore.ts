@@ -20,6 +20,10 @@ import type {
   FilesPayload,
   FileTreeEntry,
   SessionActivity,
+  QaPayload,
+  QaInstanceInfo,
+  QaTabInfo,
+  QaSnapshotNode,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
@@ -79,8 +83,19 @@ interface ZeusState {
   // View mode
   viewMode: ViewMode;
 
+  // QA / PinchTab
+  qaRunning: boolean;
+  qaInstances: QaInstanceInfo[];
+  qaSnapshot: QaSnapshotNode[] | null;
+  qaSnapshotRaw: string | null;
+  qaScreenshot: string | null;
+  qaText: string | null;
+  qaError: string | null;
+  qaLoading: boolean;
+  qaTabs: QaTabInfo[];
+
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'qa' | null;
 
   // Actions
   connect: () => () => void;
@@ -155,8 +170,21 @@ interface ZeusState {
   reconnectGitWatcher: () => void;
   reconnectFileWatcher: () => void;
 
+  // QA actions
+  startQA: () => void;
+  stopQA: () => void;
+  launchQAInstance: (headless?: boolean) => void;
+  stopQAInstance: (instanceId: string) => void;
+  navigateQA: (url: string) => void;
+  takeSnapshot: (filter?: 'interactive' | 'full') => void;
+  takeScreenshot: () => void;
+  performQAAction: (kind: string, ref?: string, value?: string, key?: string) => void;
+  extractQAText: () => void;
+  fetchQATabs: () => void;
+  clearQAError: () => void;
+
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
   toggleRightPanel: () => void;
 
   // Settings actions
@@ -192,6 +220,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   fileTree: {},
   fileTreeExpanded: {},
   fileTreeConnected: {},
+
+  qaRunning: false,
+  qaInstances: [],
+  qaSnapshot: null,
+  qaSnapshotRaw: null,
+  qaScreenshot: null,
+  qaText: null,
+  qaError: null,
+  qaLoading: false,
+  qaTabs: [],
 
   savedProjects: [],
   claudeDefaults: {
@@ -713,6 +751,62 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to QA channel
+    const unsubQA = zeusWs.on('qa', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as QaPayload;
+
+      if (payload.type === 'qa_started') {
+        set({ qaRunning: true, qaLoading: false, qaError: null });
+      }
+      if (payload.type === 'qa_stopped') {
+        set({
+          qaRunning: false, qaInstances: [], qaTabs: [],
+          qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
+          qaText: null, qaLoading: false, qaError: null,
+        });
+      }
+      if (payload.type === 'qa_status') {
+        set({ qaRunning: payload.running, qaInstances: payload.instances, qaLoading: false });
+      }
+      if (payload.type === 'instance_launched') {
+        set((state) => ({
+          qaInstances: [...state.qaInstances, payload.instance],
+          qaLoading: false, qaError: null,
+        }));
+      }
+      if (payload.type === 'instance_stopped') {
+        set((state) => ({
+          qaInstances: state.qaInstances.filter((i) => i.instanceId !== payload.instanceId),
+          qaLoading: false,
+        }));
+      }
+      if (payload.type === 'navigate_result') {
+        set({ qaLoading: false, qaError: null });
+      }
+      if (payload.type === 'snapshot_result') {
+        set({ qaSnapshot: payload.nodes, qaSnapshotRaw: payload.raw ?? null, qaLoading: false, qaError: null });
+      }
+      if (payload.type === 'screenshot_result') {
+        set({ qaScreenshot: payload.dataUrl, qaLoading: false, qaError: null });
+      }
+      if (payload.type === 'text_result') {
+        set({ qaText: payload.text, qaLoading: false, qaError: null });
+      }
+      if (payload.type === 'action_result') {
+        set({ qaLoading: false, qaError: payload.success ? null : (payload.message ?? 'Action failed') });
+        // Auto-refresh snapshot after successful action
+        if (payload.success) {
+          get().takeSnapshot('interactive');
+        }
+      }
+      if (payload.type === 'tabs_list') {
+        set({ qaTabs: payload.tabs, qaLoading: false });
+      }
+      if (payload.type === 'qa_error') {
+        set({ qaError: payload.message, qaLoading: false });
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -723,6 +817,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubSettings();
       unsubGit();
       unsubFiles();
+      unsubQA();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -1465,10 +1560,69 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  // --- QA actions ---
+
+  startQA: () => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'start_qa' }, auth: '' });
+  },
+
+  stopQA: () => {
+    set({ qaLoading: true });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'stop_qa' }, auth: '' });
+  },
+
+  launchQAInstance: (headless?: boolean) => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'launch_instance', headless }, auth: '' });
+  },
+
+  stopQAInstance: (instanceId: string) => {
+    set({ qaLoading: true });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'stop_instance', instanceId }, auth: '' });
+  },
+
+  navigateQA: (url: string) => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'navigate', url }, auth: '' });
+  },
+
+  takeSnapshot: (filter?: 'interactive' | 'full') => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'snapshot', filter }, auth: '' });
+  },
+
+  takeScreenshot: () => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'screenshot' }, auth: '' });
+  },
+
+  performQAAction: (kind: string, ref?: string, value?: string, key?: string) => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'action', kind, ref, value, key }, auth: '' });
+  },
+
+  extractQAText: () => {
+    set({ qaLoading: true, qaError: null });
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'text' }, auth: '' });
+  },
+
+  fetchQATabs: () => {
+    zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'list_tabs' }, auth: '' });
+  },
+
+  clearQAError: () => {
+    set({ qaError: null });
+  },
+
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => {
     set({ activeRightTab: tab });
+    // Fetch QA status when switching to QA tab
+    if (tab === 'qa') {
+      zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'get_qa_status' }, auth: '' });
+    }
   },
 
   toggleRightPanel: () => {

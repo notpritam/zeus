@@ -362,3 +362,51 @@ export type ActionType =
   | { action: 'task_create'; description: string }
   | { action: 'plan_presentation'; plan: string }
   | { action: 'other'; description: string };
+
+// ─── QA / PinchTab Types ───
+
+export interface QaInstanceInfo {
+  instanceId: string;
+  profileId?: string;
+  headless: boolean;
+}
+
+export interface QaTabInfo {
+  tabId: string;
+  url: string;
+  title: string;
+}
+
+export interface QaSnapshotNode {
+  ref: string;
+  role: string;
+  name: string;
+  children?: QaSnapshotNode[];
+}
+
+export type QaPayload =
+  // Client → Server
+  | { type: 'start_qa' }
+  | { type: 'stop_qa' }
+  | { type: 'get_qa_status' }
+  | { type: 'launch_instance'; headless?: boolean }
+  | { type: 'stop_instance'; instanceId: string }
+  | { type: 'navigate'; url: string }
+  | { type: 'snapshot'; filter?: 'interactive' | 'full' }
+  | { type: 'screenshot' }
+  | { type: 'action'; kind: string; ref?: string; value?: string; key?: string }
+  | { type: 'text' }
+  | { type: 'list_tabs' }
+  // Server → Client
+  | { type: 'qa_status'; running: boolean; instances: QaInstanceInfo[] }
+  | { type: 'qa_started' }
+  | { type: 'qa_stopped' }
+  | { type: 'instance_launched'; instance: QaInstanceInfo }
+  | { type: 'instance_stopped'; instanceId: string }
+  | { type: 'tabs_list'; tabs: QaTabInfo[] }
+  | { type: 'snapshot_result'; nodes: QaSnapshotNode[]; raw?: string }
+  | { type: 'screenshot_result'; dataUrl: string }
+  | { type: 'action_result'; success: boolean; message?: string }
+  | { type: 'text_result'; text: string }
+  | { type: 'navigate_result'; url: string; title: string }
+  | { type: 'qa_error'; message: string };

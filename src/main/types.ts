@@ -43,4 +43,8 @@ export type {
   GitPayload,
   FileTreeEntry,
   FilesPayload,
+  QaPayload,
+  QaInstanceInfo,
+  QaTabInfo,
+  QaSnapshotNode,
 } from '../shared/types';

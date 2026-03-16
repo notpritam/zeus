@@ -48,9 +48,10 @@ import {
   deleteTerminalSession,
   archiveTerminalSession,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload, FilesPayload } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../../shared/types';
 import { GitWatcherManager } from './git';
 import { FileTreeServiceManager } from './file-tree';
+import { QAService } from './qa';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -69,6 +70,9 @@ const gitManager = new GitWatcherManager();
 
 // File tree manager (shared across all WebSocket clients)
 const fileTreeManager = new FileTreeServiceManager();
+
+// QA service (singleton PinchTab server)
+let qaService: QAService | null = null;
 
 // Track authenticated clients
 const authenticatedClients = new WeakSet<WebSocket>();
@@ -1019,6 +1023,107 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   }
 }
 
+async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as QaPayload;
+
+  if (payload.type === 'start_qa') {
+    try {
+      if (qaService?.isRunning()) {
+        sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_started' }, auth: '' });
+        return;
+      }
+      qaService = new QAService();
+      await qaService.start();
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'qa_started' }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, {
+        channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '',
+      });
+    }
+  } else if (payload.type === 'stop_qa') {
+    if (qaService) {
+      await qaService.stop();
+      qaService = null;
+    }
+    broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'qa_stopped' }, auth: '' });
+  } else if (payload.type === 'get_qa_status') {
+    const running = qaService?.isRunning() ?? false;
+    const instances = running && qaService ? await qaService.listInstances() : [];
+    sendEnvelope(ws, {
+      channel: 'qa', sessionId: '', payload: { type: 'qa_status', running, instances }, auth: '',
+    });
+  } else if (payload.type === 'launch_instance') {
+    if (!qaService?.isRunning()) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: 'QA service not running' }, auth: '' });
+      return;
+    }
+    try {
+      const instance = await qaService.launchInstance(payload.headless);
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'instance_launched', instance }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'stop_instance') {
+    if (!qaService?.isRunning()) return;
+    try {
+      await qaService.stopInstance(payload.instanceId);
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'instance_stopped', instanceId: payload.instanceId }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'navigate') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const result = await qaService.navigate(payload.url);
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'navigate_result', url: result.url, title: result.title }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'snapshot') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const result = await qaService.snapshot(payload.filter);
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'snapshot_result', nodes: result.nodes, raw: result.raw }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'screenshot') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const dataUrl = await qaService.screenshot();
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'screenshot_result', dataUrl }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'action') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const result = await qaService.action(payload.kind, payload.ref, payload.value, payload.key);
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'action_result', success: result.success, message: result.message }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'text') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const text = await qaService.text();
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'text_result', text }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else if (payload.type === 'list_tabs') {
+    if (!qaService?.isRunning()) return;
+    try {
+      const tabs = await qaService.listTabs();
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'tabs_list', tabs }, auth: '' });
+    } catch (err) {
+      sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
+    }
+  } else {
+    sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
+  }
+}
+
 function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
   const payload = envelope.payload as SettingsPayload;
 
@@ -1101,7 +1206,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       handleFiles(ws, envelope);
       break;
     case 'qa':
-      sendError(ws, envelope.sessionId, `Channel "${envelope.channel}" not yet implemented`);
+      handleQA(ws, envelope);
       break;
     default:
       sendError(ws, envelope.sessionId, `Unknown channel: ${envelope.channel}`);
@@ -1187,10 +1292,14 @@ export async function startWebSocketServer(port = 3000): Promise<void> {
 export async function stopWebSocketServer(): Promise<void> {
   if (!wss || !server) return;
 
-  // Kill all Claude sessions, git watchers, and file tree watchers
+  // Kill all Claude sessions, git watchers, file tree watchers, and QA service
   claudeManager.killAll();
   await gitManager.stopAll();
   await fileTreeManager.stopAll();
+  if (qaService) {
+    await qaService.stop();
+    qaService = null;
+  }
 
   // Close all client connections
   for (const ws of wss.clients) {
