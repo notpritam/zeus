@@ -716,7 +716,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   selectSession: (sessionId: string | null) => {
-    set({ activeSessionId: sessionId, viewMode: 'terminal' });
+    const state = get();
+    // If in diff view, revert since terminal sessions don't own file tabs
+    if (state.viewMode === 'diff') {
+      set({ activeSessionId: sessionId, activeClaudeId: null, viewMode: 'terminal' });
+    } else {
+      set({ activeSessionId: sessionId, viewMode: 'terminal' });
+    }
   },
 
   // --- Claude actions ---
@@ -882,7 +888,26 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   selectClaudeSession: (id: string | null) => {
-    set({ activeClaudeId: id, viewMode: id ? 'claude' : get().viewMode });
+    const state = get();
+    let newViewMode: ViewMode = id ? 'claude' : state.viewMode;
+    let newActiveDiffTabId = state.activeDiffTabId;
+
+    // If currently in diff view, check if the active tab belongs to the new session
+    if (id && state.viewMode === 'diff' && state.activeDiffTabId) {
+      const activeTab = state.openDiffTabs.find((t) => t.id === state.activeDiffTabId);
+      if (activeTab && activeTab.sessionId !== id) {
+        // Active tab belongs to a different session — check if new session has tabs
+        const newSessionTabs = state.openDiffTabs.filter((t) => t.sessionId === id);
+        if (newSessionTabs.length > 0) {
+          newActiveDiffTabId = newSessionTabs[0].id;
+          newViewMode = 'diff';
+        } else {
+          newViewMode = 'claude';
+        }
+      }
+    }
+
+    set({ activeClaudeId: id, viewMode: newViewMode, activeDiffTabId: newActiveDiffTabId });
     if (id) {
       // Lazy-load entries from DB if not already loaded
       if (!get().claudeEntries[id] || get().claudeEntries[id].length === 0) {
@@ -1060,10 +1085,14 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       let newViewMode = state.viewMode;
 
       if (state.activeDiffTabId === tabId) {
-        if (remaining.length > 0) {
+        // Only consider tabs from the current session for "next tab" logic
+        const currentSessionId = state.activeClaudeId ?? state.activeSessionId;
+        const sessionTabs = remaining.filter((t) => t.sessionId === currentSessionId);
+
+        if (sessionTabs.length > 0) {
           const closedIdx = state.openDiffTabs.findIndex((t) => t.id === tabId);
-          const nextIdx = Math.min(closedIdx, remaining.length - 1);
-          newActiveId = remaining[nextIdx].id;
+          const nextIdx = Math.min(closedIdx, sessionTabs.length - 1);
+          newActiveId = sessionTabs[nextIdx].id;
         } else {
           newActiveId = null;
           newViewMode = state.previousViewMode;
@@ -1079,11 +1108,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   closeAllDiffTabs: () => {
-    set((state) => ({
-      openDiffTabs: [],
-      activeDiffTabId: null,
-      viewMode: state.previousViewMode,
-    }));
+    set((state) => {
+      const currentSessionId = state.activeClaudeId ?? state.activeSessionId;
+      // Only close tabs belonging to the current session
+      const remaining = state.openDiffTabs.filter((t) => t.sessionId !== currentSessionId);
+      return {
+        openDiffTabs: remaining,
+        activeDiffTabId: null,
+        viewMode: state.previousViewMode,
+      };
+    });
   },
 
   setActiveDiffTab: (tabId: string) => {

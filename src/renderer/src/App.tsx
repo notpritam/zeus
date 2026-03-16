@@ -75,6 +75,10 @@ function App() {
   const activeClaudeSession = claudeSessions.find((s) => s.id === activeClaudeId) ?? null;
   const activeEntries = activeClaudeId ? (claudeEntries[activeClaudeId] ?? []) : [];
 
+  // Filter diff tabs to current session for tab bar visibility
+  const currentSessionId = activeClaudeId ?? activeSessionId;
+  const sessionDiffTabs = openDiffTabs.filter((t) => t.sessionId === currentSessionId);
+
   // Persist layout between page reloads
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: 'zeus-layout' });
 
@@ -237,7 +241,7 @@ function App() {
             minSize="30%"
           >
             <div data-testid="main-area-desktop" className="flex h-full flex-col">
-              {openDiffTabs.length > 0 && <DiffTabBar />}
+              {sessionDiffTabs.length > 0 && <DiffTabBar />}
 
               <div className="min-h-0 flex-1">
                 {viewMode === 'diff' ? (

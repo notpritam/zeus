@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import type {
@@ -15,12 +15,34 @@ import type {
 
 // ─── Entry Renderers ───
 
+function CopyAction({ text, align = 'left' }: { text: string; align?: 'left' | 'right' }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className={`flex ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
+      <button
+        onClick={handleCopy}
+        className="text-muted-foreground hover:text-foreground mt-1 flex items-center gap-1 px-1 text-[10px] transition-colors"
+      >
+        {copied ? <ClipboardCheck className="size-3" /> : <Copy className="size-3" />}
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
 function UserBubble({ content, metadata }: { content: string; metadata?: unknown }) {
   const files = (metadata as { files?: string[] } | undefined)?.files;
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-col items-end">
       <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
-        <p className="text-foreground text-sm whitespace-pre-wrap">{content}</p>
+        <p className="text-foreground select-text text-sm whitespace-pre-wrap">{content}</p>
         {files && files.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {files.map((f) => (
@@ -32,16 +54,20 @@ function UserBubble({ content, metadata }: { content: string; metadata?: unknown
           </div>
         )}
       </div>
+      <CopyAction text={content} align="right" />
     </div>
   );
 }
 
 function AssistantBubble({ content }: { content: string }) {
   return (
-    <div className="flex justify-start">
+    <div className="flex flex-col items-start">
       <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
-        <Markdown content={content} />
+        <div className="select-text">
+          <Markdown content={content} />
+        </div>
       </div>
+      <CopyAction text={content} align="left" />
     </div>
   );
 }
@@ -61,11 +87,11 @@ function ThinkingBlock({ content }: { content: string }) {
         <span className="text-muted-foreground/50 text-[10px]">{expanded ? 'collapse' : 'expand'}</span>
       </div>
       {expanded ? (
-        <div className="text-muted-foreground mt-1 text-xs">
+        <div className="text-muted-foreground mt-1 select-text text-xs">
           <Markdown content={content} />
         </div>
       ) : (
-        <p className="text-muted-foreground mt-1 text-xs whitespace-pre-wrap">
+        <p className="text-muted-foreground mt-1 select-text text-xs whitespace-pre-wrap">
           {preview + (content.length > 120 ? '...' : '')}
         </p>
       )}

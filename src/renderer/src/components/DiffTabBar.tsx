@@ -29,7 +29,7 @@ function getFileStatus(
 }
 
 export default function DiffTabBar() {
-  const openDiffTabs = useZeusStore((s) => s.openDiffTabs);
+  const allDiffTabs = useZeusStore((s) => s.openDiffTabs);
   const activeDiffTabId = useZeusStore((s) => s.activeDiffTabId);
   const previousViewMode = useZeusStore((s) => s.previousViewMode);
   const viewMode = useZeusStore((s) => s.viewMode);
@@ -38,6 +38,12 @@ export default function DiffTabBar() {
   const setActiveDiffTab = useZeusStore((s) => s.setActiveDiffTab);
   const returnToHome = useZeusStore((s) => s.returnToHome);
   const saveDiffFile = useZeusStore((s) => s.saveDiffFile);
+  const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
+  const activeSessionId = useZeusStore((s) => s.activeSessionId);
+
+  // Only show tabs belonging to the current session
+  const currentSessionId = activeClaudeId ?? activeSessionId;
+  const openDiffTabs = allDiffTabs.filter((t) => t.sessionId === currentSessionId);
 
   if (openDiffTabs.length === 0) return null;
 
