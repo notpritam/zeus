@@ -4,7 +4,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Plus, Sparkles, Settings, Trash2, Archive } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
-import type { SessionRecord, ClaudeSessionInfo } from '../../../shared/types';
+import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
 
 interface SessionSidebarProps {
   sessions: SessionRecord[];
@@ -12,6 +12,7 @@ interface SessionSidebarProps {
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
   viewMode: 'terminal' | 'claude' | 'diff';
+  sessionActivity: Record<string, SessionActivity>;
   onNewSession: () => void;
   onNewClaudeSession: () => void;
   onSelectSession: (id: string) => void;
@@ -29,12 +30,14 @@ interface SessionSidebarProps {
 function ClaudeCard({
   session,
   active,
+  activity,
   onSelect,
   onDelete,
   onArchive,
 }: {
   session: ClaudeSessionInfo;
   active: boolean;
+  activity: SessionActivity;
   onSelect: () => void;
   onDelete: () => void;
   onArchive: () => void;
@@ -44,6 +47,17 @@ function ClaudeCard({
     done: 'secondary',
     error: 'destructive',
   };
+
+  // Color the Sparkles icon based on activity state
+  const sparklesColor =
+    activity.state === 'thinking' ? 'text-yellow-400' :
+    activity.state === 'streaming' ? 'text-green-400' :
+    activity.state === 'tool_running' ? 'text-blue-400' :
+    activity.state === 'waiting_approval' ? 'text-orange-400' :
+    activity.state === 'starting' ? 'text-purple-400' :
+    'text-primary';
+
+  const isActive = session.status === 'running' && activity.state !== 'idle';
 
   return (
     <button
@@ -57,8 +71,8 @@ function ClaudeCard({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <Sparkles className="text-primary size-3 shrink-0" />
-          <span className="text-foreground truncate text-xs">
+          <Sparkles className={`size-3 shrink-0 transition-colors ${sparklesColor} ${isActive ? 'animate-pulse' : ''}`} />
+          <span className="text-foreground block max-w-[160px] truncate text-xs">
             {session.name || session.prompt}
           </span>
         </div>
@@ -106,6 +120,7 @@ function SessionSidebar({
   claudeSessions,
   activeClaudeId,
   viewMode,
+  sessionActivity,
   onNewSession,
   onNewClaudeSession,
   onSelectSession,
@@ -166,6 +181,7 @@ function SessionSidebar({
                   key={s.id}
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
+                  activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
                   onArchive={() => onArchiveClaudeSession(s.id)}
@@ -195,6 +211,7 @@ function SessionSidebar({
                   key={s.id}
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
+                  activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
                   onArchive={() => onArchiveClaudeSession(s.id)}

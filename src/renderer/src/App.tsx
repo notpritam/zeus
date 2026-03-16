@@ -163,6 +163,7 @@ function App() {
             claudeSessions={claudeSessions}
             activeClaudeId={activeClaudeId}
             viewMode={viewMode}
+            sessionActivity={sessionActivity}
             onNewSession={() => {
               startSession();
               setSidebarOpen(false);
@@ -234,6 +235,7 @@ function App() {
               claudeSessions={claudeSessions}
               activeClaudeId={activeClaudeId}
               viewMode={viewMode}
+              sessionActivity={sessionActivity}
               onNewSession={() => startSession()}
               onNewClaudeSession={() => openNewClaudeModal()}
               onSelectSession={(id) => selectSession(id)}

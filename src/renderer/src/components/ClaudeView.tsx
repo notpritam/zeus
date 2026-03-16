@@ -577,13 +577,6 @@ function ClaudeView({
       <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-primary text-sm font-bold">Claude</span>
-          {isBusy && <span className="zeus-dot-pulse inline-block size-2 rounded-full bg-primary" />}
-          <Badge
-            variant={statusVariant[session.status] ?? 'secondary'}
-            className="text-[9px] uppercase tracking-wider"
-          >
-            {isBusy ? activity.state.replace('_', ' ') : session.status}
-          </Badge>
         </div>
         <div className="flex items-center gap-2">
           {session.status === 'running' && (
@@ -650,6 +643,26 @@ function ClaudeView({
               onDeny={() => onDeny(a.approvalId)}
             />
           ))}
+        </div>
+      )}
+
+      {/* Activity bar — always visible at bottom when busy */}
+      {isBusy && (
+        <div className="border-border flex items-center gap-2 border-t px-4 py-1.5">
+          <Sparkles className={`size-3.5 animate-pulse ${
+            activity.state === 'thinking' ? 'text-yellow-400' :
+            activity.state === 'streaming' ? 'text-green-400' :
+            activity.state === 'tool_running' ? 'text-blue-400' :
+            activity.state === 'waiting_approval' ? 'text-orange-400' :
+            'text-purple-400'
+          }`} />
+          <span className="text-muted-foreground text-xs font-medium">
+            {activity.state === 'thinking' && 'Thinking...'}
+            {activity.state === 'streaming' && 'Writing...'}
+            {activity.state === 'tool_running' && activity.description}
+            {activity.state === 'waiting_approval' && `Approval: ${activity.toolName}`}
+            {activity.state === 'starting' && 'Starting...'}
+          </span>
         </div>
       )}
 
