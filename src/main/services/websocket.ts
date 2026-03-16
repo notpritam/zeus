@@ -402,6 +402,8 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         workingDir,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
         model: opts.model,
+        enableQA: opts.enableQA,
+        qaTargetUrl: opts.qaTargetUrl,
       });
 
       // Persist to DB
@@ -438,6 +440,45 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         payload: { type: 'claude_started' },
         auth: '',
       });
+
+      // Auto-start QA if enabled
+      if (opts.enableQA) {
+        try {
+          if (!qaService?.isRunning()) {
+            qaService = new QAService();
+            await qaService.start();
+          }
+          const instance = await qaService.launchInstance(true);
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'qa_started' }, auth: '',
+          });
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'instance_launched', instance }, auth: '',
+          });
+
+          // Wire CDP events to frontend
+          const cdp = qaService.getCdpClient();
+          if (cdp) {
+            cdp.on('console', (entry) => {
+              broadcastEnvelope({
+                channel: 'qa', sessionId: '', payload: { type: 'cdp_console', logs: [entry] }, auth: '',
+              });
+            });
+            cdp.on('network', (entry) => {
+              broadcastEnvelope({
+                channel: 'qa', sessionId: '', payload: { type: 'cdp_network', requests: [entry] }, auth: '',
+              });
+            });
+            cdp.on('js_error', (entry) => {
+              broadcastEnvelope({
+                channel: 'qa', sessionId: '', payload: { type: 'cdp_error', errors: [entry] }, auth: '',
+              });
+            });
+          }
+        } catch (err) {
+          console.warn('[Zeus] QA auto-start failed (non-fatal):', (err as Error).message);
+        }
+      }
 
       // Git and file tree watchers are started by the frontend explicitly
       // (sent right after start_claude). No auto-start here to avoid race conditions.
@@ -570,6 +611,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     }
   } else if (payload.type === 'approve_tool') {
     const { approvalId, updatedInput } = envelope.payload as ClaudeApproveToolPayload;
+    console.log('[WS] approve_tool', approvalId, 'hasUpdatedInput:', !!updatedInput);
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
       adoptClaudeSession(ws, envelope.sessionId);
@@ -1060,6 +1102,26 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     try {
       const instance = await qaService.launchInstance(payload.headless);
       broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'instance_launched', instance }, auth: '' });
+
+      // Wire CDP events to frontend
+      const cdp = qaService!.getCdpClient();
+      if (cdp) {
+        cdp.on('console', (entry) => {
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'cdp_console', logs: [entry] }, auth: '',
+          });
+        });
+        cdp.on('network', (entry) => {
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'cdp_network', requests: [entry] }, auth: '',
+          });
+        });
+        cdp.on('js_error', (entry) => {
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'cdp_error', errors: [entry] }, auth: '',
+          });
+        });
+      }
     } catch (err) {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
     }
