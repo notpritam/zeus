@@ -57,6 +57,9 @@ export class ClaudeSession extends EventEmitter {
   get isRunning(): boolean {
     return this._isRunning;
   }
+  get pid(): number | undefined {
+    return this.child?.pid;
+  }
 
   constructor(private options: SessionOptions) {
     super();
@@ -409,6 +412,16 @@ export class ClaudeSessionManager {
 
   getAllSessions(): Map<string, ClaudeSession> {
     return new Map(this.sessions);
+  }
+
+  getSessionPids(): Array<{ sessionId: string; pid: number }> {
+    const result: Array<{ sessionId: string; pid: number }> = [];
+    for (const [id, session] of this.sessions) {
+      if (session.isRunning && session.pid) {
+        result.push({ sessionId: id, pid: session.pid });
+      }
+    }
+    return result;
   }
 
   killSession(clientKey: string): void {

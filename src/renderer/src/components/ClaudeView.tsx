@@ -396,7 +396,7 @@ interface ClaudeViewProps {
   queue: Array<{ id: string; content: string }>;
   onSendMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   onApprove: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
-  onDeny: (approvalId: string) => void;
+  onDeny: (approvalId: string, reason?: string) => void;
   onInterrupt: () => void;
   onResume: () => void;
   onQueueMessage: (content: string) => void;
@@ -521,12 +521,6 @@ function ClaudeView({
     );
   }
 
-  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
-    running: 'default',
-    done: 'secondary',
-    error: 'destructive',
-  };
-
   const sessionApprovals = approvals.filter((a) => a.sessionId === session.id);
 
   const isBusy = session?.status === 'running' && activity.state !== 'idle';
@@ -621,7 +615,7 @@ function ClaudeView({
               key={a.approvalId}
               approval={a}
               onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
-              onDeny={() => onDeny(a.approvalId)}
+              onDeny={(reason) => onDeny(a.approvalId, reason)}
             />
           ))}
         </div>

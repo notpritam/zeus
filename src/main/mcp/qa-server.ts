@@ -77,7 +77,7 @@ server.tool(
     }
     try {
       const start = Date.now();
-      const res = await pinchtabFetch('/nav', { method: 'POST', body: { url } });
+      const res = await pinchtabFetch('/navigate', { method: 'POST', body: { url } });
       if (!res.ok) throw new Error(`Navigate failed: ${res.status} ${await res.text()}`);
       const data = await res.json() as Record<string, string>;
       const loadTime = Date.now() - start;
@@ -99,16 +99,18 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'Error: PinchTab not running' }], isError: true };
     }
     try {
-      const body: Record<string, unknown> = {};
-      if (filter) body.format = filter === 'interactive' ? 'compact' : 'full';
-      const res = await pinchtabFetch('/snapshot', { method: 'POST', body });
+      const res = await pinchtabFetch('/snapshot');
       if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
       const data = await res.json() as Record<string, unknown>;
-      const raw = typeof data.html === 'string' ? data.html : JSON.stringify(data, null, 2);
+      const raw = JSON.stringify(data, null, 2);
       const elements: Array<{ ref: string; role: string; name: string }> = [];
-      if (data.refs && typeof data.refs === 'object') {
-        for (const [ref, info] of Object.entries(data.refs as Record<string, Record<string, string>>)) {
-          elements.push({ ref, role: info?.role ?? 'unknown', name: info?.name ?? info?.text ?? ref });
+      if (Array.isArray(data.nodes)) {
+        for (const node of data.nodes as Array<Record<string, unknown>>) {
+          elements.push({
+            ref: (node.ref ?? '') as string,
+            role: (node.role ?? 'unknown') as string,
+            name: (node.name ?? node.ref ?? '') as string,
+          });
         }
       }
       return { content: [{ type: 'text' as const, text: JSON.stringify({ elements, raw }) }] };
@@ -129,9 +131,9 @@ server.tool(
     try {
       const res = await pinchtabFetch('/screenshot', { timeout: 15_000 });
       if (!res.ok) throw new Error(`Screenshot failed: ${res.status}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
-      const mimeType = (res.headers.get('content-type') ?? 'image/jpeg') as 'image/jpeg' | 'image/png';
-      return { content: [{ type: 'image' as const, data: buffer.toString('base64'), mimeType }] };
+      const data = await res.json() as Record<string, string>;
+      if (!data.base64) throw new Error('Screenshot response missing base64 field');
+      return { content: [{ type: 'image' as const, data: data.base64, mimeType: 'image/jpeg' as const }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }], isError: true };
     }
@@ -147,7 +149,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'Error: PinchTab not running' }], isError: true };
     }
     try {
-      const res = await pinchtabFetch('/action', { method: 'POST', body: { action: 'click', ref } });
+      const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'click', ref } });
       const ok = res.ok;
       return { content: [{ type: 'text' as const, text: JSON.stringify({ success: ok, message: ok ? undefined : await res.text() }) }] };
     } catch (err) {
@@ -165,7 +167,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'Error: PinchTab not running' }], isError: true };
     }
     try {
-      const res = await pinchtabFetch('/action', { method: 'POST', body: { action: 'type', value: text } });
+      const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'type', value: text } });
       return { content: [{ type: 'text' as const, text: JSON.stringify({ success: res.ok }) }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -185,7 +187,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'Error: PinchTab not running' }], isError: true };
     }
     try {
-      const res = await pinchtabFetch('/action', { method: 'POST', body: { action: 'fill', ref, value } });
+      const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'fill', ref, value } });
       return { content: [{ type: 'text' as const, text: JSON.stringify({ success: res.ok }) }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -202,7 +204,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: 'Error: PinchTab not running' }], isError: true };
     }
     try {
-      const res = await pinchtabFetch('/action', { method: 'POST', body: { action: 'press', key } });
+      const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'press', key } });
       return { content: [{ type: 'text' as const, text: JSON.stringify({ success: res.ok }) }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -223,7 +225,7 @@ server.tool(
     }
     try {
       const pixels = (amount ?? 300) * (direction === 'up' ? -1 : 1);
-      const res = await pinchtabFetch('/action', { method: 'POST', body: { action: 'scroll', value: String(pixels) } });
+      const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'scroll', value: String(pixels) } });
       return { content: [{ type: 'text' as const, text: JSON.stringify({ success: res.ok }) }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -313,7 +315,7 @@ server.tool(
     try {
       // 1. Navigate
       const navStart = Date.now();
-      const navRes = await pinchtabFetch('/nav', { method: 'POST', body: { url } });
+      const navRes = await pinchtabFetch('/navigate', { method: 'POST', body: { url } });
       if (!navRes.ok) throw new Error(`Navigate failed: ${navRes.status}`);
       const navData = await navRes.json() as Record<string, string>;
       result.title = navData.title ?? '';
@@ -327,13 +329,17 @@ server.tool(
 
       // 3. Snapshot
       try {
-        const snapRes = await pinchtabFetch('/snapshot', { method: 'POST', body: {} });
+        const snapRes = await pinchtabFetch('/snapshot');
         if (snapRes.ok) {
           const snapData = await snapRes.json() as Record<string, unknown>;
           const elements: Array<{ ref: string; role: string; name: string }> = [];
-          if (snapData.refs && typeof snapData.refs === 'object') {
-            for (const [ref, info] of Object.entries(snapData.refs as Record<string, Record<string, string>>)) {
-              elements.push({ ref, role: info?.role ?? 'unknown', name: info?.name ?? info?.text ?? ref });
+          if (Array.isArray(snapData.nodes)) {
+            for (const node of snapData.nodes as Array<Record<string, unknown>>) {
+              elements.push({
+                ref: (node.ref ?? '') as string,
+                role: (node.role ?? 'unknown') as string,
+                name: (node.name ?? node.ref ?? '') as string,
+              });
             }
           }
           result.snapshot = { elements };
@@ -344,8 +350,10 @@ server.tool(
       try {
         const ssRes = await pinchtabFetch('/screenshot', { timeout: 15_000 });
         if (ssRes.ok) {
-          const buffer = Buffer.from(await ssRes.arrayBuffer());
-          result.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+          const ssData = await ssRes.json() as Record<string, string>;
+          if (ssData.base64) {
+            result.screenshot = `data:image/jpeg;base64,${ssData.base64}`;
+          }
         }
       } catch { /* non-fatal */ }
 

@@ -73,10 +73,12 @@ function ActivityBarIcon({
   icon: Icon,
   tab,
   tooltip,
+  badge,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   tab: 'source-control' | 'explorer' | 'qa';
   tooltip: string;
+  badge?: number;
 }) {
   const activeRightTab = useZeusStore((s) => s.activeRightTab);
   const setActiveRightTab = useZeusStore((s) => s.setActiveRightTab);
@@ -97,13 +99,18 @@ function ActivityBarIcon({
       <TooltipTrigger asChild>
         <button
           onClick={handleClick}
-          className={`flex w-full items-center justify-center py-1.5 transition-colors ${
+          className={`relative flex w-full items-center justify-center py-1.5 transition-colors ${
             isActive
               ? 'border-primary bg-primary/10 text-foreground border-l-2'
               : 'text-muted-foreground/60 hover:text-foreground border-l-2 border-transparent'
           }`}
         >
           <Icon className="size-5" />
+          {badge !== undefined && badge > 0 && (
+            <span className="absolute top-0.5 right-1 flex size-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold leading-none text-white">
+              {badge > 9 ? '!' : badge}
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={4}>
@@ -115,6 +122,7 @@ function ActivityBarIcon({
 
 function RightPanel() {
   const activeRightTab = useZeusStore((s) => s.activeRightTab);
+  const qaJsErrorCount = useZeusStore((s) => s.qaJsErrors.length);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -133,7 +141,7 @@ function RightPanel() {
         <div className="bg-bg border-border w-10 shrink-0 flex flex-col items-center border-l pt-2 gap-3">
           <ActivityBarIcon icon={GitBranch} tab="source-control" tooltip="Source Control" />
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
-          <ActivityBarIcon icon={Eye} tab="qa" tooltip="QA Preview" />
+          <ActivityBarIcon icon={Eye} tab="qa" tooltip="QA Preview" badge={qaJsErrorCount} />
         </div>
       </div>
     </TooltipProvider>

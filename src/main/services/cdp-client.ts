@@ -68,7 +68,6 @@ class RingBuffer<T> {
 
 // ─── CDP Client ───
 
-const CDP_DISCOVERY_URL = 'http://127.0.0.1:9222';
 const CDP_MAX_RETRIES = 5;
 const CDP_RETRY_INTERVAL = 1000;
 
@@ -81,6 +80,12 @@ export class CdpClient extends EventEmitter {
   private pendingRequests = new Map<string, { url: string; method: string; startTime: number; type: string }>();
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
+  private cdpPort: number;
+
+  constructor(cdpPort?: number) {
+    super();
+    this.cdpPort = cdpPort ?? parseInt(process.env.ZEUS_CDP_PORT ?? '9222', 10);
+  }
 
   async connect(): Promise<void> {
     const wsUrl = await this.discoverWebSocketUrl();
@@ -146,9 +151,10 @@ export class CdpClient extends EventEmitter {
   }
 
   private async discoverWebSocketUrl(): Promise<string> {
+    const discoveryUrl = `http://127.0.0.1:${this.cdpPort}`;
     for (let i = 0; i < CDP_MAX_RETRIES; i++) {
       try {
-        const res = await fetch(`${CDP_DISCOVERY_URL}/json/list`);
+        const res = await fetch(`${discoveryUrl}/json/list`);
         if (res.ok) {
           const tabs = await res.json() as Array<{ webSocketDebuggerUrl?: string; type?: string }>;
           const page = tabs.find(t => t.type === 'page' && t.webSocketDebuggerUrl);

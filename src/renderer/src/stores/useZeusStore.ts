@@ -24,6 +24,8 @@ import type {
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
+  SystemMetrics,
+  PerfPayload,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
@@ -93,6 +95,13 @@ interface ZeusState {
   qaError: string | null;
   qaLoading: boolean;
   qaTabs: QaTabInfo[];
+  qaConsoleLogs: Array<{ level: string; message: string; timestamp: number }>;
+  qaNetworkRequests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }>;
+  qaJsErrors: Array<{ message: string; stack: string; timestamp: number }>;
+
+  // Performance monitoring
+  perfMetrics: SystemMetrics | null;
+  perfMonitoring: boolean;
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'qa' | null;
@@ -114,6 +123,8 @@ interface ZeusState {
     model?: string;
     notificationSound?: boolean;
     enableGitWatcher?: boolean;
+    enableQA?: boolean;
+    qaTargetUrl?: string;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
@@ -187,6 +198,11 @@ interface ZeusState {
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
   toggleRightPanel: () => void;
 
+  // Performance actions
+  startPerfMonitoring: () => void;
+  stopPerfMonitoring: () => void;
+  setPerfPollInterval: (intervalMs: number) => void;
+
   // Settings actions
   addProject: (name: string, path: string) => void;
   removeProject: (id: string) => void;
@@ -230,6 +246,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaError: null,
   qaLoading: false,
   qaTabs: [],
+  qaConsoleLogs: [],
+  qaNetworkRequests: [],
+  qaJsErrors: [],
+
+  perfMetrics: null,
+  perfMonitoring: false,
 
   savedProjects: [],
   claudeDefaults: {
@@ -763,6 +785,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaRunning: false, qaInstances: [], qaTabs: [],
           qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
           qaText: null, qaLoading: false, qaError: null,
+          qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
         });
       }
       if (payload.type === 'qa_status') {
@@ -805,6 +828,29 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'qa_error') {
         set({ qaError: payload.message, qaLoading: false });
       }
+      if (payload.type === 'cdp_console') {
+        set((state) => ({
+          qaConsoleLogs: [...state.qaConsoleLogs, ...payload.logs].slice(-500),
+        }));
+      }
+      if (payload.type === 'cdp_network') {
+        set((state) => ({
+          qaNetworkRequests: [...state.qaNetworkRequests, ...payload.requests].slice(-500),
+        }));
+      }
+      if (payload.type === 'cdp_error') {
+        set((state) => ({
+          qaJsErrors: [...state.qaJsErrors, ...payload.errors].slice(-500),
+        }));
+      }
+    });
+
+    // Subscribe to perf channel
+    const unsubPerf = zeusWs.on('perf', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as PerfPayload;
+      if (payload.type === 'perf_update') {
+        set({ perfMetrics: payload.metrics, perfMonitoring: true });
+      }
     });
 
     zeusWs.connect();
@@ -818,6 +864,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubGit();
       unsubFiles();
       unsubQA();
+      unsubPerf();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -881,6 +928,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       model,
       notificationSound,
       enableGitWatcher,
+      enableQA,
+      qaTargetUrl,
     } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
@@ -921,6 +970,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         sessionName,
         notificationSound,
         enableGitWatcher,
+        enableQA,
+        qaTargetUrl,
       },
       auth: '',
     });
@@ -1629,6 +1680,37 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     set((state) => ({ activeRightTab: state.activeRightTab ? null : 'source-control' }));
   },
 
+
+  // --- Performance actions ---
+
+  startPerfMonitoring: () => {
+    zeusWs.send({
+      channel: 'perf',
+      sessionId: '',
+      payload: { type: 'start_monitoring' },
+      auth: '',
+    });
+    set({ perfMonitoring: true });
+  },
+
+  stopPerfMonitoring: () => {
+    zeusWs.send({
+      channel: 'perf',
+      sessionId: '',
+      payload: { type: 'stop_monitoring' },
+      auth: '',
+    });
+    set({ perfMonitoring: false, perfMetrics: null });
+  },
+
+  setPerfPollInterval: (intervalMs: number) => {
+    zeusWs.send({
+      channel: 'perf',
+      sessionId: '',
+      payload: { type: 'set_poll_interval', intervalMs },
+      auth: '',
+    });
+  },
 
   // --- Settings actions ---
 

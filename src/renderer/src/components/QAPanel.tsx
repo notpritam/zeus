@@ -15,10 +15,14 @@ import {
   RefreshCw,
   AlertCircle,
   X,
+  Terminal,
+  Network,
+  Bug,
+  Trash2,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 
-type QAViewTab = 'snapshot' | 'screenshot' | 'text';
+type QAViewTab = 'snapshot' | 'screenshot' | 'text' | 'console' | 'network' | 'errors';
 
 function QAPanel() {
   const qaRunning = useZeusStore((s) => s.qaRunning);
@@ -29,6 +33,9 @@ function QAPanel() {
   const qaText = useZeusStore((s) => s.qaText);
   const qaError = useZeusStore((s) => s.qaError);
   const qaLoading = useZeusStore((s) => s.qaLoading);
+  const qaConsoleLogs = useZeusStore((s) => s.qaConsoleLogs);
+  const qaNetworkRequests = useZeusStore((s) => s.qaNetworkRequests);
+  const qaJsErrors = useZeusStore((s) => s.qaJsErrors);
 
   const startQA = useZeusStore((s) => s.startQA);
   const stopQA = useZeusStore((s) => s.stopQA);
@@ -168,25 +175,38 @@ function QAPanel() {
           </div>
 
           {/* View tabs */}
-          <div className="border-border flex shrink-0 border-b">
-            {(['snapshot', 'screenshot', 'text'] as QAViewTab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => {
-                  setViewTab(tab);
-                  if (tab === 'snapshot') takeSnapshot('interactive');
-                  if (tab === 'screenshot') takeScreenshot();
-                  if (tab === 'text') extractQAText();
-                }}
-                className={`flex-1 py-1.5 text-[10px] font-medium capitalize transition-colors ${
-                  viewTab === tab
-                    ? 'border-primary text-foreground border-b-2'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+          <div className="border-border flex shrink-0 flex-wrap border-b">
+            {(['snapshot', 'screenshot', 'text', 'console', 'network', 'errors'] as QAViewTab[]).map((tab) => {
+              const badge = tab === 'console' ? qaConsoleLogs.length
+                : tab === 'network' ? qaNetworkRequests.length
+                : tab === 'errors' ? qaJsErrors.length
+                : 0;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setViewTab(tab);
+                    if (tab === 'snapshot') takeSnapshot('interactive');
+                    if (tab === 'screenshot') takeScreenshot();
+                    if (tab === 'text') extractQAText();
+                  }}
+                  className={`relative flex-1 py-1.5 text-[10px] font-medium capitalize transition-colors ${
+                    viewTab === tab
+                      ? 'border-primary text-foreground border-b-2'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {tab}
+                  {badge > 0 && (
+                    <span className={`ml-0.5 inline-block min-w-[14px] rounded-full px-1 text-[8px] font-bold leading-[14px] text-white ${
+                      tab === 'errors' ? 'bg-red-500' : 'bg-muted-foreground/60'
+                    }`}>
+                      {badge > 99 ? '99+' : badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* View content */}
@@ -289,6 +309,149 @@ function QAPanel() {
                     No text extracted yet
                   </p>
                 ) : null}
+              </div>
+            )}
+
+            {viewTab === 'console' && (
+              <div className="p-2">
+                <div className="mb-2 flex items-center gap-1">
+                  <Terminal className="text-muted-foreground size-3" />
+                  <span className="text-muted-foreground flex-1 text-[10px]">
+                    {qaConsoleLogs.length} log{qaConsoleLogs.length !== 1 ? 's' : ''}
+                  </span>
+                  {qaConsoleLogs.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5"
+                      onClick={() => useZeusStore.setState({ qaConsoleLogs: [] })}
+                      title="Clear logs"
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  )}
+                </div>
+                {qaConsoleLogs.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {qaConsoleLogs.slice(-200).map((log, i) => (
+                      <div
+                        key={i}
+                        className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                          log.level === 'error'
+                            ? 'bg-red-500/10 text-red-400'
+                            : log.level === 'warning'
+                              ? 'bg-yellow-500/10 text-yellow-400'
+                              : 'bg-secondary text-foreground'
+                        }`}
+                      >
+                        <span className="text-muted-foreground mr-1 text-[9px]">
+                          {new Date(log.timestamp).toLocaleTimeString()}
+                        </span>
+                        {log.message}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground py-4 text-center text-[10px]">
+                    No console logs captured
+                  </p>
+                )}
+              </div>
+            )}
+
+            {viewTab === 'network' && (
+              <div className="p-2">
+                <div className="mb-2 flex items-center gap-1">
+                  <Network className="text-muted-foreground size-3" />
+                  <span className="text-muted-foreground flex-1 text-[10px]">
+                    {qaNetworkRequests.length} request{qaNetworkRequests.length !== 1 ? 's' : ''}
+                  </span>
+                  {qaNetworkRequests.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5"
+                      onClick={() => useZeusStore.setState({ qaNetworkRequests: [] })}
+                      title="Clear requests"
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  )}
+                </div>
+                {qaNetworkRequests.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {qaNetworkRequests.slice(-200).map((req, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                          req.failed
+                            ? 'bg-red-500/10 text-red-400'
+                            : req.status >= 400
+                              ? 'bg-yellow-500/10 text-yellow-400'
+                              : 'bg-secondary text-foreground'
+                        }`}
+                      >
+                        <span className="text-muted-foreground shrink-0 text-[9px] uppercase">{req.method}</span>
+                        <span className={`shrink-0 text-[9px] font-bold ${
+                          req.failed ? 'text-red-400' : req.status >= 400 ? 'text-yellow-400' : 'text-green-400'
+                        }`}>
+                          {req.failed ? 'ERR' : req.status}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{req.url}</span>
+                        {req.duration > 0 && (
+                          <span className="text-muted-foreground shrink-0 text-[9px]">{req.duration}ms</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground py-4 text-center text-[10px]">
+                    No network requests captured
+                  </p>
+                )}
+              </div>
+            )}
+
+            {viewTab === 'errors' && (
+              <div className="p-2">
+                <div className="mb-2 flex items-center gap-1">
+                  <Bug className="text-muted-foreground size-3" />
+                  <span className="text-muted-foreground flex-1 text-[10px]">
+                    {qaJsErrors.length} error{qaJsErrors.length !== 1 ? 's' : ''}
+                  </span>
+                  {qaJsErrors.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5"
+                      onClick={() => useZeusStore.setState({ qaJsErrors: [] })}
+                      title="Clear errors"
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  )}
+                </div>
+                {qaJsErrors.length > 0 ? (
+                  <div className="space-y-1">
+                    {qaJsErrors.slice(-100).map((err, i) => (
+                      <div key={i} className="rounded bg-red-500/10 px-1.5 py-1 font-mono text-[10px] text-red-400">
+                        <div className="font-bold">{err.message}</div>
+                        {err.stack && (
+                          <pre className="mt-0.5 whitespace-pre-wrap text-[9px] text-red-400/70">
+                            {err.stack}
+                          </pre>
+                        )}
+                        <span className="text-red-400/50 text-[9px]">
+                          {new Date(err.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground py-4 text-center text-[10px]">
+                    No JavaScript errors captured
+                  </p>
+                )}
               </div>
             )}
           </ScrollArea>

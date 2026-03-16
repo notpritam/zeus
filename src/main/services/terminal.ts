@@ -75,3 +75,11 @@ export function getSessionCount(): number {
 export function hasSession(sessionId: string): boolean {
   return sessions.has(sessionId);
 }
+
+export function getSessionPids(): Array<{ sessionId: string; pid: number }> {
+  const result: Array<{ sessionId: string; pid: number }> = [];
+  for (const [id, term] of sessions) {
+    if (term.pid) result.push({ sessionId: id, pid: term.pid });
+  }
+  return result;
+}

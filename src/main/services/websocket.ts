@@ -18,8 +18,9 @@ import type {
   ClaudeApproveToolPayload,
   ClaudeDenyToolPayload,
   SettingsPayload,
+  PerfPayload,
 } from '../types';
-import { createSession, writeToSession, resizeSession, destroySession } from './terminal';
+import { createSession, writeToSession, resizeSession, destroySession, getSessionPids } from './terminal';
 import { registerSession, markExited, markKilled, getSession, getAllSessions } from './sessions';
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
 import { getTunnelUrl } from './tunnel';
@@ -52,6 +53,7 @@ import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../
 import { GitWatcherManager } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { SystemMonitorService } from './system-monitor';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -73,6 +75,35 @@ const fileTreeManager = new FileTreeServiceManager();
 
 // QA service (singleton PinchTab server)
 let qaService: QAService | null = null;
+
+// System monitor service
+const systemMonitor = new SystemMonitorService();
+
+// Register PID sources for per-process monitoring
+systemMonitor.registerPidSource(() =>
+  getSessionPids().map((s) => ({
+    ...s,
+    type: 'terminal' as const,
+    name: `Terminal ${s.sessionId.slice(0, 8)}`,
+  })),
+);
+systemMonitor.registerPidSource(() =>
+  claudeManager.getSessionPids().map((s) => ({
+    ...s,
+    type: 'claude' as const,
+    name: `Claude ${s.sessionId.slice(0, 8)}`,
+  })),
+);
+
+// Broadcast metrics to all clients when polled
+systemMonitor.setOnMetrics((metrics) => {
+  broadcastEnvelope({
+    channel: 'perf',
+    sessionId: '',
+    payload: { type: 'perf_update', metrics } satisfies PerfPayload,
+    auth: '',
+  });
+});
 
 // Track authenticated clients
 const authenticatedClients = new WeakSet<WebSocket>();
@@ -1236,6 +1267,26 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
   }
 }
 
+async function handlePerf(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as PerfPayload;
+
+  if (payload.type === 'get_perf') {
+    const metrics = await systemMonitor.collect();
+    sendEnvelope(ws, {
+      channel: 'perf',
+      sessionId: '',
+      payload: { type: 'perf_update', metrics } satisfies PerfPayload,
+      auth: '',
+    });
+  } else if (payload.type === 'set_poll_interval') {
+    systemMonitor.setPollInterval(payload.intervalMs);
+  } else if (payload.type === 'start_monitoring') {
+    systemMonitor.start();
+  } else if (payload.type === 'stop_monitoring') {
+    systemMonitor.stop();
+  }
+}
+
 function handleMessage(ws: WebSocket, raw: string): void {
   let envelope: WsEnvelope;
   try {
@@ -1269,6 +1320,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       break;
     case 'qa':
       handleQA(ws, envelope);
+      break;
+    case 'perf':
+      handlePerf(ws, envelope);
       break;
     default:
       sendError(ws, envelope.sessionId, `Unknown channel: ${envelope.channel}`);

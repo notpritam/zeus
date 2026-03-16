@@ -119,7 +119,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -365,6 +365,47 @@ export type ActionType =
   | { action: 'task_create'; description: string }
   | { action: 'plan_presentation'; plan: string }
   | { action: 'other'; description: string };
+
+// ─── Performance / System Monitor Types ───
+
+export interface ProcessMetric {
+  pid: number;
+  name: string;
+  cpu: number; // percentage
+  memory: number; // bytes
+  type: 'electron' | 'claude' | 'terminal' | 'other';
+  sessionId?: string;
+}
+
+export interface SystemMetrics {
+  cpu: {
+    usage: number; // 0-100 percentage
+    cores: number;
+  };
+  memory: {
+    total: number; // bytes
+    used: number; // bytes
+    free: number; // bytes
+    usage: number; // 0-100 percentage
+  };
+  uptime: number; // system uptime in seconds
+  loadAvg: [number, number, number]; // 1m, 5m, 15m
+  processes: ProcessMetric[];
+  snapshot: {
+    peakCpu: number;
+    peakMemory: number;
+    monitoringSince: number; // timestamp
+    totalProcessesSpawned: number;
+  };
+  pollInterval: number; // current interval in ms
+}
+
+export type PerfPayload =
+  | { type: 'get_perf' }
+  | { type: 'perf_update'; metrics: SystemMetrics }
+  | { type: 'set_poll_interval'; intervalMs: number }
+  | { type: 'start_monitoring' }
+  | { type: 'stop_monitoring' };
 
 // ─── QA / PinchTab Types ───
 

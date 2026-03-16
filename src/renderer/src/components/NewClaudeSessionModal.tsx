@@ -29,6 +29,8 @@ interface NewClaudeSessionModalProps {
     model?: string;
     notificationSound?: boolean;
     enableGitWatcher?: boolean;
+    enableQA?: boolean;
+    qaTargetUrl?: string;
   }) => void;
   onAddProject: (name: string, path: string) => void;
   onRemoveProject: (id: string) => void;
@@ -68,6 +70,8 @@ function NewClaudeSessionModal({
   const [model, setModel] = useState(claudeDefaults.model);
   const [notificationSound, setNotificationSound] = useState(claudeDefaults.notificationSound);
   const [enableGitWatcher, setEnableGitWatcher] = useState(true);
+  const [enableQA, setEnableQA] = useState(false);
+  const [qaTargetUrl, setQaTargetUrl] = useState('http://localhost:5173');
 
   // Reset form when modal opens
   useEffect(() => {
@@ -78,6 +82,8 @@ function NewClaudeSessionModal({
       setModel(claudeDefaults.model);
       setNotificationSound(claudeDefaults.notificationSound);
       setEnableGitWatcher(true);
+      setEnableQA(false);
+      setQaTargetUrl('http://localhost:5173');
       setSelectedProjectId(lastUsedProjectId);
       setCustomDir('');
       setShowCustomDir(savedProjects.length === 0);
@@ -103,6 +109,8 @@ function NewClaudeSessionModal({
       model: model.trim() || undefined,
       notificationSound,
       enableGitWatcher,
+      enableQA,
+      qaTargetUrl: enableQA ? qaTargetUrl.trim() || undefined : undefined,
     });
     onClose();
   };
@@ -345,6 +353,36 @@ function NewClaudeSessionModal({
                 onCheckedChange={setEnableGitWatcher}
               />
             </div>
+
+            {/* QA Testing */}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="enable-qa" className="text-xs font-semibold">
+                  QA Testing
+                </Label>
+                <p className="text-muted-foreground text-[10px]">Give Claude browser testing tools via MCP</p>
+              </div>
+              <Switch
+                id="enable-qa"
+                checked={enableQA}
+                onCheckedChange={setEnableQA}
+              />
+            </div>
+
+            {enableQA && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">
+                  QA Target URL{' '}
+                  <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Input
+                  value={qaTargetUrl}
+                  onChange={(e) => setQaTargetUrl(e.target.value)}
+                  placeholder="http://localhost:5173"
+                  className="text-xs"
+                />
+              </div>
+            )}
           </div>
         </div>
 

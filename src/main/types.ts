@@ -47,4 +47,7 @@ export type {
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
+  SystemMetrics,
+  ProcessMetric,
+  PerfPayload,
 } from '../shared/types';
