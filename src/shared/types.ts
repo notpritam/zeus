@@ -282,29 +282,6 @@ export interface ClaudeHistoryPayload {
   entries: NormalizedEntry[];
 }
 
-export interface ClaudeToggleEventTrackingPayload {
-  type: 'toggle_event_tracking';
-  enabled: boolean;
-}
-
-export interface EventLogEntry {
-  ts: string;
-  dir: 'in' | 'out';
-  channel: string;
-  sessionId: string;
-  payloadType: string | undefined;
-}
-
-export interface ClaudeEventTrackedPayload {
-  type: 'event_tracked';
-  entry: EventLogEntry;
-}
-
-export interface ClaudeEventTrackingStatusPayload {
-  type: 'event_tracking_status';
-  enabled: boolean;
-}
-
 export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
@@ -317,9 +294,7 @@ export type ClaudePayload =
   | ClaudeSessionListPayload
   | ClaudeGetHistoryPayload
   | ClaudeHistoryPayload
-  | ClaudeToggleEventTrackingPayload
-  | ClaudeEventTrackedPayload
-  | ClaudeEventTrackingStatusPayload;
+;
 
 // ─── Claude UI Types (renderer-side) ───
 

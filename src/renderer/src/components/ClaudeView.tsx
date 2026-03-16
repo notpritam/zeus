@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Radio, Trash } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -372,69 +372,6 @@ function QueuedMessageItem({
   );
 }
 
-// ─── Event Log Panel ───
-
-function EventLogPanel({ sessionId }: { sessionId: string }) {
-  const events = useZeusStore((s) => s.eventLog[sessionId] ?? []);
-  const clearEventLog = useZeusStore((s) => s.clearEventLog);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events.length]);
-
-  const dirColor = (dir: 'in' | 'out') =>
-    dir === 'in' ? 'text-blue-400' : 'text-green-400';
-
-  const channelColor = (ch: string) => {
-    switch (ch) {
-      case 'claude': return 'text-purple-400';
-      case 'terminal': return 'text-yellow-400';
-      case 'git': return 'text-orange-400';
-      case 'control': return 'text-cyan-400';
-      case 'qa': return 'text-pink-400';
-      default: return 'text-muted-foreground';
-    }
-  };
-
-  return (
-    <div className="border-border bg-black/40 flex max-h-48 flex-col border-b">
-      <div className="border-border flex items-center justify-between border-b px-3 py-1">
-        <div className="flex items-center gap-2">
-          <Radio className="size-3 animate-pulse text-red-400" />
-          <span className="text-[10px] font-semibold text-red-400 uppercase tracking-wider">Recording Events</span>
-          <Badge variant="outline" className="text-[9px]">{events.length}</Badge>
-        </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="text-muted-foreground hover:text-foreground h-5 px-1"
-          onClick={() => clearEventLog(sessionId)}
-        >
-          <Trash className="size-3" />
-        </Button>
-      </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto font-mono text-[10px] leading-relaxed">
-        {events.length === 0 ? (
-          <p className="text-muted-foreground px-3 py-2">Waiting for events...</p>
-        ) : (
-          events.map((ev, i) => (
-            <div key={i} className="hover:bg-white/5 flex items-baseline gap-2 px-3 py-0.5">
-              <span className="text-muted-foreground/50 shrink-0">{ev.ts.split('T')[1]?.slice(0, 12)}</span>
-              <span className={`shrink-0 font-bold ${dirColor(ev.dir)}`}>
-                {ev.dir === 'in' ? '→' : '←'}
-              </span>
-              <span className={`shrink-0 ${channelColor(ev.channel)}`}>{ev.channel}</span>
-              <span className="text-foreground truncate">{ev.payloadType ?? '—'}</span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
@@ -492,10 +429,6 @@ function ClaudeView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-
-  // Event tracking
-  const isTracking = useZeusStore((s) => session ? (s.eventTracking[session.id] ?? false) : false);
-  const toggleEventTracking = useZeusStore((s) => s.toggleEventTracking);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -623,15 +556,6 @@ function ClaudeView({
           <span className="text-primary text-sm font-bold">Claude</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant={isTracking ? 'destructive' : 'ghost'}
-            size="xs"
-            className={isTracking ? '' : 'text-muted-foreground hover:text-primary'}
-            onClick={() => toggleEventTracking(session.id, !isTracking)}
-          >
-            <Radio className={`size-3 ${isTracking ? 'animate-pulse' : ''}`} />
-            {isTracking ? 'Stop' : 'Track Events'}
-          </Button>
           {(session.status === 'error' || session.status === 'done') && (
             <Button
               variant="ghost"
@@ -645,9 +569,6 @@ function ClaudeView({
           )}
         </div>
       </div>
-
-      {/* Event log panel — shown when tracking */}
-      {isTracking && <EventLogPanel sessionId={session.id} />}
 
       {/* Entry list */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">

@@ -134,24 +134,7 @@ class ZeusWebSocket {
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
   }
 
-  onAny(handler: ChannelHandler): () => void {
-    if (!this.listeners.has('*')) {
-      this.listeners.set('*', new Set());
-    }
-    this.listeners.get('*')!.add(handler);
-    return () => {
-      this.listeners.get('*')?.delete(handler);
-    };
-  }
-
   private dispatch(envelope: WsEnvelope): void {
-    // Fire global listeners first
-    const globalHandlers = this.listeners.get('*');
-    if (globalHandlers) {
-      for (const handler of globalHandlers) {
-        handler(envelope);
-      }
-    }
     const handlers = this.listeners.get(envelope.channel);
     if (handlers) {
       for (const handler of handlers) {

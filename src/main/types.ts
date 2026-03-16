@@ -50,8 +50,4 @@ export type {
   SystemMetrics,
   ProcessMetric,
   PerfPayload,
-  EventLogEntry,
-  ClaudeToggleEventTrackingPayload,
-  ClaudeEventTrackedPayload,
-  ClaudeEventTrackingStatusPayload,
 } from '../shared/types';

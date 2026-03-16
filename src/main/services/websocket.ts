@@ -6,7 +6,6 @@ import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
 import { app, Notification as ElectronNotification } from 'electron';
 import { getMainWindow } from '../index';
-import { logEvent } from './event-logger';
 import type {
   WsEnvelope,
   TerminalInputPayload,
@@ -156,7 +155,6 @@ function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
 
 function broadcastEnvelope(envelope: WsEnvelope): void {
   if (!wss) return;
-  logEvent('out', envelope);
   for (const client of wss.clients) {
     sendEnvelope(client, envelope);
   }
@@ -1535,7 +1533,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
     return;
   }
 
-  logEvent('in', envelope);
 
   switch (envelope.channel) {
     case 'control':

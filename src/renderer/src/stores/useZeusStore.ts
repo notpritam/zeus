@@ -105,10 +105,6 @@ interface ZeusState {
   qaAgentSessionId: string | null;
   qaAgentEntries: QaAgentLogEntry[];
 
-  // Event tracking
-  eventTracking: Record<string, boolean>;
-  eventLog: Record<string, Array<{ ts: string; dir: 'in' | 'out'; channel: string; sessionId: string; payloadType: string | undefined }>>;
-
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
   perfMonitoring: boolean;
@@ -213,10 +209,6 @@ interface ZeusState {
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
   toggleRightPanel: () => void;
-
-  // Event tracking actions
-  toggleEventTracking: (sessionId: string, enabled: boolean) => void;
-  clearEventLog: (sessionId: string) => void;
 
   // Performance actions
   startPerfMonitoring: () => void;
@@ -362,8 +354,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaAgentSessionId: null,
   qaAgentEntries: [],
 
-  eventTracking: {},
-  eventLog: {},
 
   perfMetrics: null,
   perfMonitoring: false,
@@ -636,30 +626,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
-    });
-
-    // Global event interceptor for client-side event tracking
-    const unsubEventTracker = zeusWs.onAny((envelope: WsEnvelope) => {
-      const sid = envelope.sessionId;
-      if (!sid) return;
-      const state = get();
-      if (!state.eventTracking[sid]) return;
-      const payloadType =
-        typeof envelope.payload === 'object' && envelope.payload !== null
-          ? (envelope.payload as Record<string, unknown>).type as string | undefined
-          : undefined;
-      const entry = {
-        ts: new Date().toISOString(),
-        dir: 'in' as const,
-        channel: envelope.channel,
-        sessionId: sid,
-        payloadType,
-      };
-      set((s) => {
-        const existing = s.eventLog[sid] ?? [];
-        const updated = [...existing, entry].slice(-500);
-        return { eventLog: { ...s.eventLog, [sid]: updated } };
-      });
     });
 
     // Subscribe to settings channel
@@ -1007,7 +973,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubFiles();
       unsubQA();
       unsubPerf();
-      unsubEventTracker();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -1854,21 +1819,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     set((state) => ({ activeRightTab: state.activeRightTab ? null : 'source-control' }));
   },
 
-
-  // --- Event tracking actions ---
-
-  toggleEventTracking: (sessionId: string, enabled: boolean) => {
-    set((state) => ({
-      eventTracking: { ...state.eventTracking, [sessionId]: enabled },
-      eventLog: enabled ? state.eventLog : { ...state.eventLog, [sessionId]: [] },
-    }));
-  },
-
-  clearEventLog: (sessionId: string) => {
-    set((state) => ({
-      eventLog: { ...state.eventLog, [sessionId]: [] },
-    }));
-  },
 
   // --- Performance actions ---
 
