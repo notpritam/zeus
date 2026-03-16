@@ -30,9 +30,27 @@ export type ControlResponseType =
   | { subtype: 'success'; request_id: string; response?: unknown }
   | { subtype: 'error'; request_id: string; error?: string };
 
+export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ImageContentBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: ImageMediaType;
+    data: string; // raw base64 string (no data: prefix)
+  };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+
 export interface UserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
 }
 
 export type PermissionResult =
@@ -249,6 +267,6 @@ export function makeControlResponse(requestId: string, response: unknown): Contr
   };
 }
 
-export function makeUserMessage(content: string): UserMessage {
+export function makeUserMessage(content: string | ContentBlock[]): UserMessage {
   return { type: 'user', message: { role: 'user', content } };
 }

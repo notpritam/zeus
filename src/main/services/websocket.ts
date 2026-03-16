@@ -424,20 +424,26 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       sendError(ws, envelope.sessionId, `Failed to resume Claude: ${(err as Error).message}`);
     }
   } else if (payload.type === 'send_message') {
-    const { content, files } = envelope.payload as ClaudeSendMessagePayload;
+    const { content, files, images } = envelope.payload as ClaudeSendMessagePayload;
     const session = claudeManager.getSession(envelope.sessionId);
     if (session) {
       adoptClaudeSession(ws, envelope.sessionId);
+
+      // Build metadata for DB persistence
+      const meta: Record<string, unknown> = {};
+      if (files && files.length > 0) meta.files = files;
+      if (images && images.length > 0) meta.images = images.map((img) => ({ filename: img.filename, mediaType: img.mediaType }));
+
       // Persist user message to DB (original content, not enhanced)
       upsertClaudeEntry(envelope.sessionId, {
         id: `user-${Date.now()}`,
         entryType: { type: 'user_message' },
         content,
-        metadata: files && files.length > 0 ? { files } : undefined,
+        metadata: Object.keys(meta).length > 0 ? meta : undefined,
       });
 
       // Build enhanced message with file contents if files attached
-      let enhancedContent = content;
+      let enhancedText = content;
       if (files && files.length > 0) {
         const fileService = fileTreeManager.getService(envelope.sessionId);
         if (fileService) {
@@ -465,12 +471,38 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
             }
           }
           if (fileBlocks.length > 0) {
-            enhancedContent = `<attached_files>\n${fileBlocks.join('\n')}\n</attached_files>\n\n${content}`;
+            enhancedText = `<attached_files>\n${fileBlocks.join('\n')}\n</attached_files>\n\n${content}`;
           }
         }
       }
 
-      await session.sendMessage(enhancedContent);
+      // If images attached, send as multi-part content blocks
+      if (images && images.length > 0) {
+        const blocks: import('./claude-types').ContentBlock[] = [];
+
+        // Add image blocks
+        for (const img of images) {
+          // Strip data URL prefix to get raw base64
+          const base64 = img.dataUrl.replace(/^data:image\/\w+;base64,/, '');
+          blocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.mediaType,
+              data: base64,
+            },
+          });
+        }
+
+        // Add text block
+        if (enhancedText) {
+          blocks.push({ type: 'text', text: enhancedText });
+        }
+
+        await session.sendMessage(blocks);
+      } else {
+        await session.sendMessage(enhancedText);
+      }
     } else {
       sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
     }

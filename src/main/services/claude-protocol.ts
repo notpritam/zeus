@@ -6,6 +6,7 @@ import { createInterface } from 'readline';
 import { EventEmitter } from 'events';
 import type {
   ClaudeJson,
+  ContentBlock,
   ControlRequestType,
   PermissionMode,
   PermissionResult,
@@ -84,7 +85,7 @@ export class ProtocolPeer extends EventEmitter {
     this.sendJson(makeControlRequest({ subtype: 'set_permission_mode', mode }));
   }
 
-  async sendUserMessage(content: string): Promise<void> {
+  async sendUserMessage(content: string | ContentBlock[]): Promise<void> {
     this.sendJson(makeUserMessage(content));
   }
 

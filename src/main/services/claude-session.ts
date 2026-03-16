@@ -133,7 +133,7 @@ export class ClaudeSession extends EventEmitter {
   }
 
   /** Send a follow-up message to an active session */
-  async sendMessage(content: string): Promise<void> {
+  async sendMessage(content: string | import('./claude-types').ContentBlock[]): Promise<void> {
     if (!this.protocol) throw new Error('Session not started');
     await this.protocol.sendUserMessage(content);
   }

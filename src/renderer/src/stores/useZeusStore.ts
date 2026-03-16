@@ -78,7 +78,6 @@ interface ZeusState {
 
   // Right panel
   rightPanelOpen: boolean;
-  rightPanelTab: 'source-control' | 'file-explorer';
 
   // Actions
   connect: () => () => void;
@@ -98,7 +97,7 @@ interface ZeusState {
     notificationSound?: boolean;
     enableGitWatcher?: boolean;
   }) => void;
-  sendClaudeMessage: (content: string, files?: string[]) => void;
+  sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   approveClaudeTool: (approvalId: string) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
   interruptClaude: () => void;
@@ -151,7 +150,6 @@ interface ZeusState {
 
   // Right panel actions
   toggleRightPanel: () => void;
-  setRightPanelTab: (tab: 'source-control' | 'file-explorer') => void;
 
   // Settings actions
   addProject: (name: string, path: string) => void;
@@ -198,7 +196,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   viewMode: 'terminal',
 
   rightPanelOpen: false,
-  rightPanelTab: 'source-control',
 
   connect: () => {
     // Subscribe to status channel
@@ -799,16 +796,21 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
-  sendClaudeMessage: (content: string, files?: string[]) => {
+  sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => {
     const { activeClaudeId } = get();
     if (!activeClaudeId) return;
+
+    // Build metadata for optimistic entry
+    const meta: Record<string, unknown> = {};
+    if (files && files.length > 0) meta.files = files;
+    if (images && images.length > 0) meta.images = images.map((img) => ({ filename: img.filename, dataUrl: img.dataUrl }));
 
     // Add optimistic user message entry (display original content, not file contents)
     const userEntry: NormalizedEntry = {
       id: `user-${Date.now()}`,
       entryType: { type: 'user_message' },
       content,
-      metadata: files && files.length > 0 ? { files } : undefined,
+      metadata: Object.keys(meta).length > 0 ? meta : undefined,
     };
     set((state) => ({
       claudeEntries: {
@@ -820,7 +822,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'claude',
       sessionId: activeClaudeId,
-      payload: { type: 'send_message', content, files },
+      payload: { type: 'send_message', content, files, images },
       auth: '',
     });
   },
@@ -1309,9 +1311,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     set((state) => ({ rightPanelOpen: !state.rightPanelOpen }));
   },
 
-  setRightPanelTab: (tab: 'source-control' | 'file-explorer') => {
-    set({ rightPanelTab: tab });
-  },
 
   // --- Settings actions ---
 

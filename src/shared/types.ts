@@ -229,10 +229,17 @@ export interface ClaudeResumePayload {
   workingDir?: string;
 }
 
+export interface ImageAttachment {
+  filename: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  dataUrl: string; // data:image/png;base64,...
+}
+
 export interface ClaudeSendMessagePayload {
   type: 'send_message';
   content: string;
   files?: string[];
+  images?: ImageAttachment[];
 }
 
 export interface ClaudeApproveToolPayload {

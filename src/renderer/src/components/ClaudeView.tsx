@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import type {
@@ -25,7 +25,7 @@ function CopyAction({ text, align = 'left' }: { text: string; align?: 'left' | '
   };
 
   return (
-    <div className={`flex ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex ${align === 'right' ? 'justify-end' : 'justify-start'} ${copied ? '' : 'opacity-0 group-hover/msg:opacity-100'} transition-opacity`}>
       <button
         onClick={handleCopy}
         className="text-muted-foreground hover:text-foreground mt-1 flex items-center gap-1 px-1 text-[10px] transition-colors"
@@ -37,12 +37,58 @@ function CopyAction({ text, align = 'left' }: { text: string; align?: 'left' | '
   );
 }
 
+const USER_BUBBLE_MAX_H = 150; // px – collapsed height limit
+
 function UserBubble({ content, metadata }: { content: string; metadata?: unknown }) {
-  const files = (metadata as { files?: string[] } | undefined)?.files;
+  const meta = metadata as { files?: string[]; images?: Array<{ filename: string; dataUrl: string }> } | undefined;
+  const files = meta?.files;
+  const images = meta?.images;
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const contentRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setOverflows(contentRef.current.scrollHeight > USER_BUBBLE_MAX_H);
+    }
+  }, [content]);
+
   return (
-    <div className="flex flex-col items-end">
+    <div className="group/msg flex flex-col items-end">
       <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
-        <p className="text-foreground select-text text-sm whitespace-pre-wrap">{content}</p>
+        {images && images.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {images.map((img, i) => (
+              <img
+                key={i}
+                src={img.dataUrl}
+                alt={img.filename}
+                className="max-h-40 rounded-md border border-primary/20 object-cover"
+              />
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <p
+            ref={contentRef}
+            className="text-foreground select-text text-sm whitespace-pre-wrap overflow-hidden transition-[max-height] duration-200"
+            style={{ maxHeight: expanded || !overflows ? 'none' : `${USER_BUBBLE_MAX_H}px` }}
+          >
+            {content}
+          </p>
+          {overflows && !expanded && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-primary/10 to-transparent" />
+          )}
+        </div>
+        {overflows && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-muted-foreground hover:text-foreground mt-1 flex items-center gap-0.5 text-[10px] transition-colors"
+          >
+            {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
         {files && files.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {files.map((f) => (
@@ -61,7 +107,7 @@ function UserBubble({ content, metadata }: { content: string; metadata?: unknown
 
 function AssistantBubble({ content }: { content: string }) {
   return (
-    <div className="flex flex-col items-start">
+    <div className="group/msg flex flex-col items-start">
       <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
         <div className="select-text">
           <Markdown content={content} />
@@ -251,11 +297,28 @@ function ApprovalBanner({
 
 // ─── Main ClaudeView ───
 
+const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+interface ImageAttachmentLocal {
+  id: string;
+  filename: string;
+  mediaType: string;
+  dataUrl: string;
+}
+
+function fileToDataUrl(file: globalThis.File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(reader.result as string));
+    reader.readAsDataURL(file);
+  });
+}
+
 interface ClaudeViewProps {
   session: ClaudeSessionInfo | null;
   entries: NormalizedEntry[];
   approvals: ClaudeApprovalInfo[];
-  onSendMessage: (content: string, files?: string[]) => void;
+  onSendMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   onApprove: (approvalId: string) => void;
   onDeny: (approvalId: string) => void;
   onInterrupt: () => void;
