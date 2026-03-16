@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { GitBranch, FolderOpen, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { GitBranch, FolderOpen, RefreshCw } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
 import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from '@/components/ui/ResizablePanel';
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 
 function WatcherStatusBar() {
   const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
@@ -68,110 +68,73 @@ function WatcherStatusBar() {
   );
 }
 
-function SectionHeader({
+function ActivityBarIcon({
   icon: Icon,
-  label,
-  collapsed,
-  onToggle,
+  tab,
+  tooltip,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  collapsed: boolean;
-  onToggle: () => void;
+  tab: 'source-control' | 'explorer';
+  tooltip: string;
 }) {
+  const activeRightTab = useZeusStore((s) => s.activeRightTab);
+  const setActiveRightTab = useZeusStore((s) => s.setActiveRightTab);
+
+  const isActive = activeRightTab === tab;
+
+  const handleClick = () => {
+    if (isActive) {
+      // Clicking active tab collapses the panel
+      setActiveRightTab(null);
+    } else {
+      setActiveRightTab(tab);
+    }
+  };
+
   return (
-    <button
-      className="bg-bg-card border-border hover:bg-secondary/50 flex w-full shrink-0 items-center gap-1.5 border-b px-2 py-1 text-left transition-colors"
-      onClick={onToggle}
-    >
-      {collapsed ? (
-        <ChevronRight className="text-text-muted size-3" />
-      ) : (
-        <ChevronDown className="text-text-muted size-3" />
-      )}
-      <Icon className="text-text-muted size-3" />
-      <span className="text-text-secondary text-[11px] font-semibold uppercase tracking-wider">
-        {label}
-      </span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={handleClick}
+          className={`flex w-full items-center justify-center py-1.5 transition-colors ${
+            isActive
+              ? 'border-primary bg-primary/10 text-foreground border-l-2'
+              : 'text-muted-foreground/60 hover:text-foreground border-l-2 border-transparent'
+          }`}
+        >
+          <Icon className="size-5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="left" sideOffset={4}>
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
 function RightPanel() {
-  const [gitCollapsed, setGitCollapsed] = useState(false);
-  const [filesCollapsed, setFilesCollapsed] = useState(false);
-
-  const bothOpen = !gitCollapsed && !filesCollapsed;
+  const activeRightTab = useZeusStore((s) => s.activeRightTab);
 
   return (
-    <div className="bg-card flex h-full flex-col overflow-hidden">
-      {bothOpen ? (
-        /* Both sections open — use resizable vertical split */
-        <ResizablePanelGroup orientation="vertical">
-          <ResizablePanel id="right-git" defaultSize="50%" minSize="60px">
-            <div className="flex h-full flex-col">
-              <SectionHeader
-                icon={GitBranch}
-                label="Source Control"
-                collapsed={false}
-                onToggle={() => setGitCollapsed(true)}
-              />
-              <div className="min-h-0 flex-1">
-                <GitPanel />
-              </div>
-            </div>
-          </ResizablePanel>
-
-          <ResizableHandle className="!h-px !w-full" />
-
-          <ResizablePanel id="right-files" defaultSize="50%" minSize="60px">
-            <div className="flex h-full flex-col">
-              <SectionHeader
-                icon={FolderOpen}
-                label="Explorer"
-                collapsed={false}
-                onToggle={() => setFilesCollapsed(true)}
-              />
-              <div className="min-h-0 flex-1">
-                <FileExplorer />
-              </div>
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      ) : (
-        /* One or both collapsed — no resizable needed */
-        <>
-          {/* Source Control */}
-          <SectionHeader
-            icon={GitBranch}
-            label="Source Control"
-            collapsed={gitCollapsed}
-            onToggle={() => setGitCollapsed((v) => !v)}
-          />
-          {!gitCollapsed && (
+    <TooltipProvider delayDuration={300}>
+      <div className="flex h-full">
+        {/* Panel content - only when a tab is active */}
+        {activeRightTab && (
+          <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
             <div className="min-h-0 flex-1 overflow-hidden">
-              <GitPanel />
+              {activeRightTab === 'source-control' ? <GitPanel /> : <FileExplorer />}
             </div>
-          )}
+            <WatcherStatusBar />
+          </div>
+        )}
 
-          {/* Explorer */}
-          <SectionHeader
-            icon={FolderOpen}
-            label="Explorer"
-            collapsed={filesCollapsed}
-            onToggle={() => setFilesCollapsed((v) => !v)}
-          />
-          {!filesCollapsed && (
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <FileExplorer />
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Watcher status bar — shows when disconnected */}
-      <WatcherStatusBar />
-    </div>
+        {/* Activity Bar - always visible */}
+        <div className="bg-bg border-border w-10 shrink-0 flex flex-col items-center border-l pt-2 gap-3">
+          <ActivityBarIcon icon={GitBranch} tab="source-control" tooltip="Source Control" />
+          <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
+        </div>
+      </div>
+    </TooltipProvider>
   );
 }
 

@@ -77,7 +77,7 @@ interface ZeusState {
   viewMode: ViewMode;
 
   // Right panel
-  rightPanelOpen: boolean;
+  activeRightTab: 'source-control' | 'explorer' | null;
 
   // Actions
   connect: () => () => void;
@@ -149,6 +149,7 @@ interface ZeusState {
   reconnectFileWatcher: () => void;
 
   // Right panel actions
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | null) => void;
   toggleRightPanel: () => void;
 
   // Settings actions
@@ -195,7 +196,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   viewMode: 'terminal',
 
-  rightPanelOpen: false,
+  activeRightTab: null,
 
   connect: () => {
     // Subscribe to status channel
@@ -483,8 +484,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
         // Auto-open right panel on first status with changes
         const totalChanges = payload.data.staged.length + payload.data.unstaged.length;
-        if (!get().rightPanelOpen && totalChanges > 0) {
-          set({ rightPanelOpen: true });
+        if (!get().activeRightTab && totalChanges > 0) {
+          set({ activeRightTab: 'source-control' });
         }
       }
 
@@ -1307,8 +1308,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | null) => {
+    set({ activeRightTab: tab });
+  },
+
   toggleRightPanel: () => {
-    set((state) => ({ rightPanelOpen: !state.rightPanelOpen }));
+    set((state) => ({ activeRightTab: state.activeRightTab ? null : 'source-control' }));
   },
 
 

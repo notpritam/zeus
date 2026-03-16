@@ -36,7 +36,7 @@ function App() {
     claudeDefaults,
     lastUsedProjectId,
     showNewClaudeModal,
-    rightPanelOpen,
+    activeRightTab,
     openDiffTabs,
     connect,
     togglePower,
@@ -136,7 +136,7 @@ function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onToggleRightPanel={toggleRightPanel}
-        rightPanelOpen={rightPanelOpen}
+        rightPanelOpen={activeRightTab !== null}
         onOpenSettings={() => setShowSettings(true)}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
       />
@@ -239,7 +239,7 @@ function App() {
 
           <ResizablePanel
             id="content"
-            defaultSize={rightPanelOpen ? '60%' : '85%'}
+            defaultSize={activeRightTab ? '60%' : '75%'}
             minSize="30%"
           >
             <div data-testid="main-area-desktop" className="flex h-full flex-col">
@@ -266,14 +266,15 @@ function App() {
             </div>
           </ResizablePanel>
 
-          {rightPanelOpen && (
-            <>
-              <ResizableHandle />
-              <ResizablePanel id="right-panel" defaultSize="25%" minSize="200px" maxSize="40%">
-                <RightPanel />
-              </ResizablePanel>
-            </>
-          )}
+          <ResizableHandle />
+          <ResizablePanel
+            id="right-panel"
+            defaultSize={activeRightTab ? '25%' : '40px'}
+            minSize={activeRightTab ? '200px' : '40px'}
+            maxSize={activeRightTab ? '40%' : '40px'}
+          >
+            <RightPanel />
+          </ResizablePanel>
         </ResizablePanelGroup>
       </div>
 

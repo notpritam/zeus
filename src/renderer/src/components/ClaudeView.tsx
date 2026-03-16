@@ -337,10 +337,12 @@ function ClaudeView({
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
+  const [attachedImages, setAttachedImages] = useState<ImageAttachmentLocal[]>([]);
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -380,6 +382,49 @@ function ClaudeView({
     setAttachedFiles((prev) => prev.filter((f) => f.path !== filePath));
   }, []);
 
+  const addImageFiles = useCallback(async (files: globalThis.File[]) => {
+    for (const file of files) {
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) continue;
+      const dataUrl = await fileToDataUrl(file);
+      setAttachedImages((prev) => [
+        ...prev,
+        { id: `img-${Date.now()}-${Math.random()}`, filename: file.name, mediaType: file.type, dataUrl },
+      ]);
+    }
+  }, []);
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageFiles: globalThis.File[] = [];
+      for (const item of items) {
+        if (item.kind === 'file' && ACCEPTED_IMAGE_TYPES.has(item.type)) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        addImageFiles(imageFiles);
+      }
+    },
+    [addImageFiles],
+  );
+
+  const handleImagePick = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      addImageFiles(files);
+      e.target.value = '';
+    },
+    [addImageFiles],
+  );
+
+  const removeImage = useCallback((id: string) => {
+    setAttachedImages((prev) => prev.filter((img) => img.id !== id));
+  }, []);
+
   if (!session) {
     return (
       <div
@@ -403,10 +448,15 @@ function ClaudeView({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed && attachedFiles.length === 0) return;
-    onSendMessage(trimmed, attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined);
+    if (!trimmed && attachedFiles.length === 0 && attachedImages.length === 0) return;
+    onSendMessage(
+      trimmed,
+      attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined,
+      attachedImages.length > 0 ? attachedImages.map((img) => ({ filename: img.filename, mediaType: img.mediaType, dataUrl: img.dataUrl })) : undefined,
+    );
     setInput('');
     setAttachedFiles([]);
+    setAttachedImages([]);
     setShowMentionPopover(false);
   };
 
@@ -491,9 +541,25 @@ function ClaudeView({
           </div>
         ) : (
           <>
-            {/* Attached file chips */}
-            {attachedFiles.length > 0 && (
+            {/* Attached file chips + image thumbnails */}
+            {(attachedFiles.length > 0 || attachedImages.length > 0) && (
               <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+                {attachedImages.map((img) => (
+                  <div key={img.id} className="group/thumb relative">
+                    <img
+                      src={img.dataUrl}
+                      alt={img.filename}
+                      className="h-16 w-16 rounded-md border border-border object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(img.id)}
+                      className="absolute -right-1 -top-1 hidden rounded-full bg-destructive p-0.5 text-white group-hover/thumb:block"
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  </div>
+                ))}
                 {attachedFiles.map((f) => (
                   <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
                     {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
@@ -511,7 +577,7 @@ function ClaudeView({
             )}
 
             {/* Input bar with popover */}
-            <form onSubmit={handleSubmit} className="relative flex gap-2 px-4 py-3">
+            <form onSubmit={handleSubmit} className="relative flex items-center gap-2 px-4 py-3">
               {showMentionPopover && session.status === 'running' && (
                 <FileMentionPopover
                   sessionId={session.id}
@@ -520,19 +586,38 @@ function ClaudeView({
                   onClose={() => setShowMentionPopover(false)}
                 />
               )}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                className="hidden"
+                onChange={handleImagePick}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground size-8 shrink-0"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={session.status !== 'running'}
+              >
+                <ImagePlus className="size-4" />
+              </Button>
               <Input
                 ref={inputRef}
                 data-testid="claude-input"
                 value={input}
                 onChange={handleInputChange}
-                placeholder="Send follow-up... (@ to attach files)"
+                onPaste={handlePaste}
+                placeholder="Send follow-up... (@ files, paste images)"
                 disabled={session.status !== 'running'}
                 className="text-sm"
               />
               <Button
                 data-testid="claude-send"
                 type="submit"
-                disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0)}
+                disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0 && attachedImages.length === 0)}
                 size="sm"
               >
                 <Send className="size-3" />
