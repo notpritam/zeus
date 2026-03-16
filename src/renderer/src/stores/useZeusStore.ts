@@ -944,37 +944,59 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   resumeClaudeSession: (id: string) => {
     const state = get();
     const session = state.claudeSessions.find((s) => s.id === id);
-    if (!session) return;
+    if (!session || !session.claudeSessionId) return;
 
-    const entries = state.claudeEntries[id] ?? [];
-    // Gather last few user/assistant messages for context
-    const contextEntries = entries
-      .filter((e) => e.entryType.type === 'user_message' || e.entryType.type === 'assistant_message')
-      .slice(-6);
+    const existingEntries = state.claudeEntries[id] ?? [];
+    const resumePrompt = 'Continue where you left off.';
 
-    const contextLines = contextEntries.map((e) => {
-      const role = e.entryType.type === 'user_message' ? 'User' : 'Assistant';
-      // Truncate long messages to keep prompt manageable
-      const text = e.content.length > 500 ? e.content.slice(0, 500) + '...' : e.content;
-      return `${role}: ${text}`;
-    });
-
-    const resumePrompt = [
-      'Continue from a previous session that errored out. Here is the recent conversation context:',
-      '',
-      ...contextLines,
-      '',
-      'Please continue where you left off.',
-    ].join('\n');
-
-    // Start a new session with the context prompt and same config
-    get().startClaudeSession({
-      prompt: resumePrompt,
-      workingDir: session.workingDir || '/',
-      sessionName: session.name ? `${session.name} (resumed)` : undefined,
+    // Create a new client session ID but resume the real Claude conversation
+    const newId = `claude-${Date.now()}-${++claudeIdCounter}`;
+    const newSession: ClaudeSessionInfo = {
+      id: newId,
+      claudeSessionId: session.claudeSessionId,
+      status: 'running',
+      prompt: session.prompt,
+      name: session.name ? `${session.name} (resumed)` : session.name,
       notificationSound: session.notificationSound,
       enableGitWatcher: session.enableGitWatcher,
+      workingDir: session.workingDir,
+      startedAt: Date.now(),
+    };
+
+    set((state) => ({
+      claudeSessions: [...state.claudeSessions, newSession],
+      activeClaudeId: newId,
+      claudeEntries: { ...state.claudeEntries, [newId]: [...existingEntries] },
+      viewMode: 'claude',
+    }));
+
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: newId,
+      payload: {
+        type: 'resume_claude',
+        claudeSessionId: session.claudeSessionId,
+        prompt: resumePrompt,
+        workingDir: session.workingDir || '/',
+      },
+      auth: '',
     });
+
+    // Start git/file watchers if enabled
+    if (session.enableGitWatcher !== false) {
+      zeusWs.send({
+        channel: 'git',
+        sessionId: newId,
+        payload: { type: 'start_watching', workingDir: session.workingDir || '/' },
+        auth: '',
+      });
+      zeusWs.send({
+        channel: 'filetree',
+        sessionId: newId,
+        payload: { type: 'start_watching', workingDir: session.workingDir || '/' },
+        auth: '',
+      });
+    }
   },
 
   queueMessage: (content: string) => {

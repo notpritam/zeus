@@ -419,6 +419,21 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         { workingDir },
       );
 
+      // Persist resumed session to DB
+      insertClaudeSession({
+        id: envelope.sessionId,
+        claudeSessionId: opts.claudeSessionId,
+        status: 'running',
+        prompt: opts.prompt,
+        name: null,
+        notificationSound: true,
+        workingDir,
+        permissionMode: 'bypassPermissions',
+        model: null,
+        startedAt: Date.now(),
+        endedAt: null,
+      });
+
       if (!clientClaudeSessions.has(ws)) clientClaudeSessions.set(ws, new Set());
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);
 
