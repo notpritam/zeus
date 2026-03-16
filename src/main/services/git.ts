@@ -30,6 +30,10 @@ export class GitWatcher extends EventEmitter {
     this.workingDir = workingDir;
   }
 
+  getWorkingDir(): string {
+    return this.workingDir;
+  }
+
   async start(): Promise<void> {
     try {
       await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
@@ -244,12 +248,19 @@ export class GitWatcher extends EventEmitter {
 export class GitWatcherManager {
   private watchers = new Map<string, GitWatcher>();
 
-  async startWatching(sessionId: string, workingDir: string): Promise<GitWatcher> {
+  async startWatching(
+    sessionId: string,
+    workingDir: string,
+  ): Promise<{ watcher: GitWatcher; isNew: boolean }> {
+    const existing = this.watchers.get(sessionId);
+    if (existing && existing.getWorkingDir() === workingDir) {
+      return { watcher: existing, isNew: false };
+    }
     await this.stopWatching(sessionId);
     const watcher = new GitWatcher(workingDir);
     this.watchers.set(sessionId, watcher);
     await watcher.start();
-    return watcher;
+    return { watcher, isNew: true };
   }
 
   async stopWatching(sessionId: string): Promise<void> {

@@ -253,12 +253,19 @@ export class FileTreeService extends EventEmitter {
 export class FileTreeServiceManager {
   private services = new Map<string, FileTreeService>();
 
-  async startWatching(sessionId: string, workingDir: string): Promise<FileTreeService> {
+  async startWatching(
+    sessionId: string,
+    workingDir: string,
+  ): Promise<{ service: FileTreeService; isNew: boolean }> {
+    const existing = this.services.get(sessionId);
+    if (existing && existing.getWorkingDir() === workingDir) {
+      return { service: existing, isNew: false };
+    }
     await this.stopWatching(sessionId);
     const service = new FileTreeService(workingDir);
     this.services.set(sessionId, service);
     await service.start();
-    return service;
+    return { service, isNew: true };
   }
 
   async stopWatching(sessionId: string): Promise<void> {

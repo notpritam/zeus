@@ -311,22 +311,22 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           return { claudeSessions: merged };
         });
 
-        // Re-request git/files watchers for running sessions on reconnect
-        for (const s of sessions) {
-          if (s.status === 'running' && s.workingDir) {
-            zeusWs.send({
-              channel: 'git',
-              sessionId: s.id,
-              payload: { type: 'start_watching', workingDir: s.workingDir },
-              auth: '',
-            });
-            zeusWs.send({
-              channel: 'files',
-              sessionId: s.id,
-              payload: { type: 'start_watching', workingDir: s.workingDir },
-              auth: '',
-            });
-          }
+        // Only request state for the active session (watchers are already alive on backend)
+        const activeId = get().activeClaudeId;
+        const activeSession = sessions.find((s) => s.id === activeId && s.workingDir);
+        if (activeSession) {
+          zeusWs.send({
+            channel: 'git',
+            sessionId: activeSession.id,
+            payload: { type: 'start_watching', workingDir: activeSession.workingDir! },
+            auth: '',
+          });
+          zeusWs.send({
+            channel: 'files',
+            sessionId: activeSession.id,
+            payload: { type: 'start_watching', workingDir: activeSession.workingDir! },
+            auth: '',
+          });
         }
         return;
       }
@@ -444,6 +444,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const unsubGit = zeusWs.on('git', (envelope: WsEnvelope) => {
       const payload = envelope.payload as GitPayload;
       const sid = envelope.sessionId;
+
+      // Always track connection state for all sessions
       if (payload.type === 'git_connected') {
         set((state) => ({
           gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
@@ -456,8 +458,17 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      if (payload.type === 'not_a_repo') {
+        set((state) => ({
+          gitErrors: { ...state.gitErrors, [sid]: 'Not a git repository' },
+          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: false },
+        }));
+      }
+
+      // Only process detailed events for the active session
+      if (sid !== get().activeClaudeId) return;
+
       if (payload.type === 'git_heartbeat') {
-        // Keep connection alive — mark as connected if not already
         const current = get().gitWatcherConnected[sid];
         if (!current) {
           set((state) => ({
@@ -550,13 +561,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           gitErrors: { ...state.gitErrors, [sid]: payload.message },
         }));
       }
-
-      if (payload.type === 'not_a_repo') {
-        set((state) => ({
-          gitErrors: { ...state.gitErrors, [sid]: 'Not a git repository' },
-          gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: false },
-        }));
-      }
     });
 
     // Subscribe to files channel
@@ -564,18 +568,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       const payload = envelope.payload as FilesPayload;
       const sid = envelope.sessionId;
 
+      // Always track connection state for all sessions
       if (payload.type === 'files_connected') {
         set((state) => ({
           fileTreeConnected: { ...state.fileTreeConnected, [sid]: true },
         }));
-        // Auto-request root directory listing
-        zeusWs.send({
-          channel: 'files',
-          sessionId: sid,
-          payload: { type: 'list_directory', dirPath: '' },
-          auth: '',
-        });
       }
+
+      // Only process detailed events for the active session
+      if (sid !== get().activeClaudeId) return;
 
       if (payload.type === 'directory_listing') {
         set((state) => ({
@@ -609,7 +610,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         const tabId = `${sid}:edit:${payload.filePath}`;
         const existing = get().openDiffTabs.find((t) => t.id === tabId);
         if (existing) {
-          // Update existing tab
           set((state) => ({
             openDiffTabs: state.openDiffTabs.map((t) =>
               t.id === tabId
@@ -644,7 +644,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
 
       if (payload.type === 'read_file_error') {
-        // Could show error toast in the future
         console.error(`[files] read error: ${payload.error}`);
       }
 
@@ -884,14 +883,32 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   selectClaudeSession: (id: string | null) => {
     set({ activeClaudeId: id, viewMode: id ? 'claude' : get().viewMode });
-    // Lazy-load entries from DB if not already loaded
-    if (id && (!get().claudeEntries[id] || get().claudeEntries[id].length === 0)) {
-      zeusWs.send({
-        channel: 'claude',
-        sessionId: id,
-        payload: { type: 'get_claude_history' },
-        auth: '',
-      });
+    if (id) {
+      // Lazy-load entries from DB if not already loaded
+      if (!get().claudeEntries[id] || get().claudeEntries[id].length === 0) {
+        zeusWs.send({
+          channel: 'claude',
+          sessionId: id,
+          payload: { type: 'get_claude_history' },
+          auth: '',
+        });
+      }
+      // Request current git + files state (idempotent — watcher reused if alive)
+      const session = get().claudeSessions.find((s) => s.id === id);
+      if (session?.workingDir) {
+        zeusWs.send({
+          channel: 'git',
+          sessionId: id,
+          payload: { type: 'start_watching', workingDir: session.workingDir },
+          auth: '',
+        });
+        zeusWs.send({
+          channel: 'files',
+          sessionId: id,
+          payload: { type: 'start_watching', workingDir: session.workingDir },
+          auth: '',
+        });
+      }
     }
   },
 

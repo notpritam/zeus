@@ -568,55 +568,56 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
   if (payload.type === 'start_watching') {
     try {
-      const watcher = await gitManager.startWatching(sessionId, payload.workingDir);
+      const { watcher, isNew } = await gitManager.startWatching(sessionId, payload.workingDir);
 
-      watcher.on('connected', () => {
-        broadcastEnvelope({
-          channel: 'git',
-          sessionId,
-          payload: { type: 'git_connected' },
-          auth: '',
+      if (isNew) {
+        watcher.on('connected', () => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_connected' },
+            auth: '',
+          });
         });
-      });
 
-      watcher.on('heartbeat', () => {
-        broadcastEnvelope({
-          channel: 'git',
-          sessionId,
-          payload: { type: 'git_heartbeat' },
-          auth: '',
+        watcher.on('heartbeat', () => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_heartbeat' },
+            auth: '',
+          });
         });
-      });
 
-      watcher.on('status', (data) => {
-        broadcastEnvelope({
-          channel: 'git',
-          sessionId,
-          payload: { type: 'git_status', data },
-          auth: '',
+        watcher.on('status', (data) => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_status', data },
+            auth: '',
+          });
         });
-      });
 
-      watcher.on('not_a_repo', () => {
-        broadcastEnvelope({
-          channel: 'git',
-          sessionId,
-          payload: { type: 'not_a_repo' },
-          auth: '',
+        watcher.on('not_a_repo', () => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'not_a_repo' },
+            auth: '',
+          });
         });
-      });
 
-      watcher.on('error', (err: Error) => {
-        broadcastEnvelope({
-          channel: 'git',
-          sessionId,
-          payload: { type: 'git_error', message: err.message },
-          auth: '',
+        watcher.on('error', (err: Error) => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_error', message: err.message },
+            auth: '',
+          });
         });
-      });
+      }
 
-      // The initial 'connected' and 'status' events fired during start() before
-      // listeners were wired. Send them now so the UI gets the initial state.
+      // Always send current state (whether new or existing watcher)
       broadcastEnvelope({
         channel: 'git',
         sessionId,
@@ -786,37 +787,38 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
   if (payload.type === 'start_watching') {
     try {
-      const service = await fileTreeManager.startWatching(sessionId, payload.workingDir);
+      const { service, isNew } = await fileTreeManager.startWatching(sessionId, payload.workingDir);
 
-      service.on('connected', () => {
-        broadcastEnvelope({
-          channel: 'files',
-          sessionId,
-          payload: { type: 'files_connected' },
-          auth: '',
+      if (isNew) {
+        service.on('connected', () => {
+          broadcastEnvelope({
+            channel: 'files',
+            sessionId,
+            payload: { type: 'files_connected' },
+            auth: '',
+          });
         });
-      });
 
-      service.on('files_changed', (data: { directories: string[] }) => {
-        broadcastEnvelope({
-          channel: 'files',
-          sessionId,
-          payload: { type: 'files_changed', directories: data.directories },
-          auth: '',
+        service.on('files_changed', (data: { directories: string[] }) => {
+          broadcastEnvelope({
+            channel: 'files',
+            sessionId,
+            payload: { type: 'files_changed', directories: data.directories },
+            auth: '',
+          });
         });
-      });
 
-      service.on('error', (err: Error) => {
-        broadcastEnvelope({
-          channel: 'files',
-          sessionId,
-          payload: { type: 'files_error', message: err.message },
-          auth: '',
+        service.on('error', (err: Error) => {
+          broadcastEnvelope({
+            channel: 'files',
+            sessionId,
+            payload: { type: 'files_error', message: err.message },
+            auth: '',
+          });
         });
-      });
+      }
 
-      // The 'connected' event from chokidar 'ready' may fire before or after
-      // listeners are wired. Send connected + initial root listing now.
+      // Always send current state (whether new or existing service)
       broadcastEnvelope({
         channel: 'files',
         sessionId,
