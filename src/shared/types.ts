@@ -373,7 +373,7 @@ export interface ProcessMetric {
   name: string;
   cpu: number; // percentage
   memory: number; // bytes
-  type: 'electron' | 'claude' | 'terminal' | 'other';
+  type: 'electron' | 'claude' | 'terminal' | 'qa' | 'other';
   sessionId?: string;
 }
 
@@ -428,6 +428,15 @@ export interface QaSnapshotNode {
   children?: QaSnapshotNode[];
 }
 
+// ─── QA Agent ───
+
+export type QaAgentLogEntry =
+  | { kind: 'tool_call'; tool: string; args: string; timestamp: number }
+  | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number }
+  | { kind: 'text'; content: string; timestamp: number }
+  | { kind: 'error'; message: string; timestamp: number }
+  | { kind: 'user_message'; content: string; timestamp: number };
+
 export type QaPayload =
   // Client → Server
   | { type: 'start_qa' }
@@ -457,4 +466,12 @@ export type QaPayload =
   | { type: 'cdp_console'; logs: Array<{ level: string; message: string; timestamp: number }> }
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
+  // Client → Server (QA Agent)
+  | { type: 'start_qa_agent'; task: string; workingDir: string; targetUrl?: string }
+  | { type: 'stop_qa_agent' }
+  | { type: 'qa_agent_message'; text: string }
+  // Server → Client (QA Agent)
+  | { type: 'qa_agent_started'; sessionId: string }
+  | { type: 'qa_agent_stopped' }
+  | { type: 'qa_agent_entry'; entry: QaAgentLogEntry }
   | { type: 'qa_error'; message: string };
