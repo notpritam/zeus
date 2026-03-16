@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
 import { app, Notification as ElectronNotification } from 'electron';
 import { getMainWindow } from '../index';
+import { logEvent } from './event-logger';
 import type {
   WsEnvelope,
   TerminalInputPayload,
@@ -76,6 +77,9 @@ const fileTreeManager = new FileTreeServiceManager();
 // QA service (singleton PinchTab server)
 let qaService: QAService | null = null;
 
+// QA agent — hidden Claude session managed outside ClaudeSessionManager
+let qaAgentSession: ClaudeSession | null = null;
+
 // System monitor service
 const systemMonitor = new SystemMonitorService();
 
@@ -94,6 +98,14 @@ systemMonitor.registerPidSource(() =>
     name: `Claude ${s.sessionId.slice(0, 8)}`,
   })),
 );
+
+// Register QA/PinchTab PID source
+systemMonitor.registerPidSource(() => {
+  if (!qaService?.isRunning()) return [];
+  const pid = qaService.getPid();
+  if (!pid) return [];
+  return [{ sessionId: 'qa', pid, type: 'qa' as const, name: 'PinchTab Server' }];
+});
 
 // Broadcast metrics to all clients when polled
 systemMonitor.setOnMetrics((metrics) => {
@@ -144,6 +156,7 @@ function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
 
 function broadcastEnvelope(envelope: WsEnvelope): void {
   if (!wss) return;
+  logEvent('out', envelope);
   for (const client of wss.clients) {
     sendEnvelope(client, envelope);
   }
@@ -409,6 +422,129 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       auth: '',
     });
     requestAttention('Task Failed', `Claude session encountered an error: ${err.message}`);
+  });
+}
+
+function buildQAAgentSystemPrompt(targetUrl: string): string {
+  return `You are a QA agent for a web application running at ${targetUrl}.
+
+You have full access to:
+- Browser control: qa_navigate, qa_click, qa_fill, qa_type, qa_press, qa_scroll
+- Browser inspection: qa_snapshot, qa_screenshot, qa_run_test_flow
+- Browser observability: qa_console_logs, qa_network_requests, qa_js_errors
+- File editing: Read, Edit, Write tools
+- Shell commands: Bash tool
+
+Your workflow:
+1. Navigate to the target URL
+2. Test the requested functionality
+3. Take screenshots to verify visual state
+4. Check console logs, network requests, and JS errors
+5. If you find bugs: fix the code, then re-test to confirm the fix
+6. Report findings concisely
+
+Always use qa_run_test_flow after making code changes to verify the fix.
+Be concise — the user sees a compact action log, not a full chat.
+Never use AskUserQuestion — make your best judgment and proceed.`;
+}
+
+function wireQAAgent(session: ClaudeSession): void {
+  const toolEntries = new Map<string, string>();
+
+  session.on('entry', (entry: NormalizedEntry) => {
+    const now = Date.now();
+
+    if (entry.entryType.type === 'assistant_message' && entry.content.trim()) {
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_entry',
+          entry: { kind: 'text', content: entry.content, timestamp: now },
+        },
+      });
+    }
+
+    if (entry.entryType.type === 'tool_use') {
+      const { toolName, status } = entry.entryType;
+
+      if (status === 'created') {
+        toolEntries.set(entry.id, toolName);
+        let args = '';
+        try {
+          const parsed = JSON.parse(entry.content);
+          if (parsed.url) args = parsed.url;
+          else if (parsed.ref) args = `ref=${parsed.ref}`;
+          else if (parsed.command) args = parsed.command.slice(0, 80);
+          else if (parsed.file_path) args = parsed.file_path;
+          else args = entry.content.slice(0, 100);
+        } catch {
+          args = entry.content.slice(0, 100);
+        }
+
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'qa_agent_entry',
+            entry: { kind: 'tool_call', tool: toolName, args, timestamp: now },
+          },
+        });
+      } else if (status === 'success' || status === 'failed' || status === 'timed_out') {
+        const summary = entry.content.slice(0, 200);
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'qa_agent_entry',
+            entry: {
+              kind: 'tool_result',
+              tool: toolName,
+              summary,
+              success: status === 'success',
+              timestamp: now,
+            },
+          },
+        });
+        toolEntries.delete(entry.id);
+      }
+    }
+
+    if (entry.entryType.type === 'error_message') {
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_entry',
+          entry: { kind: 'error', message: entry.content, timestamp: now },
+        },
+      });
+    }
+  });
+
+  session.on('approval_needed', (approval) => {
+    if (approval.toolName === 'AskUserQuestion') {
+      session.approveTool(approval.approvalId);
+    }
+  });
+
+  session.on('done', () => {
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_stopped' },
+    });
+    qaAgentSession = null;
+  });
+
+  session.on('error', (err) => {
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: {
+        type: 'qa_agent_entry',
+        entry: { kind: 'error', message: `Agent crashed: ${err.message}`, timestamp: Date.now() },
+      },
+    });
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_stopped' },
+    });
+    qaAgentSession = null;
   });
 }
 
@@ -1114,6 +1250,11 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       });
     }
   } else if (payload.type === 'stop_qa') {
+    // Kill QA agent if running (it depends on PinchTab)
+    if (qaAgentSession) {
+      qaAgentSession.kill();
+    }
+
     if (qaService) {
       await qaService.stop();
       qaService = null;
@@ -1212,6 +1353,104 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     } catch (err) {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
     }
+  } else if (payload.type === 'start_qa_agent') {
+    if (qaAgentSession) {
+      sendEnvelope(ws, {
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_error', message: 'QA agent already running. Stop it first.' },
+      });
+      return;
+    }
+
+    try {
+      if (!qaService?.isRunning()) {
+        qaService = new QAService();
+        await qaService.start();
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: { type: 'qa_started' },
+        });
+      }
+      const instances = await qaService.listInstances();
+      if (instances.length === 0) {
+        const instance = await qaService.launchInstance(true);
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: { type: 'instance_launched', instance },
+        });
+        const cdp = qaService.getCdpClient();
+        if (cdp) {
+          cdp.on('console', (entry) => {
+            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_console', logs: [entry] } });
+          });
+          cdp.on('network', (entry) => {
+            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_network', requests: [entry] } });
+          });
+          cdp.on('js_error', (entry) => {
+            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_error', errors: [entry] } });
+          });
+        }
+      }
+
+      const targetUrl = payload.targetUrl || 'http://localhost:5173';
+      const session = new ClaudeSession({
+        workingDir: payload.workingDir,
+        permissionMode: 'bypassPermissions',
+        enableQA: true,
+        qaTargetUrl: targetUrl,
+      });
+
+      qaAgentSession = session;
+      wireQAAgent(session);
+
+      const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
+      await session.start(prompt);
+
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_started', sessionId: 'qa-agent' },
+      });
+    } catch (err) {
+      qaAgentSession = null;
+      sendEnvelope(ws, {
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_error', message: `Failed to start QA agent: ${(err as Error).message}` },
+      });
+    }
+  } else if (payload.type === 'stop_qa_agent') {
+    if (qaAgentSession) {
+      qaAgentSession.kill();
+    } else {
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_stopped' },
+      });
+    }
+  } else if (payload.type === 'qa_agent_message') {
+    if (!qaAgentSession) {
+      sendEnvelope(ws, {
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_error', message: 'No QA agent running' },
+      });
+      return;
+    }
+
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: {
+        type: 'qa_agent_entry',
+        entry: { kind: 'user_message', content: payload.text, timestamp: Date.now() },
+      },
+    });
+
+    try {
+      await qaAgentSession.sendMessage(payload.text);
+    } catch (err) {
+      sendEnvelope(ws, {
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_error', message: `Failed to send message: ${(err as Error).message}` },
+      });
+    }
   } else {
     sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
   }
@@ -1295,6 +1534,8 @@ function handleMessage(ws: WebSocket, raw: string): void {
     sendError(ws, '', 'Invalid JSON');
     return;
   }
+
+  logEvent('in', envelope);
 
   switch (envelope.channel) {
     case 'control':
