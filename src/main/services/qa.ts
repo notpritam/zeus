@@ -128,6 +128,10 @@ export class QAService extends EventEmitter {
     return this.running;
   }
 
+  getPid(): number | null {
+    return this.proc?.pid ?? null;
+  }
+
   // ─── PinchTab API Proxy Methods ───
 
   async launchInstance(headless = false): Promise<QaInstanceInfo> {

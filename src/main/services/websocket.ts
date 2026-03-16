@@ -1640,6 +1640,7 @@ export async function startWebSocketServer(port = 3000): Promise<void> {
     httpServer.listen(port, '0.0.0.0', () => {
       server = httpServer;
       wss = wsServer;
+
       console.log(`[Zeus] Server listening on http://127.0.0.1:${port}`);
       resolve();
     });

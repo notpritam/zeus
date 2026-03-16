@@ -14,6 +14,7 @@ import { initSettings } from './services/settings';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
 import { initDatabase, closeDatabase, markStaleSessionsErrored, pruneOldSessions } from './services/db';
+import { initEventLogger, closeEventLogger } from './services/event-logger';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -42,6 +43,7 @@ app.whenReady().then(async () => {
   initAuthToken();
   initDatabase();
   initSettings();
+  initEventLogger();
   markStaleSessionsErrored();
   pruneOldSessions(30);
   await startWebSocketServer();
@@ -66,6 +68,7 @@ app.on('before-quit', async () => {
   destroyAllSessions();
   await stopTunnel();
   await stopWebSocketServer();
+  closeEventLogger();
   closeDatabase();
 });
 
