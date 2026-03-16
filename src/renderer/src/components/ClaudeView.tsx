@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
+import ApprovalCard from '@/components/ApprovalCard';
 import type {
   NormalizedEntry,
   NormalizedEntryType,
@@ -281,122 +282,6 @@ function EntryItem({ entry }: { entry: NormalizedEntry }) {
     default:
       return null;
   }
-}
-
-// ─── Approval Banner ───
-
-function formatApprovalDetail(approval: ClaudeApprovalInfo): { label: string; detail: string; body?: string } {
-  const input = approval.toolInput as Record<string, unknown> | null;
-  if (!input) return { label: approval.toolName, detail: '' };
-
-  switch (approval.toolName) {
-    case 'Edit':
-    case 'Write':
-      return {
-        label: approval.toolName === 'Edit' ? 'Edit File' : 'Write File',
-        detail: (input.file_path as string) ?? '',
-        body: input.new_string != null
-          ? `- ${String(input.old_string ?? '').slice(0, 120)}\n+ ${String(input.new_string).slice(0, 120)}`
-          : input.content != null
-            ? String(input.content).slice(0, 200)
-            : undefined,
-      };
-    case 'Bash':
-      return {
-        label: 'Run Command',
-        detail: String(input.command ?? ''),
-      };
-    case 'Read':
-      return {
-        label: 'Read File',
-        detail: (input.file_path as string) ?? '',
-      };
-    case 'Glob':
-    case 'Grep':
-      return {
-        label: approval.toolName === 'Glob' ? 'Find Files' : 'Search',
-        detail: String(input.pattern ?? input.query ?? ''),
-      };
-    case 'WebFetch':
-      return {
-        label: 'Fetch URL',
-        detail: String(input.url ?? ''),
-      };
-    case 'AskUserQuestion':
-      return {
-        label: 'Question',
-        detail: String(input.question ?? ''),
-      };
-    default:
-      return {
-        label: approval.toolName,
-        detail: JSON.stringify(input).slice(0, 150),
-      };
-  }
-}
-
-function ApprovalBanner({
-  approval,
-  onApprove,
-  onDeny,
-}: {
-  approval: ClaudeApprovalInfo;
-  onApprove: () => void;
-  onDeny: () => void;
-}) {
-  const { label, detail, body } = formatApprovalDetail(approval);
-  const [showBody, setShowBody] = useState(true);
-
-  return (
-    <div className="zeus-attention-approval border-warn-border overflow-hidden rounded-lg border">
-      {/* Header */}
-      <div className="bg-warn-bg flex items-center justify-between gap-2 px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <ShieldAlert className="text-warn size-4 shrink-0 animate-pulse" />
-          <span className="text-warn text-xs font-semibold">{label}</span>
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            size="xs"
-            className="bg-accent text-white hover:bg-accent/90"
-            onClick={onApprove}
-          >
-            <Check className="size-3" />
-            Allow
-          </Button>
-          <Button size="xs" variant="destructive" onClick={onDeny}>
-            <X className="size-3" />
-            Deny
-          </Button>
-        </div>
-      </div>
-
-      {/* Detail — file path, command, etc. */}
-      {detail && (
-        <div className="bg-warn-bg/50 border-warn-border border-t px-3 py-1.5">
-          <p className="text-foreground truncate font-mono text-xs">{detail}</p>
-        </div>
-      )}
-
-      {/* Body — diff preview, content, etc. */}
-      {body && (
-        <div className="border-warn-border border-t">
-          <button
-            onClick={() => setShowBody(!showBody)}
-            className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1 px-3 py-1 text-[10px]"
-          >
-            {showBody ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-            {showBody ? 'Hide changes' : 'Show changes'}
-          </button>
-          {showBody && (
-            <pre className="text-muted-foreground max-h-40 overflow-auto px-3 pb-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-              {body}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ─── Main ClaudeView ───
@@ -728,11 +613,11 @@ function ClaudeView({
         )}
       </div>
 
-      {/* Approval banners */}
+      {/* Approval cards */}
       {sessionApprovals.length > 0 && (
         <div className="border-border space-y-2 border-t px-4 py-2">
           {sessionApprovals.map((a) => (
-            <ApprovalBanner
+            <ApprovalCard
               key={a.approvalId}
               approval={a}
               onApprove={() => onApprove(a.approvalId)}

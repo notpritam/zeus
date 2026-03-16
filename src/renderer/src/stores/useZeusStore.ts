@@ -138,6 +138,7 @@ interface ZeusState {
 
   // Diff tab actions
   openDiffTab: (sessionId: string, file: string, staged: boolean) => void;
+  openApprovalDiff: (sessionId: string, filePath: string, original: string, modified: string) => void;
   closeDiffTab: (tabId: string) => void;
   closeAllDiffTabs: () => void;
   setActiveDiffTab: (tabId: string) => void;
@@ -1224,6 +1225,56 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: { type: 'git_file_contents', file, staged },
       auth: '',
     });
+  },
+
+  openApprovalDiff: (sessionId: string, filePath: string, original: string, modified: string) => {
+    const tabId = `${sessionId}:approval:${filePath}`;
+    const existing = get().openDiffTabs.find((t) => t.id === tabId);
+    if (existing) {
+      // Update content and switch to it
+      set((state) => ({
+        openDiffTabs: state.openDiffTabs.map((t) =>
+          t.id === tabId ? { ...t, original, modified, isDirty: false } : t,
+        ),
+        activeDiffTabId: tabId,
+        viewMode: 'diff' as ViewMode,
+        previousViewMode:
+          state.viewMode !== 'diff'
+            ? (state.viewMode as 'terminal' | 'claude')
+            : state.previousViewMode,
+      }));
+      return;
+    }
+
+    const ext = filePath.substring(filePath.lastIndexOf('.'));
+    const extMap: Record<string, string> = {
+      '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
+      '.css': 'css', '.html': 'html', '.json': 'json', '.md': 'markdown',
+      '.py': 'python', '.rs': 'rust', '.go': 'go', '.yaml': 'yaml', '.yml': 'yaml',
+      '.sh': 'shell', '.sql': 'sql', '.xml': 'xml',
+    };
+
+    const newTab: DiffTab = {
+      id: tabId,
+      sessionId,
+      file: filePath,
+      staged: false,
+      original,
+      modified,
+      language: extMap[ext] || 'plaintext',
+      isDirty: false,
+      mode: 'diff',
+    };
+
+    set((state) => ({
+      openDiffTabs: [...state.openDiffTabs, newTab],
+      activeDiffTabId: tabId,
+      viewMode: 'diff' as ViewMode,
+      previousViewMode:
+        state.viewMode !== 'diff'
+          ? (state.viewMode as 'terminal' | 'claude')
+          : state.previousViewMode,
+    }));
   },
 
   closeDiffTab: (tabId: string) => {
