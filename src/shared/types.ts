@@ -220,6 +220,8 @@ export interface ClaudeStartPayload {
   sessionName?: string;
   notificationSound?: boolean;
   enableGitWatcher?: boolean;
+  enableQA?: boolean;
+  qaTargetUrl?: string;
 }
 
 export interface ClaudeResumePayload {
@@ -410,4 +412,8 @@ export type QaPayload =
   | { type: 'action_result'; success: boolean; message?: string }
   | { type: 'text_result'; text: string }
   | { type: 'navigate_result'; url: string; title: string }
+  // Server → Client (CDP observability)
+  | { type: 'cdp_console'; logs: Array<{ level: string; message: string; timestamp: number }> }
+  | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
+  | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   | { type: 'qa_error'; message: string };
