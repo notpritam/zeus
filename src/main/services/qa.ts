@@ -3,11 +3,13 @@ import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import type { QaInstanceInfo, QaTabInfo, QaSnapshotNode } from '../../shared/types';
+import { CdpClient } from './cdp-client';
 
 const PINCHTAB_PORT = 9867;
 const PINCHTAB_BASE = `http://127.0.0.1:${PINCHTAB_PORT}`;
 const HEALTH_CHECK_INTERVAL = 500;
 const HEALTH_CHECK_MAX_RETRIES = 10;
+const CDP_PORT = parseInt(process.env.ZEUS_CDP_PORT ?? '9222', 10);
 
 function findBinaryPath(): string {
   // Try the npm package bin first
@@ -50,6 +52,11 @@ async function pinchtabFetch(
 export class QAService extends EventEmitter {
   private proc: ChildProcess | null = null;
   private running = false;
+  private cdpClient: CdpClient | null = null;
+
+  getCdpClient(): CdpClient | null {
+    return this.cdpClient;
+  }
 
   async start(): Promise<void> {
     if (this.running) return;
@@ -90,6 +97,11 @@ export class QAService extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    if (this.cdpClient) {
+      this.cdpClient.disconnect();
+      this.cdpClient = null;
+    }
+
     if (!this.proc) return;
 
     return new Promise<void>((resolve) => {
@@ -121,17 +133,35 @@ export class QAService extends EventEmitter {
   async launchInstance(headless = false): Promise<QaInstanceInfo> {
     const res = await pinchtabFetch('/instance/start', {
       method: 'POST',
-      body: { headless },
+      body: { headless, chromeFlags: [`--remote-debugging-port=${CDP_PORT}`] },
     });
     if (!res.ok) throw new Error(`Failed to launch instance: ${res.status} ${await res.text()}`);
     const data = await res.json() as Record<string, unknown>;
-    return {
+
+    const instance: QaInstanceInfo = {
       instanceId: (data.instanceId ?? data.id ?? 'default') as string,
       headless,
     };
+
+    // Start CDP client after Chrome instance is ready
+    try {
+      this.cdpClient = new CdpClient();
+      await this.cdpClient.connect();
+      console.log('[Zeus] CDP client connected');
+    } catch (err) {
+      console.warn('[Zeus] CDP client failed to connect (QA will work without observability):', (err as Error).message);
+      this.cdpClient = null;
+    }
+
+    return instance;
   }
 
   async stopInstance(instanceId: string): Promise<void> {
+    if (this.cdpClient) {
+      this.cdpClient.disconnect();
+      this.cdpClient = null;
+    }
+
     const res = await pinchtabFetch('/instance/stop', {
       method: 'POST',
       body: { instanceId },
