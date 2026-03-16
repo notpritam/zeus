@@ -104,6 +104,7 @@ interface ZeusState {
   interruptClaude: () => void;
   stopClaude: () => void;
   selectClaudeSession: (id: string | null) => void;
+  resumeClaudeSession: (id: string) => void;
   deleteClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
@@ -885,6 +886,42 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       ),
       pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== activeClaudeId),
     }));
+  },
+
+  resumeClaudeSession: (id: string) => {
+    const state = get();
+    const session = state.claudeSessions.find((s) => s.id === id);
+    if (!session) return;
+
+    const entries = state.claudeEntries[id] ?? [];
+    // Gather last few user/assistant messages for context
+    const contextEntries = entries
+      .filter((e) => e.entryType.type === 'user_message' || e.entryType.type === 'assistant_message')
+      .slice(-6);
+
+    const contextLines = contextEntries.map((e) => {
+      const role = e.entryType.type === 'user_message' ? 'User' : 'Assistant';
+      // Truncate long messages to keep prompt manageable
+      const text = e.content.length > 500 ? e.content.slice(0, 500) + '...' : e.content;
+      return `${role}: ${text}`;
+    });
+
+    const resumePrompt = [
+      'Continue from a previous session that errored out. Here is the recent conversation context:',
+      '',
+      ...contextLines,
+      '',
+      'Please continue where you left off.',
+    ].join('\n');
+
+    // Start a new session with the context prompt and same config
+    get().startClaudeSession({
+      prompt: resumePrompt,
+      workingDir: session.workingDir || '/',
+      sessionName: session.name ? `${session.name} (resumed)` : undefined,
+      notificationSound: session.notificationSound,
+      enableGitWatcher: session.enableGitWatcher,
+    });
   },
 
   selectClaudeSession: (id: string | null) => {

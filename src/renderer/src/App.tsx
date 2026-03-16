@@ -48,6 +48,7 @@ function App() {
     approveClaudeTool,
     denyClaudeTool,
     interruptClaude,
+    resumeClaudeSession,
     selectClaudeSession,
     deleteClaudeSession,
     archiveClaudeSession,
@@ -199,6 +200,7 @@ function App() {
               onApprove={approveClaudeTool}
               onDeny={denyClaudeTool}
               onInterrupt={interruptClaude}
+              onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
             />
           ) : (
             <TerminalView sessionId={activeSessionId} />
@@ -255,6 +257,7 @@ function App() {
                     onApprove={approveClaudeTool}
                     onDeny={denyClaudeTool}
                     onInterrupt={interruptClaude}
+                    onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
                   />
                 ) : (
                   <TerminalView sessionId={activeSessionId} />

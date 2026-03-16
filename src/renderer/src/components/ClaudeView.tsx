@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import type {
@@ -259,6 +259,7 @@ interface ClaudeViewProps {
   onApprove: (approvalId: string) => void;
   onDeny: (approvalId: string) => void;
   onInterrupt: () => void;
+  onResume: () => void;
 }
 
 function ClaudeView({
@@ -269,6 +270,7 @@ function ClaudeView({
   onApprove,
   onDeny,
   onInterrupt,
+  onResume,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
@@ -358,17 +360,30 @@ function ClaudeView({
             {session.status}
           </Badge>
         </div>
-        {session.status === 'running' && (
-          <Button
-            variant="ghost"
-            size="xs"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={onInterrupt}
-          >
-            <StopCircle className="size-3" />
-            Interrupt
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {session.status === 'running' && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={onInterrupt}
+            >
+              <StopCircle className="size-3" />
+              Interrupt
+            </Button>
+          )}
+          {(session.status === 'error' || session.status === 'done') && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground hover:text-primary"
+              onClick={onResume}
+            >
+              <RotateCcw className="size-3" />
+              Resume
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Entry list */}
@@ -401,54 +416,68 @@ function ClaudeView({
 
       {/* Input area */}
       <div className="border-border bg-card border-t">
-        {/* Attached file chips */}
-        {attachedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-4 pt-2">
-            {attachedFiles.map((f) => (
-              <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
-                {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
-                {f.path}
-                <button
-                  type="button"
-                  onClick={() => removeFile(f.path)}
-                  className="hover:text-destructive ml-0.5"
-                >
-                  <X className="size-3" />
-                </button>
-              </Badge>
-            ))}
+        {(session.status === 'error' || session.status === 'done') ? (
+          <div className="flex items-center justify-between px-4 py-3">
+            <p className="text-muted-foreground text-sm">
+              {session.status === 'error' ? 'Session errored out.' : 'Session ended.'}
+            </p>
+            <Button size="sm" variant="outline" onClick={onResume}>
+              <RotateCcw className="size-3" />
+              Resume Session
+            </Button>
           </div>
-        )}
+        ) : (
+          <>
+            {/* Attached file chips */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+                {attachedFiles.map((f) => (
+                  <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
+                    {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
+                    {f.path}
+                    <button
+                      type="button"
+                      onClick={() => removeFile(f.path)}
+                      className="hover:text-destructive ml-0.5"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
 
-        {/* Input bar with popover */}
-        <form onSubmit={handleSubmit} className="relative flex gap-2 px-4 py-3">
-          {showMentionPopover && session.status === 'running' && (
-            <FileMentionPopover
-              sessionId={session.id}
-              initialQuery={mentionQuery}
-              onSelect={handleFileSelect}
-              onClose={() => setShowMentionPopover(false)}
-            />
-          )}
-          <Input
-            ref={inputRef}
-            data-testid="claude-input"
-            value={input}
-            onChange={handleInputChange}
-            placeholder={session.status === 'running' ? 'Send follow-up... (@ to attach files)' : 'Session ended'}
-            disabled={session.status !== 'running'}
-            className="text-sm"
-          />
-          <Button
-            data-testid="claude-send"
-            type="submit"
-            disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0)}
-            size="sm"
-          >
-            <Send className="size-3" />
-            Send
-          </Button>
-        </form>
+            {/* Input bar with popover */}
+            <form onSubmit={handleSubmit} className="relative flex gap-2 px-4 py-3">
+              {showMentionPopover && session.status === 'running' && (
+                <FileMentionPopover
+                  sessionId={session.id}
+                  initialQuery={mentionQuery}
+                  onSelect={handleFileSelect}
+                  onClose={() => setShowMentionPopover(false)}
+                />
+              )}
+              <Input
+                ref={inputRef}
+                data-testid="claude-input"
+                value={input}
+                onChange={handleInputChange}
+                placeholder="Send follow-up... (@ to attach files)"
+                disabled={session.status !== 'running'}
+                className="text-sm"
+              />
+              <Button
+                data-testid="claude-send"
+                type="submit"
+                disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0)}
+                size="sm"
+              >
+                <Send className="size-3" />
+                Send
+              </Button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
