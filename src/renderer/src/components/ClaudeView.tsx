@@ -170,37 +170,60 @@ function toolActionLabel(actionType: ActionType): string {
 function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; content: string }) {
   if (entryType.type !== 'tool_use') return null;
   const { toolName, actionType, status } = entryType;
+  const [expanded, setExpanded] = useState(false);
 
   const statusLabel = typeof status === 'string' ? status : status.status;
   const isRunning = statusLabel === 'created';
-  const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
-    success: 'default',
-    pending_approval: 'secondary',
-    failed: 'destructive',
-    denied: 'destructive',
-  };
+  const isPending = statusLabel === 'pending_approval';
+  const isDenied = statusLabel === 'denied';
+  const isFailed = statusLabel === 'failed';
+
+  const borderColor =
+    isPending ? 'border-orange-400/40 bg-orange-400/5' :
+    isDenied ? 'border-red-400/40 bg-red-400/5' :
+    isFailed ? 'border-red-400/30' :
+    isRunning ? 'border-primary/30' :
+    '';
+
+  const statusDotColor =
+    isRunning ? 'bg-primary' :
+    isPending ? 'bg-orange-400' :
+    statusLabel === 'success' ? 'bg-green-400' :
+    (isDenied || isFailed) ? 'bg-red-400' :
+    'bg-muted-foreground';
+
+  // Extract meaningful detail from actionType
+  const detail = toolActionLabel(actionType);
+  const hasContent = content && !content.startsWith(toolName) && content.length > 0;
 
   return (
-    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${isRunning ? 'border-primary/30' : ''}`}>
+    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${borderColor}`}>
+      {/* Header row */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {isRunning && <span className="inline-block size-1.5 shrink-0 rounded-full bg-primary" />}
-          <Badge variant="outline" className={`text-[10px] font-semibold ${isRunning ? 'zeus-shimmer-accent border-primary/30' : 'text-primary'}`}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`inline-block size-1.5 shrink-0 rounded-full ${statusDotColor} ${(isRunning || isPending) ? 'animate-pulse' : ''}`} />
+          <span className={`text-[10px] font-semibold ${isRunning ? 'zeus-shimmer-accent' : isPending ? 'text-orange-400' : 'text-primary'}`}>
             {toolName}
-          </Badge>
-          <span className={`truncate font-mono text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>
-            {toolActionLabel(actionType)}
+          </span>
+          <span className={`min-w-0 truncate font-mono text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>
+            {detail}
           </span>
         </div>
-        <Badge
-          variant={statusVariant[statusLabel] ?? 'secondary'}
-          className="text-[9px] uppercase tracking-wider"
-        >
-          {isRunning ? 'running' : statusLabel}
-        </Badge>
+        {hasContent && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
+          >
+            {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          </button>
+        )}
       </div>
-      {content && !content.startsWith(toolName) && (
-        <p className={`mt-1 truncate text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>{content}</p>
+
+      {/* Expanded content — show tool output/details */}
+      {expanded && hasContent && (
+        <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
+          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{content}</pre>
+        </div>
       )}
     </div>
   );
@@ -262,6 +285,56 @@ function EntryItem({ entry }: { entry: NormalizedEntry }) {
 
 // ─── Approval Banner ───
 
+function formatApprovalDetail(approval: ClaudeApprovalInfo): { label: string; detail: string; body?: string } {
+  const input = approval.toolInput as Record<string, unknown> | null;
+  if (!input) return { label: approval.toolName, detail: '' };
+
+  switch (approval.toolName) {
+    case 'Edit':
+    case 'Write':
+      return {
+        label: approval.toolName === 'Edit' ? 'Edit File' : 'Write File',
+        detail: (input.file_path as string) ?? '',
+        body: input.new_string != null
+          ? `- ${String(input.old_string ?? '').slice(0, 120)}\n+ ${String(input.new_string).slice(0, 120)}`
+          : input.content != null
+            ? String(input.content).slice(0, 200)
+            : undefined,
+      };
+    case 'Bash':
+      return {
+        label: 'Run Command',
+        detail: String(input.command ?? ''),
+      };
+    case 'Read':
+      return {
+        label: 'Read File',
+        detail: (input.file_path as string) ?? '',
+      };
+    case 'Glob':
+    case 'Grep':
+      return {
+        label: approval.toolName === 'Glob' ? 'Find Files' : 'Search',
+        detail: String(input.pattern ?? input.query ?? ''),
+      };
+    case 'WebFetch':
+      return {
+        label: 'Fetch URL',
+        detail: String(input.url ?? ''),
+      };
+    case 'AskUserQuestion':
+      return {
+        label: 'Question',
+        detail: String(input.question ?? ''),
+      };
+    default:
+      return {
+        label: approval.toolName,
+        detail: JSON.stringify(input).slice(0, 150),
+      };
+  }
+}
+
 function ApprovalBanner({
   approval,
   onApprove,
@@ -271,29 +344,57 @@ function ApprovalBanner({
   onApprove: () => void;
   onDeny: () => void;
 }) {
+  const { label, detail, body } = formatApprovalDetail(approval);
+  const [showBody, setShowBody] = useState(true);
+
   return (
-    <div className="bg-warn-bg border-warn-border flex items-center justify-between rounded-lg border px-3 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="text-warn size-4 shrink-0" />
-          <p className="text-warn text-xs font-semibold">Tool Approval Required</p>
+    <div className="zeus-attention-approval border-warn-border overflow-hidden rounded-lg border">
+      {/* Header */}
+      <div className="bg-warn-bg flex items-center justify-between gap-2 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <ShieldAlert className="text-warn size-4 shrink-0 animate-pulse" />
+          <span className="text-warn text-xs font-semibold">{label}</span>
         </div>
-        <p className="text-muted-foreground mt-0.5 truncate font-mono text-xs">{approval.toolName}</p>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            size="xs"
+            className="bg-accent text-white hover:bg-accent/90"
+            onClick={onApprove}
+          >
+            <Check className="size-3" />
+            Allow
+          </Button>
+          <Button size="xs" variant="destructive" onClick={onDeny}>
+            <X className="size-3" />
+            Deny
+          </Button>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <Button
-          size="xs"
-          className="bg-accent text-white hover:bg-accent/90"
-          onClick={onApprove}
-        >
-          <Check className="size-3" />
-          Allow
-        </Button>
-        <Button size="xs" variant="destructive" onClick={onDeny}>
-          <X className="size-3" />
-          Deny
-        </Button>
-      </div>
+
+      {/* Detail — file path, command, etc. */}
+      {detail && (
+        <div className="bg-warn-bg/50 border-warn-border border-t px-3 py-1.5">
+          <p className="text-foreground truncate font-mono text-xs">{detail}</p>
+        </div>
+      )}
+
+      {/* Body — diff preview, content, etc. */}
+      {body && (
+        <div className="border-warn-border border-t">
+          <button
+            onClick={() => setShowBody(!showBody)}
+            className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1 px-3 py-1 text-[10px]"
+          >
+            {showBody ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            {showBody ? 'Hide changes' : 'Show changes'}
+          </button>
+          {showBody && (
+            <pre className="text-muted-foreground max-h-40 overflow-auto px-3 pb-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+              {body}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }
