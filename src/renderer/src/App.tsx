@@ -76,7 +76,7 @@ function App() {
     return cleanup;
   }, [connect]);
 
-  useNotificationSound(claudeSessions);
+  useNotificationSound(claudeSessions, sessionActivity);
 
   const activeClaudeSession = claudeSessions.find((s) => s.id === activeClaudeId) ?? null;
   const activeEntries = activeClaudeId ? (claudeEntries[activeClaudeId] ?? []) : [];
