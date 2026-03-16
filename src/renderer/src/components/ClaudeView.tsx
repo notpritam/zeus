@@ -530,8 +530,8 @@ function ClaudeView({
     const trimmed = input.trim();
     if (!trimmed && attachedFiles.length === 0 && attachedImages.length === 0) return;
 
-    if (isBusy && attachedFiles.length === 0 && attachedImages.length === 0) {
-      // Queue text-only messages when busy
+    if (isBusy) {
+      // Queue all messages when busy — they'll be sent when session becomes idle
       onQueueMessage(trimmed);
     } else {
       onSendMessage(

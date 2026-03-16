@@ -210,6 +210,94 @@ interface ZeusState {
 }
 
 let claudeIdCounter = 0;
+let drainInFlight: Record<string, boolean> = {};
+
+/**
+ * Drain the next queued message for a session.
+ * Called when a session becomes idle or done.
+ * - If session is still alive (idle activity), sends via send_message
+ * - If session process exited (done), resumes via resume_claude
+ * Returns true if a message was drained.
+ */
+function drainQueue(
+  sid: string,
+  reason: 'idle' | 'done',
+  get: () => ZeusState,
+  set: (fn: (state: ZeusState) => Partial<ZeusState>) => void,
+): boolean {
+  if (drainInFlight[sid]) return false;
+
+  const queue = get().messageQueue[sid];
+  if (!queue || queue.length === 0) return false;
+
+  const session = get().claudeSessions.find((s) => s.id === sid);
+  if (!session) return false;
+
+  const next = queue[0];
+  drainInFlight[sid] = true;
+
+  // Remove from queue + add optimistic user entry
+  const userEntry: NormalizedEntry = {
+    id: `user-${Date.now()}`,
+    entryType: { type: 'user_message' },
+    content: next.content,
+  };
+
+  if (reason === 'idle') {
+    // Session process is alive — send follow-up directly
+    set((state) => ({
+      messageQueue: {
+        ...state.messageQueue,
+        [sid]: (state.messageQueue[sid] ?? []).slice(1),
+      },
+      claudeEntries: {
+        ...state.claudeEntries,
+        [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
+      },
+    }));
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: sid,
+      payload: { type: 'send_message', content: next.content },
+      auth: '',
+    });
+  } else {
+    // Session process exited — resume with queued message
+    if (!session.claudeSessionId) {
+      drainInFlight[sid] = false;
+      return false;
+    }
+    set((state) => ({
+      messageQueue: {
+        ...state.messageQueue,
+        [sid]: (state.messageQueue[sid] ?? []).slice(1),
+      },
+      claudeSessions: state.claudeSessions.map((s) =>
+        s.id === sid ? { ...s, status: 'running' as const } : s,
+      ),
+      sessionActivity: { ...state.sessionActivity, [sid]: { state: 'starting' } },
+      claudeEntries: {
+        ...state.claudeEntries,
+        [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
+      },
+    }));
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: sid,
+      payload: {
+        type: 'resume_claude',
+        claudeSessionId: session.claudeSessionId,
+        prompt: next.content,
+        workingDir: session.workingDir || '/',
+      },
+      auth: '',
+    });
+  }
+
+  // Clear in-flight after a short delay to allow server to process
+  setTimeout(() => { drainInFlight[sid] = false; }, 500);
+  return true;
+}
 
 export const useZeusStore = create<ZeusState>((set, get) => ({
   connected: false,
@@ -457,83 +545,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           sessionActivity: { ...state.sessionActivity, [sid]: activity },
         }));
 
-        // Auto-send queued messages when session becomes idle
+        // Auto-drain queued messages when session becomes idle
         if (activity.state === 'idle') {
-          const queue = get().messageQueue[sid];
-          if (queue && queue.length > 0) {
-            const next = queue[0];
-            // Remove from queue
-            set((state) => ({
-              messageQueue: {
-                ...state.messageQueue,
-                [sid]: (state.messageQueue[sid] ?? []).slice(1),
-              },
-            }));
-            // Send the queued message
-            const userEntry: NormalizedEntry = {
-              id: `user-${Date.now()}`,
-              entryType: { type: 'user_message' },
-              content: next.content,
-            };
-            set((state) => ({
-              claudeEntries: {
-                ...state.claudeEntries,
-                [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
-              },
-            }));
-            zeusWs.send({
-              channel: 'claude',
-              sessionId: sid,
-              payload: { type: 'send_message', content: next.content },
-              auth: '',
-            });
-          }
+          drainQueue(sid, 'idle', get, set);
         }
       }
 
       if (payload.type === 'done') {
-        // Check for queued messages before marking done
-        const queue = get().messageQueue[sid];
-        const session = get().claudeSessions.find((s) => s.id === sid);
-
-        if (queue && queue.length > 0 && session?.claudeSessionId) {
-          // Drain the next queued message by resuming the session
-          const next = queue[0];
-          set((state) => ({
-            messageQueue: {
-              ...state.messageQueue,
-              [sid]: (state.messageQueue[sid] ?? []).slice(1),
-            },
-            // Keep session as running since we're auto-resuming
-            claudeSessions: state.claudeSessions.map((s) =>
-              s.id === sid ? { ...s, status: 'running' as const } : s,
-            ),
-            sessionActivity: { ...state.sessionActivity, [sid]: { state: 'starting' } },
-          }));
-          // Add optimistic user entry
-          const userEntry: NormalizedEntry = {
-            id: `user-${Date.now()}`,
-            entryType: { type: 'user_message' },
-            content: next.content,
-          };
-          set((state) => ({
-            claudeEntries: {
-              ...state.claudeEntries,
-              [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
-            },
-          }));
-          zeusWs.send({
-            channel: 'claude',
-            sessionId: sid,
-            payload: {
-              type: 'resume_claude',
-              claudeSessionId: session.claudeSessionId,
-              prompt: next.content,
-              workingDir: session.workingDir || '/',
-            },
-            auth: '',
-          });
-        } else {
+        // Try to drain queue first — if there are queued messages, auto-resume
+        const drained = drainQueue(sid, 'done', get, set);
+        if (!drained) {
           set((state) => ({
             claudeSessions: state.claudeSessions.map((s) =>
               s.id === sid ? { ...s, status: 'done' as const } : s,
