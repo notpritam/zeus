@@ -3,11 +3,16 @@ import path from 'path';
 import crypto from 'crypto';
 import { app } from 'electron';
 import type { ZeusSettings, SavedProject, ClaudeDefaults } from '../../shared/types';
+import { insertProject, getAllProjects, deleteProject } from './db';
 
 const SETTINGS_FILE = 'zeus-settings.json';
 
-const DEFAULT_SETTINGS: ZeusSettings = {
-  savedProjects: [],
+interface SettingsOnDisk {
+  claudeDefaults: ClaudeDefaults;
+  lastUsedProjectId: string | null;
+}
+
+const DEFAULT_SETTINGS: SettingsOnDisk = {
   claudeDefaults: {
     permissionMode: 'bypassPermissions',
     model: '',
@@ -16,7 +21,7 @@ const DEFAULT_SETTINGS: ZeusSettings = {
   lastUsedProjectId: null,
 };
 
-let settings: ZeusSettings = { ...DEFAULT_SETTINGS };
+let settings: SettingsOnDisk = { ...DEFAULT_SETTINGS };
 
 function getSettingsPath(): string {
   return path.join(app.getPath('userData'), SETTINGS_FILE);
@@ -36,14 +41,24 @@ export function initSettings(): void {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<ZeusSettings>;
+
+      // Migrate any projects from the old JSON format into the DB
+      if (parsed.savedProjects && parsed.savedProjects.length > 0) {
+        for (const p of parsed.savedProjects) {
+          insertProject(p);
+        }
+        console.log(`[Zeus] Migrated ${parsed.savedProjects.length} project(s) from JSON to DB`);
+      }
+
       settings = {
-        savedProjects: parsed.savedProjects ?? DEFAULT_SETTINGS.savedProjects,
         claudeDefaults: {
           ...DEFAULT_SETTINGS.claudeDefaults,
           ...parsed.claudeDefaults,
         },
         lastUsedProjectId: parsed.lastUsedProjectId ?? DEFAULT_SETTINGS.lastUsedProjectId,
       };
+      // Re-write without savedProjects to complete migration
+      writeToDisk();
       console.log('[Zeus] Settings loaded from disk');
     } else {
       settings = { ...DEFAULT_SETTINGS };
@@ -58,7 +73,11 @@ export function initSettings(): void {
 }
 
 export function getSettings(): ZeusSettings {
-  return settings;
+  return {
+    savedProjects: getAllProjects(),
+    claudeDefaults: settings.claudeDefaults,
+    lastUsedProjectId: settings.lastUsedProjectId,
+  };
 }
 
 export function addProject(name: string, projectPath: string): SavedProject {
@@ -68,17 +87,16 @@ export function addProject(name: string, projectPath: string): SavedProject {
     path: projectPath,
     addedAt: Date.now(),
   };
-  settings.savedProjects.push(project);
-  writeToDisk();
+  insertProject(project);
   return project;
 }
 
 export function removeProject(id: string): void {
-  settings.savedProjects = settings.savedProjects.filter((p) => p.id !== id);
+  deleteProject(id);
   if (settings.lastUsedProjectId === id) {
     settings.lastUsedProjectId = null;
+    writeToDisk();
   }
-  writeToDisk();
 }
 
 export function updateDefaults(partial: Partial<ClaudeDefaults>): void {

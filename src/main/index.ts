@@ -40,8 +40,8 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   startPowerBlock();
   initAuthToken();
-  initSettings();
   initDatabase();
+  initSettings();
   markStaleSessionsErrored();
   pruneOldSessions(30);
   await startWebSocketServer();

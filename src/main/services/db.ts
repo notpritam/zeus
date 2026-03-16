@@ -1,14 +1,14 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'path';
-import type { SessionRecord } from '../../shared/types';
+import type { SessionRecord, SavedProject } from '../../shared/types';
 import type { NormalizedEntry } from '../services/claude-types';
 
 let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -53,8 +53,20 @@ function runMigrations(database: Database.Database): void {
         exit_code   INTEGER
       );
     `);
-    database.pragma(`user_version = ${SCHEMA_VERSION}`);
   }
+
+  if (currentVersion < 2) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS saved_projects (
+        id        TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        path      TEXT NOT NULL UNIQUE,
+        added_at  INTEGER NOT NULL
+      );
+    `);
+  }
+
+  database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
 // ─── Lifecycle ───
@@ -347,4 +359,38 @@ export function deleteTerminalSession(id: string): void {
 export function archiveTerminalSession(id: string): void {
   if (!db) return;
   db.prepare(`UPDATE terminal_sessions SET status = 'archived' WHERE id = ?`).run(id);
+}
+
+// ─── Saved Projects CRUD ───
+
+interface SavedProjectDbRow {
+  id: string;
+  name: string;
+  path: string;
+  added_at: number;
+}
+
+export function insertProject(project: SavedProject): void {
+  if (!db) return;
+  db.prepare(
+    `INSERT OR IGNORE INTO saved_projects (id, name, path, added_at) VALUES (?, ?, ?, ?)`,
+  ).run(project.id, project.name, project.path, project.addedAt);
+}
+
+export function getAllProjects(): SavedProject[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM saved_projects ORDER BY added_at DESC`)
+    .all() as SavedProjectDbRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    addedAt: r.added_at,
+  }));
+}
+
+export function deleteProject(id: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM saved_projects WHERE id = ?`).run(id);
 }
