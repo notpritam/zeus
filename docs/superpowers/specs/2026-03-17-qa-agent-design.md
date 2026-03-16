@@ -30,10 +30,10 @@ The agent is a hidden Claude session (not shown in the main session list) with f
 
 #### New WebSocket Payload Types
 
-Add to `QaPayload` union in `src/main/types.ts`:
+Add to `QaPayload` union in `src/shared/types.ts` only (main/types.ts re-exports automatically):
 
 ```typescript
-| { type: 'start_qa_agent'; task: string; targetUrl?: string }
+| { type: 'start_qa_agent'; task: string; workingDir: string; targetUrl?: string }
 | { type: 'stop_qa_agent' }
 | { type: 'qa_agent_message'; text: string }
 | { type: 'qa_agent_started'; sessionId: string }
@@ -41,7 +41,7 @@ Add to `QaPayload` union in `src/main/types.ts`:
 | { type: 'qa_agent_entry'; entry: QaAgentLogEntry }
 ```
 
-#### QA Agent Log Entry
+#### QA Agent Log Entry (defined in `src/shared/types.ts`)
 
 ```typescript
 type QaAgentLogEntry =
@@ -52,45 +52,51 @@ type QaAgentLogEntry =
   | { kind: 'user_message'; content: string; timestamp: number }
 ```
 
+Note: For `tool_result` with screenshots, store only a thumbnail reference key, not the full base64 string — screenshots are already visible in the QA panel's screenshot tab.
+
 #### Session Spawning (`websocket.ts` — `handleQA`)
+
+Extract agent logic into a `handleQAAgent()` helper (matching the `wireClaudeSession` pattern).
 
 When `start_qa_agent` is received:
 
-1. If QA service not running, start it and launch a browser instance first
-2. Spawn a Claude session via `ClaudeSessionManager` with:
+1. **Guard:** If a QA agent is already running, reject with `qa_error: "QA agent already running"`.
+2. If QA service not running, start it and launch a browser instance first.
+3. **Construct a `ClaudeSession` directly** — do NOT use `claudeManager.createSession()`. Store as module-level `let qaAgentSession: ClaudeSession | null`. This keeps it out of the session manager's `sessions` Map and prevents it appearing in `getAllSessions()`.
+4. Start the session with:
    - `enableQA: true`
    - `permissionMode: 'bypassPermissions'`
    - `qaTargetUrl` from payload or default `http://localhost:5173`
-   - Working directory from current project settings
-3. Enhanced system prompt (see below)
-4. Store the session reference as `qaAgentSession` alongside `qaService`
-5. Wire the session's streaming output to parse entries and broadcast as `qa_agent_entry` on the `qa` channel
-6. Send the initial task as the first user message to the session
+   - `workingDir` from the payload
+5. The task string is passed as the `prompt` argument to `ClaudeSession.start()` — it becomes the initial user message. No separate `sendMessage()` call needed.
+6. Wire the session's streaming output to parse entries and broadcast as `qa_agent_entry` on the `qa` channel.
+7. Wire both `done` AND `error` events to broadcast `qa_agent_stopped` and clean up `qaAgentSession = null`. On `error`, also send a final `qa_agent_entry` with `kind: 'error'` before stopping.
 
 #### Entry Parsing
 
-Claude session streams `NormalizedEntry` objects. The WebSocket handler translates them:
+Claude session streams `NormalizedEntry` objects via `ClaudeLogProcessor.process()`. The entry types are discriminated on `entryType.type`. Translation rules:
 
-- `assistant.text` → `{ kind: 'text', content, timestamp }`
-- `tool_use` → `{ kind: 'tool_call', tool: name, args: JSON.stringify(input), timestamp }`
-- `tool_result` → `{ kind: 'tool_result', tool: name, summary: truncated output, screenshot?: if qa_screenshot, timestamp }`
-- Session errors → `{ kind: 'error', message, timestamp }`
+- `entryType.type === 'assistant_message'` → `{ kind: 'text', content: message text, timestamp }`
+- `entryType.type === 'tool_use'` with `status === 'created'` → `{ kind: 'tool_call', tool: toolName, args: JSON.stringify(input), timestamp }`
+- `entryType.type === 'tool_use'` with `status === 'success' | 'failed'` → `{ kind: 'tool_result', tool: toolName, summary: truncated output, timestamp }` (tool entries are upserted by id, not appended — detect status transitions)
+- Session `error` event → `{ kind: 'error', message, timestamp }`
 
 #### Follow-up Messages
 
-`qa_agent_message` payload forwards text to the running Claude session via `sendMessage()`. Also broadcasts a `qa_agent_entry` with `kind: 'user_message'` so the QA panel shows what the user said.
+`qa_agent_message` payload:
+1. Check `qaAgentSession` exists and is running. If not, return `qa_error`.
+2. Forward text via `qaAgentSession.sendMessage()`.
+3. Broadcast a `qa_agent_entry` with `kind: 'user_message'` so the QA panel shows what the user said.
 
 #### Stopping
 
-`stop_qa_agent` kills the Claude session. The session's exit event broadcasts `qa_agent_stopped`.
+`stop_qa_agent` kills the Claude session via `qaAgentSession.kill()`. The exit event handler broadcasts `qa_agent_stopped`.
 
-#### Hidden Session
+Also: the existing `stop_qa` handler must also kill the QA agent if one is running (since stopping PinchTab breaks the agent's MCP tools).
 
-The QA agent session should NOT appear in `getAllSessions` / `getAllClaudeSessions` responses. Two options:
-- Tag it with a `hidden: true` flag in the sessions DB and filter it out
-- Simply don't insert it into the DB at all — manage it as an ephemeral in-memory session
+#### Auto-approval for AskUserQuestion
 
-Recommended: **Don't insert into DB.** The QA agent is ephemeral. No need to persist its history.
+Since the agent runs in `bypassPermissions` mode but `AskUserQuestion` still triggers an approval hook, add special handling: if the agent session receives an `approval_needed` event for `AskUserQuestion`, auto-approve with "Continue with your best judgment."
 
 ### System Prompt
 
@@ -114,6 +120,7 @@ Your workflow:
 
 Always use qa_run_test_flow after making code changes to verify the fix.
 Be concise in your responses — the user sees a compact action log, not a full chat.
+Never use AskUserQuestion — make your best judgment and proceed.
 ```
 
 ### Frontend
@@ -124,13 +131,12 @@ Be concise in your responses — the user sees a compact action log, not a full 
 qaAgentRunning: boolean;
 qaAgentSessionId: string | null;
 qaAgentEntries: QaAgentLogEntry[];
-qaAgentTaskInput: string;
 ```
 
 #### New Store Actions
 
 ```typescript
-startQAAgent(task: string, targetUrl?: string): void;
+startQAAgent(task: string, workingDir: string, targetUrl?: string): void;
 stopQAAgent(): void;
 sendQAAgentMessage(text: string): void;
 clearQAAgentEntries(): void;
@@ -141,7 +147,9 @@ clearQAAgentEntries(): void;
 Handle new payload types on `qa` channel:
 - `qa_agent_started` → set `qaAgentRunning: true`, store sessionId
 - `qa_agent_stopped` → set `qaAgentRunning: false`, clear sessionId
-- `qa_agent_entry` → append to `qaAgentEntries` (cap at 1000)
+- `qa_agent_entry` → append to `qaAgentEntries` (cap at 500)
+
+All agent payloads use `broadcastEnvelope` (any connected client should see progress).
 
 #### QA Panel UI Changes (`QAPanel.tsx`)
 
@@ -156,26 +164,29 @@ When no agent is running, Agent mode shows:
 
 When agent is running, Agent mode shows:
 - Scrollable compact action log:
-  - Tool calls as badges: `🔍 navigated → http://localhost:5173/login`
-  - Tool results as one-liners: `📸 screenshot captured` / `✏️ edited src/App.tsx`
+  - Tool calls as action badges: `navigated → localhost:5173/login`
+  - Tool results as one-liners: `screenshot captured` / `edited src/App.tsx`
   - Agent text as compact messages
   - User messages styled differently (right-aligned or dimmer)
   - Errors in red
-  - Screenshots as small inline thumbnails (tap to expand)
+  - Screenshots as small inline thumbnails
 - Text input at bottom for follow-up messages
 - Stop button in header
 
 **Existing tabs remain accessible** during agent operation — console/network/errors update in real-time from CDP as the agent works.
 
+**Disable "Stop PinchTab" button** while QA agent is running (stopping PinchTab would break the agent).
+
 ## Data Flow
 
 ```
 User types task in QA Panel
-    → WebSocket: {channel: 'qa', type: 'start_qa_agent', task: "test login flow"}
+    → WebSocket: {channel: 'qa', type: 'start_qa_agent', task: "test login", workingDir: "/path/to/project"}
+    → Guard: reject if agent already running
     → Backend starts QA service (if needed) + launches browser (if needed)
-    → Backend spawns hidden Claude session with QA MCP tools
-    → Backend sends task as first message to Claude session
-    → Claude session streams entries
+    → Backend constructs ClaudeSession directly (not via manager)
+    → Backend calls session.start(task) — task IS the prompt
+    → Claude session streams NormalizedEntry objects
     → Backend parses entries → broadcasts {type: 'qa_agent_entry', entry}
     → Frontend appends to qaAgentEntries[]
     → QA Panel renders compact log
@@ -183,27 +194,48 @@ User types task in QA Panel
 Follow-up:
     User types "now try wrong password"
     → WebSocket: {channel: 'qa', type: 'qa_agent_message', text: "..."}
-    → Backend forwards to Claude session
+    → Guard: check session exists and is running
+    → Backend forwards to Claude session via sendMessage()
     → Streaming continues, new entries appear in log
 
-Stop:
+Stop (explicit):
     User clicks Stop
     → WebSocket: {channel: 'qa', type: 'stop_qa_agent'}
     → Backend kills Claude session
-    → Backend broadcasts {type: 'qa_agent_stopped'}
+    → Exit handler broadcasts {type: 'qa_agent_stopped'}
     → Frontend resets state
+
+Stop (crash):
+    Claude session exits with non-zero code
+    → Error handler sends {type: 'qa_agent_entry', entry: {kind: 'error', ...}}
+    → Error handler broadcasts {type: 'qa_agent_stopped'}
+    → Frontend resets state
+
+Stop (QA service stopped):
+    User clicks "Stop PinchTab" (disabled while agent runs, but as fallback)
+    → stop_qa handler also kills QA agent if running
+    → Same cleanup as explicit stop
 ```
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/main/types.ts` | Add QA agent payload types and `QaAgentLogEntry` |
-| `src/shared/types.ts` | Add `QaAgentLogEntry` type (shared) |
-| `src/main/services/websocket.ts` | Add `start_qa_agent`, `stop_qa_agent`, `qa_agent_message` handlers |
-| `src/main/services/claude-session.ts` | No changes needed — existing infra sufficient |
+| `src/shared/types.ts` | Add QA agent payload types and `QaAgentLogEntry` |
+| `src/main/services/websocket.ts` | Add `handleQAAgent()` helper with `start_qa_agent`, `stop_qa_agent`, `qa_agent_message` handlers; update `stop_qa` to also kill agent |
+| `src/main/services/claude-session.ts` | No changes needed — construct `ClaudeSession` directly |
 | `src/renderer/src/stores/useZeusStore.ts` | Add agent state, actions, WebSocket listener |
-| `src/renderer/src/components/QAPanel.tsx` | Add Agent mode with action log + input |
+| `src/renderer/src/components/QAPanel.tsx` | Add Agent mode with action log + input; disable Stop PinchTab while agent runs |
+
+## Edge Cases
+
+| Case | Handling |
+|------|----------|
+| Start agent while one already running | Reject with `qa_error` |
+| Agent session crashes | Wire `error` event → send error entry + `qa_agent_stopped` |
+| Send follow-up to finished agent | Check `isRunning` first, return `qa_error` if stopped |
+| Stop PinchTab while agent runs | Button disabled; fallback: `stop_qa` also kills agent |
+| CDP not connected | Agent's observability tools return empty arrays — acceptable degradation |
 
 ## Testing
 
@@ -213,3 +245,5 @@ Stop:
 - Stop agent, verify cleanup
 - Verify agent doesn't appear in main session list
 - Verify existing QA tabs (console, network, errors) still update during agent operation
+- Crash the agent session, verify frontend resets cleanly
+- Try starting a second agent while one runs, verify rejection
