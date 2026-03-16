@@ -17,6 +17,11 @@ import { initDatabase, closeDatabase, markStaleSessionsErrored, pruneOldSessions
 
 let mainWindow: BrowserWindow | null = null;
 
+/** Get the main window (used by services to flash taskbar, bounce dock, etc.) */
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow;
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow(createMainWindowOptions());
 

@@ -1,11 +1,25 @@
 import { useEffect, useRef } from 'react';
 import type { ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
 
+// Vite resolves these to hashed asset URLs
+import approvalSoundUrl from '@/assets/sounds/approval.wav';
+import successSoundUrl from '@/assets/sounds/success.wav';
+import errorSoundUrl from '@/assets/sounds/error.wav';
+
 type AttentionReason = 'approval_needed' | 'task_done' | 'task_error';
+
+const SOUND_URLS: Record<AttentionReason, string> = {
+  approval_needed: approvalSoundUrl,
+  task_done: successSoundUrl,
+  task_error: errorSoundUrl,
+};
 
 /**
  * Plays notification sounds and shows system notifications when
  * Claude sessions need attention: tool approval, task done, or error.
+ *
+ * Uses real .wav files via AudioContext (like vibe-kanban) to avoid
+ * macOS NowPlaying/MediaRemote TCC prompts that `new Audio()` triggers.
  */
 export function useNotificationSound(
   claudeSessions: ClaudeSessionInfo[],
@@ -48,55 +62,61 @@ export function useNotificationSound(
   }, [claudeSessions, sessionActivity]);
 }
 
-// ─── Sound ───
+// ─── Sound (AudioContext + decodeAudioData, same approach as vibe-kanban) ───
 
-function playTone(reason: AttentionReason) {
+async function playSound(reason: AttentionReason): Promise<void> {
+  try {
+    const url = SOUND_URLS[reason];
+    const ctx = new AudioContext();
+    const res = await fetch(url);
+    const buf = await res.arrayBuffer();
+    const audioData = await ctx.decodeAudioData(buf);
+    const source = ctx.createBufferSource();
+    source.buffer = audioData;
+    source.connect(ctx.destination);
+    source.start();
+    source.onended = () => ctx.close();
+  } catch {
+    // Audio not available — fall back to oscillator
+    playToneFallback(reason);
+  }
+}
+
+/** Fallback oscillator tone if .wav fetch fails */
+function playToneFallback(reason: AttentionReason) {
   try {
     const ctx = new AudioContext();
-    const oscillator = ctx.createOscillator();
+    const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-
-    oscillator.connect(gain);
+    osc.connect(gain);
     gain.connect(ctx.destination);
-    oscillator.type = 'sine';
+    osc.type = 'sine';
 
     if (reason === 'approval_needed') {
-      // Two-tone alert: urgent feel
-      oscillator.frequency.setValueAtTime(660, ctx.currentTime);
-      oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
-      oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.24);
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + 0.4);
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
     } else if (reason === 'task_done') {
-      // Rising chime: success
-      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-      oscillator.frequency.setValueAtTime(1047, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + 0.3);
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1);
     } else {
-      // Low tone: error
-      oscillator.frequency.setValueAtTime(330, ctx.currentTime);
-      oscillator.frequency.setValueAtTime(220, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + 0.35);
+      osc.frequency.setValueAtTime(330, ctx.currentTime);
+      osc.frequency.setValueAtTime(220, ctx.currentTime + 0.15);
     }
 
-    oscillator.onended = () => ctx.close();
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.35);
+    osc.onended = () => ctx.close();
   } catch {
-    // Audio not available
+    // Truly no audio available
   }
 }
 
 // ─── System notification ───
 
 function showSystemNotification(reason: AttentionReason, sessionName: string) {
-  if (document.hasFocus()) return; // Only notify when window is not focused
+  if (document.hasFocus()) return;
 
   const titles: Record<AttentionReason, string> = {
     approval_needed: 'Approval Needed',
@@ -122,7 +142,7 @@ function showSystemNotification(reason: AttentionReason, sessionName: string) {
 }
 
 function notify(reason: AttentionReason, sessionName: string) {
-  playTone(reason);
+  playSound(reason);
   showSystemNotification(reason, sessionName);
 }
 

@@ -4,6 +4,8 @@ import { stat as fsStat } from 'fs/promises';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
+import { app, Notification as ElectronNotification } from 'electron';
+import { getMainWindow } from '../index';
 import type {
   WsEnvelope,
   TerminalInputPayload,
@@ -70,6 +72,34 @@ const fileTreeManager = new FileTreeServiceManager();
 
 // Track authenticated clients
 const authenticatedClients = new WeakSet<WebSocket>();
+
+/**
+ * Request OS-level attention: flash taskbar (Windows/Linux), bounce dock (macOS),
+ * and show a native notification if the window is not focused.
+ */
+function requestAttention(title: string, body: string): void {
+  const win = getMainWindow();
+
+  if (win && !win.isFocused()) {
+    // Flash the taskbar icon (Windows/Linux)
+    win.flashFrame(true);
+
+    // Bounce the dock icon (macOS)
+    if (process.platform === 'darwin') {
+      app.dock?.bounce('informational');
+    }
+
+    // Show native OS notification
+    if (ElectronNotification.isSupported()) {
+      const notif = new ElectronNotification({ title, body, silent: true });
+      notif.on('click', () => {
+        win.show();
+        win.focus();
+      });
+      notif.show();
+    }
+  }
+}
 
 function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
   if (ws.readyState === WebSocket.OPEN) {
@@ -290,7 +320,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
   });
 
-  // Forward approval requests
+  // Forward approval requests + request OS attention
   session.on('approval_needed', (approval) => {
     broadcastEnvelope({
       channel: 'claude',
@@ -298,6 +328,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       payload: { type: 'approval_needed', ...approval },
       auth: '',
     });
+    requestAttention('Approval Needed', `"${approval.toolName}" needs your approval to continue.`);
   });
 
   // Forward session ID once extracted from stream + persist to DB
@@ -321,7 +352,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
   });
 
-  // Forward session end (process exited) + persist status
+  // Forward session end (process exited) + persist status + request attention
   session.on('done', () => {
     updateClaudeSessionStatus(envelope.sessionId, 'done', Date.now());
     broadcastEnvelope({
@@ -330,9 +361,10 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       payload: { type: 'done' },
       auth: '',
     });
+    requestAttention('Task Complete', 'Claude session finished successfully.');
   });
 
-  // Forward errors + persist status
+  // Forward errors + persist status + request attention
   session.on('error', (err) => {
     updateClaudeSessionStatus(envelope.sessionId, 'error', Date.now());
     broadcastEnvelope({
@@ -341,6 +373,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       payload: { type: 'error', message: err.message },
       auth: '',
     });
+    requestAttention('Task Failed', `Claude session encountered an error: ${err.message}`);
   });
 }
 
