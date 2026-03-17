@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, Component, type ReactNode } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,37 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { NormalizedEntry } from '../../../shared/types';
+
+const EMPTY_ENTRIES: NormalizedEntry[] = [];
+const EMPTY_QA_AGENTS: { info: any; entries: any[] }[] = [];
+const EMPTY_QUEUE: { id: string; content: string }[] = [];
+
+// ─── Error Boundary ───
+
+class InfoPanelErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+          <AlertCircle className="text-destructive size-6" />
+          <p className="text-destructive text-xs font-medium">Panel crashed</p>
+          <p className="text-muted-foreground text-[10px] text-center max-w-[200px] break-all">{this.state.error.message}</p>
+          <button
+            className="text-primary text-[10px] hover:underline mt-1"
+            onClick={() => this.setState({ error: null })}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── Helpers ───
 
@@ -37,9 +67,12 @@ function formatDuration(ms: number): string {
   return `${hrs}h ${mins % 60}m`;
 }
 
-function formatTimeIST(ts: number): string {
+function formatTimeIST(ts: number | undefined): string {
+  if (!ts) return '—';
   try {
-    return new Date(ts).toLocaleString('en-IN', {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
@@ -66,6 +99,7 @@ function countEntries(entries: NormalizedEntry[]) {
   let agents = 0;
 
   for (const e of entries) {
+    if (!e?.entryType) continue;
     switch (e.entryType.type) {
       case 'user_message': userMessages++; break;
       case 'assistant_message': assistantMessages++; break;
@@ -73,7 +107,7 @@ function countEntries(entries: NormalizedEntry[]) {
       case 'error_message': errors++; break;
       case 'tool_use': {
         toolCalls++;
-        const action = e.entryType.actionType.action;
+        const action = e.entryType.actionType?.action;
         if (action === 'file_edit') edits++;
         else if (action === 'file_read') reads++;
         else if (action === 'command_run') commands++;
@@ -209,14 +243,14 @@ function PinchTabControl() {
 function SessionInfoPanel() {
   const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
   const session = useZeusStore((s) => s.claudeSessions.find((cs) => cs.id === s.activeClaudeId));
-  const entries = useZeusStore((s) => activeClaudeId ? (s.claudeEntries[activeClaudeId] ?? []) : []);
+  const entries = useZeusStore((s) => activeClaudeId ? (s.claudeEntries[activeClaudeId] ?? EMPTY_ENTRIES) : EMPTY_ENTRIES);
   const activity = useZeusStore((s) => activeClaudeId ? s.sessionActivity[activeClaudeId] : undefined);
   const gitStatus = useZeusStore((s) => activeClaudeId ? s.gitStatus[activeClaudeId] : undefined);
   const gitConnected = useZeusStore((s) => activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false);
   const fileTreeConnected = useZeusStore((s) => activeClaudeId ? s.fileTreeConnected[activeClaudeId] === true : false);
-  const qaAgents = useZeusStore((s) => activeClaudeId ? (s.qaAgents[activeClaudeId] ?? []) : []);
-  const pendingApprovals = useZeusStore((s) => s.pendingApprovals.filter((a) => a.sessionId === activeClaudeId));
-  const queue = useZeusStore((s) => activeClaudeId ? (s.messageQueue[activeClaudeId] ?? []) : []);
+  const qaAgents = useZeusStore((s) => activeClaudeId ? (s.qaAgents[activeClaudeId] ?? EMPTY_QA_AGENTS) : EMPTY_QA_AGENTS);
+  const pendingApprovals = useZeusStore(useShallow((s) => s.pendingApprovals.filter((a) => a.sessionId === activeClaudeId)));
+  const queue = useZeusStore((s) => activeClaudeId ? (s.messageQueue[activeClaudeId] ?? EMPTY_QUEUE) : EMPTY_QUEUE);
 
   const stats = useMemo(() => countEntries(entries), [entries]);
 
@@ -238,7 +272,7 @@ function SessionInfoPanel() {
     );
   }
 
-  const elapsed = Date.now() - session.startedAt;
+  const elapsed = session.startedAt ? Date.now() - session.startedAt : 0;
   const statusColor =
     session.status === 'running' ? 'text-green-400' :
     session.status === 'done' ? 'text-muted-foreground' :
@@ -253,7 +287,7 @@ function SessionInfoPanel() {
     activity.state === 'waiting_approval' ? `Awaiting: ${activity.toolName}` :
     activity.state === 'starting' ? 'Starting' : 'Unknown';
 
-  const runningQaAgents = qaAgents.filter((a) => a.info.status === 'running').length;
+  const runningQaAgents = qaAgents.filter((a) => a.info?.status === 'running').length;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -305,8 +339,8 @@ function SessionInfoPanel() {
         } />
         {gitStatus && (
           <>
-            {gitStatus.staged.length > 0 && <StatRow label="  Staged" value={gitStatus.staged.length} color="text-accent" />}
-            {gitStatus.unstaged.length > 0 && <StatRow label="  Unstaged" value={gitStatus.unstaged.length} color="text-warn" />}
+            {gitStatus.staged?.length > 0 && <StatRow label="  Staged" value={gitStatus.staged.length} color="text-accent" />}
+            {gitStatus.unstaged?.length > 0 && <StatRow label="  Unstaged" value={gitStatus.unstaged.length} color="text-warn" />}
           </>
         )}
         <InfoRow icon={FolderOpen} label="File Tree" value={
@@ -342,9 +376,9 @@ function SessionInfoPanel() {
             <InfoRow icon={Eye} label="Total" value={qaAgents.length} />
             {runningQaAgents > 0 && <StatRow label="Running" value={runningQaAgents} color="text-green-400" />}
             {qaAgents.map((a) => (
-              <div key={a.info.qaAgentId} className="flex items-center justify-between px-3 py-0.5">
-                <span className="text-muted-foreground truncate text-[11px] max-w-[140px]">{a.info.name || a.info.task.slice(0, 30)}</span>
-                <Badge variant={a.info.status === 'running' ? 'default' : 'secondary'} className="text-[9px]">{a.info.status}</Badge>
+              <div key={a.info?.qaAgentId ?? Math.random()} className="flex items-center justify-between px-3 py-0.5">
+                <span className="text-muted-foreground truncate text-[11px] max-w-[140px]">{a.info?.name || a.info?.task?.slice(0, 30) || '—'}</span>
+                <Badge variant={a.info?.status === 'running' ? 'default' : 'secondary'} className="text-[9px]">{a.info?.status ?? '—'}</Badge>
               </div>
             ))}
           </>
@@ -353,11 +387,19 @@ function SessionInfoPanel() {
         {/* Initial Prompt */}
         <SectionHeader title="Initial Prompt" />
         <div className="px-3 py-2">
-          <p className="text-muted-foreground text-[11px] leading-relaxed whitespace-pre-wrap line-clamp-6">{session.prompt}</p>
+          <p className="text-muted-foreground text-[11px] leading-relaxed whitespace-pre-wrap line-clamp-6">{session.prompt || '—'}</p>
         </div>
       </ScrollArea>
     </div>
   );
 }
 
-export default SessionInfoPanel;
+function SessionInfoPanelWithBoundary() {
+  return (
+    <InfoPanelErrorBoundary>
+      <SessionInfoPanel />
+    </InfoPanelErrorBoundary>
+  );
+}
+
+export default SessionInfoPanelWithBoundary;

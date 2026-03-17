@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2 } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -174,38 +174,179 @@ function ThinkingBlock({ content }: { content: string }) {
   );
 }
 
-function toolActionLabel(actionType: ActionType): string {
+// ─── Tool Helpers ───
+
+function getToolIcon(actionType: ActionType): React.ReactNode {
   switch (actionType.action) {
     case 'file_read':
-      return `Read ${actionType.path}`;
+      return <Glasses className="size-3.5" />;
     case 'file_edit':
-      return `Edit ${actionType.path}`;
+      return <FileCode2 className="size-3.5" />;
     case 'command_run':
-      return `$ ${actionType.command}`;
+      return <Terminal className="size-3.5" />;
     case 'search':
-      return `Search: ${actionType.query}`;
+      return <Search className="size-3.5" />;
     case 'web_fetch':
-      return `Fetch: ${actionType.url}`;
+      return <Globe className="size-3.5" />;
     case 'task_create':
-      return `Agent: ${actionType.description}`;
-    case 'plan_presentation':
-      return 'Plan';
-    case 'other':
-      return actionType.description;
+      return <ListTree className="size-3.5" />;
+    default:
+      return <Code2 className="size-3.5" />;
   }
 }
 
-function ToolCard({ entryType, content, sessionDone, isLastEntry }: { entryType: NormalizedEntryType; content: string; sessionDone?: boolean; isLastEntry?: boolean }) {
+function getToolTitle(actionType: ActionType): string {
+  switch (actionType.action) {
+    case 'file_read': return 'Read';
+    case 'file_edit': return 'Edit';
+    case 'command_run': return 'Shell';
+    case 'search': return 'Search';
+    case 'web_fetch': return 'Fetch';
+    case 'task_create': return 'Agent';
+    case 'plan_presentation': return 'Plan';
+    case 'other': return actionType.description.startsWith('MCP:') ? 'MCP Tool' : actionType.description;
+  }
+}
+
+function getToolSubtitle(actionType: ActionType): string {
+  switch (actionType.action) {
+    case 'file_read': return actionType.path?.split('/').pop() || actionType.path || '';
+    case 'file_edit': return actionType.path?.split('/').pop() || actionType.path || '';
+    case 'command_run': return actionType.command || '';
+    case 'search': return actionType.query || '';
+    case 'web_fetch': return actionType.url || '';
+    case 'task_create': return actionType.description || '';
+    case 'plan_presentation': return '';
+    case 'other': return actionType.description || '';
+  }
+}
+
+function getToolDirectory(actionType: ActionType): string | null {
+  if (actionType.action === 'file_read' || actionType.action === 'file_edit') {
+    const p = actionType.path || '';
+    const idx = p.lastIndexOf('/');
+    return idx > 0 ? p.slice(0, idx) : null;
+  }
+  return null;
+}
+
+// Strip basic ANSI escape codes from bash output
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+}
+
+function ToolOutputCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+      className="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 transition-colors"
+      title={copied ? 'Copied' : 'Copy'}
+    >
+      {copied ? <ClipboardCheck className="size-3" /> : <Copy className="size-3" />}
+    </button>
+  );
+}
+
+// ─── Per-tool body renderers ───
+
+function BashToolBody({ command, output }: { command: string; output: string }) {
+  const cleaned = stripAnsi(output);
+  const fullText = `$ ${command}${cleaned ? '\n' + cleaned : ''}`;
+  return (
+    <div className="relative mt-2">
+      <div className="absolute top-1 right-1 z-10">
+        <ToolOutputCopyButton text={fullText} />
+      </div>
+      <div className="border-border max-h-60 overflow-auto rounded border bg-black/30 p-2">
+        <pre className="whitespace-pre-wrap font-mono text-[11px]">
+          <span className="text-primary/70">$ </span>
+          <span className="text-foreground/80">{command}</span>
+          {cleaned && (
+            <>
+              {'\n'}
+              <span className="text-muted-foreground">{cleaned}</span>
+            </>
+          )}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+function SearchToolBody({ output }: { output: string }) {
+  if (!output) return null;
+  return (
+    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
+      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
+    </div>
+  );
+}
+
+function EditToolBody({ output, actionType }: { output: string; actionType: ActionType }) {
+  if (!output) return null;
+  // If we have changes data in the actionType, show old→new
+  const changes = (actionType as { changes?: Array<{ action: string; oldString?: string; newString?: string; content?: string }> }).changes;
+  if (changes && changes.length > 0) {
+    return (
+      <div className="mt-2 space-y-1.5">
+        {changes.map((change, i) => (
+          <div key={i} className="border-border overflow-hidden rounded border">
+            {change.action === 'edit' && change.oldString && (
+              <div className="border-border max-h-32 overflow-auto border-b bg-red-500/5 px-2 py-1.5">
+                <pre className="whitespace-pre-wrap font-mono text-[11px] text-red-400/80">{change.oldString}</pre>
+              </div>
+            )}
+            {change.action === 'edit' && change.newString && (
+              <div className="max-h-32 overflow-auto bg-green-500/5 px-2 py-1.5">
+                <pre className="whitespace-pre-wrap font-mono text-[11px] text-green-400/80">{change.newString}</pre>
+              </div>
+            )}
+            {change.action === 'write' && change.content && (
+              <div className="max-h-40 overflow-auto bg-black/20 px-2 py-1.5">
+                <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{change.content}</pre>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  // Fallback: show raw output
+  return (
+    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
+      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
+    </div>
+  );
+}
+
+function GenericToolBody({ output }: { output: string }) {
+  if (!output) return null;
+  return (
+    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
+      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
+    </div>
+  );
+}
+
+// ─── ToolCard (opencode-inspired) ───
+
+function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { entryType: NormalizedEntryType; content: string; metadata?: unknown; sessionDone?: boolean; isLastEntry?: boolean }) {
   if (entryType.type !== 'tool_use') return null;
   const { toolName, actionType, status } = entryType;
   const [expanded, setExpanded] = useState(false);
 
   const statusLabel = typeof status === 'string' ? status : status.status;
-  // Only show as running if it's the last entry and session is still active
   const isRunning = statusLabel === 'created' && !sessionDone && isLastEntry === true;
   const isPending = statusLabel === 'pending_approval';
   const isDenied = statusLabel === 'denied';
   const isFailed = statusLabel === 'failed';
+  const isSuccess = statusLabel === 'success' || (statusLabel === 'created' && sessionDone);
 
   const borderColor =
     isPending ? 'border-orange-400/40 bg-orange-400/5' :
@@ -217,41 +358,81 @@ function ToolCard({ entryType, content, sessionDone, isLastEntry }: { entryType:
   const statusDotColor =
     isRunning ? 'bg-primary' :
     isPending ? 'bg-orange-400' :
-    (statusLabel === 'success' || (statusLabel === 'created' && sessionDone)) ? 'bg-green-400' :
+    isSuccess ? 'bg-green-400' :
     (isDenied || isFailed) ? 'bg-red-400' :
     'bg-muted-foreground';
 
-  // Extract meaningful detail from actionType
-  const detail = toolActionLabel(actionType);
-  const hasContent = content && !content.startsWith(toolName) && content.length > 0;
+  const meta = metadata as { output?: string } | undefined;
+  const output = meta?.output || '';
+
+  const title = getToolTitle(actionType);
+  const subtitle = getToolSubtitle(actionType);
+  const directory = getToolDirectory(actionType);
+  const icon = getToolIcon(actionType);
+
+  // Determine if this tool type has expandable content
+  const isBash = actionType.action === 'command_run';
+  const isEdit = actionType.action === 'file_edit';
+  const isRead = actionType.action === 'file_read';
+  const isSearch = actionType.action === 'search';
+  const hasExpandable = isBash ? true : (output.length > 0 || (isEdit && !!(actionType as unknown as { changes?: unknown[] }).changes));
+
+  const handleToggle = () => {
+    if (!hasExpandable || isRunning) return;
+    setExpanded(!expanded);
+  };
 
   return (
-    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${borderColor}`}>
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={`inline-block size-1.5 shrink-0 rounded-full ${statusDotColor} ${(isRunning || isPending) ? 'animate-pulse' : ''}`} />
-          <span className={`text-[10px] font-semibold ${isRunning ? 'zeus-shimmer-accent' : isPending ? 'text-orange-400' : 'text-primary'}`}>
-            {toolName}
-          </span>
-          <span className={`min-w-0 truncate font-mono text-xs ${isRunning ? 'zeus-shimmer' : 'text-muted-foreground'}`}>
-            {detail}
-          </span>
-        </div>
-        {hasContent && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
-          >
-            {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-          </button>
-        )}
-      </div>
+    <div className={`bg-secondary border-border rounded-lg border ${borderColor} transition-colors`}>
+      {/* Trigger row */}
+      <button
+        onClick={handleToggle}
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left ${hasExpandable && !isRunning ? 'cursor-pointer' : 'cursor-default'}`}
+      >
+        {/* Icon */}
+        <span className={`shrink-0 ${isRunning ? 'text-primary animate-pulse' : isSuccess ? 'text-green-400' : isFailed || isDenied ? 'text-red-400' : isPending ? 'text-orange-400' : 'text-muted-foreground'}`}>
+          {icon}
+        </span>
 
-      {/* Expanded content — show tool output/details */}
-      {expanded && hasContent && (
-        <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
-          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{content}</pre>
+        {/* Title + subtitle */}
+        <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className={`shrink-0 text-xs font-semibold ${isRunning ? 'zeus-shimmer-accent' : 'text-foreground/90'}`}>
+            {title}
+          </span>
+          {!isRunning && subtitle && (
+            <span className="text-muted-foreground min-w-0 truncate text-xs">
+              {subtitle}
+            </span>
+          )}
+          {isRunning && (
+            <span className="zeus-shimmer text-xs">working...</span>
+          )}
+        </div>
+
+        {/* Directory path (for file tools) */}
+        {!isRunning && directory && (
+          <span className="text-muted-foreground/50 hidden shrink-0 text-[10px] sm:block">
+            {directory}
+          </span>
+        )}
+
+        {/* Status dot + chevron */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className={`inline-block size-1.5 rounded-full ${statusDotColor} ${(isRunning || isPending) ? 'animate-pulse' : ''}`} />
+          {hasExpandable && !isRunning && (
+            <ChevronDown className={`text-muted-foreground size-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          )}
+        </div>
+      </button>
+
+      {/* Expanded body — per-tool rendering */}
+      {expanded && !isRunning && (
+        <div className="border-border border-t px-3 pb-2">
+          {isBash && <BashToolBody command={actionType.action === 'command_run' ? actionType.command : ''} output={output} />}
+          {isEdit && <EditToolBody output={output} actionType={actionType} />}
+          {isSearch && <SearchToolBody output={output} />}
+          {isRead && output && <GenericToolBody output={output} />}
+          {!isBash && !isEdit && !isSearch && !isRead && output && <GenericToolBody output={output} />}
         </div>
       )}
     </div>
@@ -396,7 +577,7 @@ function EntryItem({ entry, sessionDone, isLastEntry }: { entry: NormalizedEntry
     case 'thinking':
       return <ThinkingBlock content={entry.content} />;
     case 'tool_use':
-      return <ToolCard entryType={entry.entryType} content={entry.content} sessionDone={sessionDone} isLastEntry={isLastEntry} />;
+      return <ToolCard entryType={entry.entryType} content={entry.content} metadata={entry.metadata} sessionDone={sessionDone} isLastEntry={isLastEntry} />;
     case 'token_usage':
       return <TokenUsageBar entryType={entry.entryType} />;
     case 'system_message':

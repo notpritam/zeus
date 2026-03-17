@@ -123,7 +123,8 @@ export class ClaudeLogProcessor {
                 actionType: tracked.actionType,
                 status,
               },
-              content: summary.summary || tracked.content,
+              content: tracked.content,
+              metadata: { output: summary.summary || '' },
             }];
           }
         }
@@ -206,6 +207,7 @@ export class ClaudeLogProcessor {
     const resultMsg = msg as {
       tool_use_id?: string;
       result?: unknown;
+      content?: unknown;
       is_error?: boolean;
     };
 
@@ -222,9 +224,11 @@ export class ClaudeLogProcessor {
     }
 
     const status = resultMsg.is_error ? 'failed' : 'success';
-    const resultContent = typeof resultMsg.result === 'string'
-      ? resultMsg.result
-      : JSON.stringify(resultMsg.result ?? '').slice(0, 500);
+    // Claude SDK may use either 'result' or 'content' for the output
+    const raw = resultMsg.result ?? resultMsg.content ?? '';
+    const resultOutput = typeof raw === 'string'
+      ? raw
+      : JSON.stringify(raw).slice(0, 2000);
 
     this.toolMap.delete(toolUseId);
     this.setActivity({ state: 'streaming' });
@@ -237,7 +241,8 @@ export class ClaudeLogProcessor {
         actionType: tracked.actionType,
         status: status as 'success' | 'failed',
       },
-      content: resultContent,
+      content: tracked.content,
+      metadata: { output: resultOutput },
     }];
   }
 

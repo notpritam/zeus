@@ -101,6 +101,7 @@ function ActivityBarIcon({
       <TooltipTrigger asChild>
         <button
           onClick={handleClick}
+          aria-label={tooltip}
           className={`relative flex w-full items-center justify-center py-1.5 transition-colors ${
             isActive
               ? 'border-primary bg-primary/10 text-foreground border-l-2'
