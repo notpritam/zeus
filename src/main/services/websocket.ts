@@ -1964,14 +1964,20 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         });
         insertQaAgentEntry(payload.qaAgentId, 'system_message', JSON.stringify(interruptEntry), Date.now());
       } catch {
-        // If interrupt fails (process already dead), fall back to broadcasting stopped
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
-        });
+        // interrupt() failed — process is likely already dead
       }
+      // Always update status to stopped immediately so the UI reflects it
+      updateQaAgentSessionStatus(payload.qaAgentId, 'stopped');
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
+      });
     } else if (record) {
-      // Already stopped — no-op, user can send a new message to resume
+      // Already stopped — broadcast to sync UI
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
+      });
     } else {
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
@@ -2082,24 +2088,28 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     insertQaAgentEntry(payload.qaAgentId, 'user_message', JSON.stringify(userMsgEntry), Date.now());
 
     try {
+      // Broadcast that the agent is running again
+      updateQaAgentSessionStatus(record.qaAgentId, 'running');
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_started',
+          qaAgentId: record.qaAgentId,
+          parentSessionId: record.parentSessionId,
+          parentSessionType: record.parentSessionType,
+          name: record.name,
+          task: record.task,
+          targetUrl: record.targetUrl,
+        },
+      });
+
       if (record.session && record.session.isRunning) {
         // Session is alive (e.g. interrupted but process still running) — send message directly
-        updateQaAgentSessionStatus(record.qaAgentId, 'running');
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: {
-            type: 'qa_agent_started',
-            qaAgentId: record.qaAgentId,
-            parentSessionId: record.parentSessionId,
-            parentSessionType: record.parentSessionType,
-            name: record.name,
-            task: record.task,
-            targetUrl: record.targetUrl,
-          },
-        });
+        console.log(`[QA] Sending follow-up to alive session ${record.qaAgentId}`);
         await record.session.sendMessage(payload.text);
       } else {
         // Session is dead — start a new session (with --resume if we have Claude session ID)
+        console.log(`[QA] Starting new session for agent ${record.qaAgentId} (resume=${!!record.claudeSessionId})`);
         const targetUrl = record.targetUrl || 'http://localhost:5173';
         const sessionOpts: import('./claude-session').SessionOptions = {
           workingDir: record.workingDir,
@@ -2117,31 +2127,30 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         record.collectedTextEntries = [];
         wireQAAgent(record);
 
-        // Broadcast that the agent is running again
-        updateQaAgentSessionStatus(record.qaAgentId, 'running');
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: {
-            type: 'qa_agent_started',
-            qaAgentId: record.qaAgentId,
-            parentSessionId: record.parentSessionId,
-            parentSessionType: record.parentSessionType,
-            name: record.name,
-            task: record.task,
-            targetUrl: record.targetUrl,
-          },
-        });
-
         const prompt = record.claudeSessionId
           ? payload.text  // resuming — just send the follow-up text
           : `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.text}`;
         await newSession.start(prompt);
       }
     } catch (err) {
-      sendEnvelope(ws, {
+      console.error(`[QA] Failed to send message to agent ${record.qaAgentId}:`, (err as Error).message);
+      // Revert status back to stopped so the UI isn't stuck on "running"
+      updateQaAgentSessionStatus(record.qaAgentId, 'stopped');
+      broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_error', message: `Failed to send message: ${(err as Error).message}` },
+        payload: { type: 'qa_agent_stopped', qaAgentId: record.qaAgentId, parentSessionId: record.parentSessionId },
       });
+      const errorEntry: NormalizedEntry = {
+        id: `qa-error-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        entryType: { type: 'error_message', errorType: 'other' },
+        content: `Failed to send message: ${(err as Error).message}`,
+      };
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_entry', qaAgentId: record.qaAgentId, parentSessionId: record.parentSessionId, entry: errorEntry },
+      });
+      insertQaAgentEntry(record.qaAgentId, 'error_message', JSON.stringify(errorEntry), Date.now());
     }
   } else if (payload.type === 'clear_qa_agent_entries') {
     clearQaAgentEntries(payload.qaAgentId);

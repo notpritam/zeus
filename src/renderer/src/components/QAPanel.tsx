@@ -859,6 +859,8 @@ function QAPanel() {
                               if (e.key === 'Enter' && agentFollowUp.trim()) {
                                 sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
                                 setAgentFollowUp('');
+                                agentUserScrolledUp.current = false;
+                                scrollAgentLogToBottom();
                               }
                             }}
                             className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded-md border border-transparent px-2.5 py-1.5 text-xs outline-none focus:border-primary/40"
@@ -873,6 +875,8 @@ function QAPanel() {
                               if (agentFollowUp.trim()) {
                                 sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
                                 setAgentFollowUp('');
+                                agentUserScrolledUp.current = false;
+                                scrollAgentLogToBottom();
                               }
                             }}
                             title="Send message"
