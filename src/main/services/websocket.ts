@@ -1079,6 +1079,95 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       payload: { type: 'claude_session_archived', archivedId: envelope.sessionId },
       auth: '',
     });
+  // ─── External Session Management (from zeus-bridge MCP) ───
+
+  } else if (payload.type === 'register_external_session') {
+    // External agent creates a session visible in the UI
+    const sessionId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+
+    insertClaudeSession({
+      id: sessionId,
+      claudeSessionId: null,
+      status: 'running',
+      prompt: payload.prompt || 'External session',
+      name: payload.name || null,
+      color: null,
+      notificationSound: true,
+      workingDir: payload.workingDir || process.env.HOME || '/',
+      permissionMode: 'bypassPermissions',
+      model: null,
+      startedAt: now,
+      endedAt: null,
+    });
+
+    // Persist initial user message entry
+    upsertClaudeEntry(sessionId, {
+      id: `user-${now}`,
+      entryType: { type: 'user_message' },
+      content: payload.prompt || 'External session',
+    });
+
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'claude_started' },
+      auth: '',
+    });
+
+    // Send response back with sessionId
+    sendEnvelope(ws, {
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'register_external_session_response', responseId: payload.responseId, sessionId },
+      auth: '',
+    });
+
+    console.log(`[Claude] External session registered: ${sessionId} — ${payload.name}`);
+
+  } else if (payload.type === 'external_session_entry') {
+    // External agent adds an entry to a session
+    const { sessionId: extSessionId, entry } = payload as { sessionId: string; entry: NormalizedEntry };
+    if (!extSessionId || !entry) return;
+
+    upsertClaudeEntry(extSessionId, entry);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: extSessionId,
+      payload: { type: 'entry', entry },
+      auth: '',
+    });
+
+  } else if (payload.type === 'external_session_activity') {
+    // External agent updates activity state
+    const { sessionId: extSessionId, activity } = payload as { sessionId: string; activity: unknown };
+    if (!extSessionId || !activity) return;
+
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: extSessionId,
+      payload: { type: 'session_activity', activity },
+      auth: '',
+    });
+
+  } else if (payload.type === 'external_session_done') {
+    // External agent ends a session
+    const { sessionId: extSessionId, status } = payload as { sessionId: string; status: string };
+    if (!extSessionId) return;
+
+    const finalStatus = status === 'error' ? 'error' : 'done';
+    finalizeCreatedToolEntries(extSessionId);
+    updateClaudeSessionStatus(extSessionId, finalStatus, Date.now());
+
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: extSessionId,
+      payload: { type: finalStatus === 'error' ? 'error' : 'done', message: finalStatus === 'error' ? 'External session errored' : undefined },
+      auth: '',
+    });
+
+    console.log(`[Claude] External session ended: ${extSessionId} (${finalStatus})`);
+
   } else {
     sendError(ws, envelope.sessionId, `Unknown claude type: ${payload.type}`);
   }
@@ -1510,15 +1599,15 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   if (payload.type === 'start_qa') {
     try {
       if (qaService?.isRunning()) {
-        sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_started' }, auth: '' });
+        sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_started', responseId: payload.responseId }, auth: '' });
         return;
       }
       qaService = new QAService();
       await qaService.start();
-      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'qa_started' }, auth: '' });
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'qa_started', responseId: payload.responseId }, auth: '' });
     } catch (err) {
       sendEnvelope(ws, {
-        channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '',
+        channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message, responseId: payload.responseId }, auth: '',
       });
     }
   } else if (payload.type === 'stop_qa') {
@@ -1536,7 +1625,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     const running = qaService?.isRunning() ?? false;
     const instances = running && qaService ? await qaService.listInstances() : [];
     sendEnvelope(ws, {
-      channel: 'qa', sessionId: '', payload: { type: 'qa_status', running, instances }, auth: '',
+      channel: 'qa', sessionId: '', payload: { type: 'qa_status', running, instances, responseId: payload.responseId }, auth: '',
     });
   } else if (payload.type === 'launch_instance') {
     if (!qaService?.isRunning()) {
@@ -1545,7 +1634,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     }
     try {
       const instance = await qaService.launchInstance(payload.headless);
-      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'instance_launched', instance }, auth: '' });
+      broadcastEnvelope({ channel: 'qa', sessionId: '', payload: { type: 'instance_launched', instance, responseId: payload.responseId }, auth: '' });
 
       // Wire CDP events to frontend
       const cdp = qaService!.getCdpClient();

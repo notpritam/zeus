@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Info,
   Clock,
@@ -12,13 +13,15 @@ import {
   BellOff,
   Eye,
   EyeOff,
-  MessageSquare,
   Wrench,
-  Brain,
   AlertCircle,
   Bot,
-  BarChart3,
   Zap,
+  Play,
+  Square,
+  Globe,
+  Monitor,
+  Loader2,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { NormalizedEntry } from '../../../shared/types';
@@ -94,7 +97,7 @@ function InfoRow({ icon: Icon, label, value, muted }: { icon: React.ComponentTyp
         <Icon className="text-muted-foreground size-3 shrink-0" />
         <span className="text-muted-foreground text-[11px]">{label}</span>
       </div>
-      <span className={`text-right text-[11px] font-medium ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>{value}</span>
+      <div className={`text-right text-[11px] font-medium ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>{value}</div>
     </div>
   );
 }
@@ -117,6 +120,90 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
+// ─── PinchTab Control ───
+
+function PinchTabControl() {
+  const qaRunning = useZeusStore((s) => s.qaRunning);
+  const qaInstances = useZeusStore((s) => s.qaInstances);
+  const qaLoading = useZeusStore((s) => s.qaLoading);
+  const startQA = useZeusStore((s) => s.startQA);
+  const stopQA = useZeusStore((s) => s.stopQA);
+  const launchQAInstance = useZeusStore((s) => s.launchQAInstance);
+  const stopQAInstance = useZeusStore((s) => s.stopQAInstance);
+
+  return (
+    <>
+      <SectionHeader title="PinchTab / Browser" />
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <Globe className="text-muted-foreground size-3 shrink-0" />
+          <span className="text-muted-foreground text-[11px]">Server</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`size-1.5 rounded-full ${qaRunning ? 'bg-green-400' : 'bg-muted-foreground/30'}`} />
+          <span className={`text-[11px] font-medium ${qaRunning ? 'text-green-400' : 'text-muted-foreground'}`}>
+            {qaRunning ? 'Running' : 'Stopped'}
+          </span>
+          {qaLoading ? (
+            <Loader2 className="text-muted-foreground size-3 animate-spin" />
+          ) : qaRunning ? (
+            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground hover:text-destructive" onClick={stopQA}>
+              <Square className="size-2.5" />
+            </Button>
+          ) : (
+            <Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground hover:text-green-400" onClick={startQA}>
+              <Play className="size-2.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Instances */}
+      {qaRunning && (
+        <>
+          <div className="flex items-center justify-between gap-2 px-3 py-1">
+            <div className="flex items-center gap-2">
+              <Monitor className="text-muted-foreground size-3 shrink-0" />
+              <span className="text-muted-foreground text-[11px]">Instances</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Badge variant="secondary" className="text-[10px] font-mono">{qaInstances.length}</Badge>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-5 text-muted-foreground hover:text-primary"
+                onClick={() => launchQAInstance(true)}
+                disabled={qaLoading}
+                title="Launch headless instance"
+              >
+                <Play className="size-2.5" />
+              </Button>
+            </div>
+          </div>
+          {qaInstances.map((inst) => (
+            <div key={inst.instanceId} className="flex items-center justify-between px-3 py-0.5 pl-8">
+              <span className="text-muted-foreground truncate text-[10px] font-mono max-w-[120px]" title={inst.instanceId}>
+                {inst.instanceId.slice(0, 12)}
+              </span>
+              <div className="flex items-center gap-1">
+                <Badge variant="outline" className="text-[8px]">{inst.headless ? 'headless' : 'headed'}</Badge>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-4 text-muted-foreground hover:text-destructive"
+                  onClick={() => stopQAInstance(inst.instanceId)}
+                >
+                  <Square className="size-2" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
 // ─── Main Panel ───
 
 function SessionInfoPanel() {
@@ -135,9 +222,18 @@ function SessionInfoPanel() {
 
   if (!activeClaudeId || !session) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
-        <Info className="text-muted-foreground size-6" />
-        <p className="text-muted-foreground text-xs">No active session</p>
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          <Info className="text-muted-foreground size-3.5" />
+          <span className="text-foreground text-xs font-semibold">Session Info</span>
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <PinchTabControl />
+          <div className="flex flex-col items-center justify-center gap-2 p-4 pt-8">
+            <Info className="text-muted-foreground size-6" />
+            <p className="text-muted-foreground text-xs">No active session</p>
+          </div>
+        </ScrollArea>
       </div>
     );
   }
@@ -157,7 +253,6 @@ function SessionInfoPanel() {
     activity.state === 'waiting_approval' ? `Awaiting: ${activity.toolName}` :
     activity.state === 'starting' ? 'Starting' : 'Unknown';
 
-  const gitChanges = gitStatus ? gitStatus.staged.length + gitStatus.unstaged.length : 0;
   const runningQaAgents = qaAgents.filter((a) => a.info.status === 'running').length;
 
   return (
@@ -169,6 +264,9 @@ function SessionInfoPanel() {
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
+        {/* PinchTab Control — always visible */}
+        <PinchTabControl />
+
         {/* Session Details */}
         <SectionHeader title="Session" />
         <InfoRow icon={Zap} label="Name" value={session.name || '—'} muted={!session.name} />

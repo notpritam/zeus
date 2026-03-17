@@ -219,7 +219,7 @@ interface ZeusState {
   fetchQaAgentEntries: (qaAgentId: string) => void;
 
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | null) => void;
   toggleRightPanel: () => void;
 
   // Performance actions
@@ -2012,7 +2012,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | null) => {
     set({ activeRightTab: tab });
     // Fetch QA status when switching to QA tab
     if (tab === 'qa') {
