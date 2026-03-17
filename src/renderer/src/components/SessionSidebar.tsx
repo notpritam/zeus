@@ -75,7 +75,7 @@ interface SessionSidebarProps {
 // ─── Activity helpers ───
 
 function statusDotColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
-  if (session.status === 'error') return 'bg-red-400';
+  if (session.status === 'error') return 'bg-muted-foreground/30';
   if (session.status === 'done') return 'bg-green-400/50';
   if (activity.state === 'waiting_approval') return 'bg-orange-400';
   if (activity.state === 'thinking') return 'bg-yellow-400';
@@ -86,7 +86,7 @@ function statusDotColor(session: ClaudeSessionInfo, activity: SessionActivity): 
 }
 
 function statusTextColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
-  if (session.status === 'error') return 'text-red-400';
+  if (session.status === 'error') return 'text-muted-foreground';
   if (session.status === 'done') return 'text-green-400/70';
   if (activity.state === 'waiting_approval') return 'text-orange-400';
   if (activity.state === 'thinking') return 'text-yellow-400';
@@ -103,7 +103,7 @@ function statusLabel(session: ClaudeSessionInfo, activity: SessionActivity): str
   if (activity.state === 'waiting_approval') return `Approval: ${activity.toolName}`;
   if (activity.state === 'starting') return 'Starting...';
   if (session.status === 'done') return 'Completed';
-  if (session.status === 'error') return 'Error';
+  if (session.status === 'error') return 'Resumed';
   return 'Idle';
 }
 

@@ -143,13 +143,28 @@ function NewClaudeSessionModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[640px]">
-        <DialogHeader className="px-6 pt-6 pb-2">
-          <DialogTitle className="text-sm">New Claude Session</DialogTitle>
-          <DialogDescription className="sr-only">
+      <DialogContent showCloseButton={false} className="fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] max-md:inset-0 max-md:top-0 max-md:left-0 max-md:translate-x-0 max-md:translate-y-0 max-md:max-w-none max-md:w-full max-md:h-full max-md:rounded-none flex max-h-[90vh] max-md:max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[640px]">
+        <DialogHeader className="sr-only">
+          <DialogTitle>New Claude Session</DialogTitle>
+          <DialogDescription>
             Configure and start a new Claude session
           </DialogDescription>
         </DialogHeader>
+
+        {/* Top header with close button */}
+        <div className="flex shrink-0 items-center justify-between border-b bg-secondary/30 px-5 py-3">
+          <div>
+            <h2 className="text-sm font-semibold">New Claude Session</h2>
+            <p className="text-muted-foreground text-[11px] mt-0.5">Configure and launch</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </button>
+        </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-4">
           {/* Section 1: Project Selection */}

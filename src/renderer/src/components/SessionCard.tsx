@@ -68,7 +68,7 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
             isActive ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'
           }`} />
           <span className="text-muted-foreground truncate text-[10px]">
-            {isActive ? 'Running' : session.status === 'exited' ? 'Exited' : session.status === 'killed' ? 'Killed' : session.status} · {formatTime(session.startedAt)}
+            {isActive ? 'Running' : session.status === 'exited' ? 'Exited' : session.status === 'killed' ? 'Killed' : 'Resumed'} · {formatTime(session.startedAt)}
           </span>
         </div>
       </div>

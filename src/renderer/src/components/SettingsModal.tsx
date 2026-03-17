@@ -55,29 +55,41 @@ function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>Settings</DialogTitle>
-        <DialogDescription>System settings, performance, and keyboard shortcuts</DialogDescription>
-      </DialogHeader>
-      <DialogContent showCloseButton={false} className="fixed inset-0 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] sm:max-w-2xl h-[480px] p-0 gap-0 overflow-hidden">
-        <div className="flex h-full">
-          {/* Left sidebar */}
-          <div className="w-48 shrink-0 border-r bg-secondary/30 flex flex-col">
-            <div className="p-4 pb-3">
+      <DialogContent showCloseButton={false} className="fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] max-md:inset-0 max-md:top-0 max-md:left-0 max-md:translate-x-0 max-md:translate-y-0 max-md:max-w-none max-md:w-full max-md:h-full max-md:rounded-none sm:max-w-2xl sm:h-[480px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>System settings, performance, and keyboard shortcuts</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex h-full flex-col overflow-hidden">
+          {/* Top header — full width */}
+          <div className="flex shrink-0 items-center justify-between border-b bg-secondary/30 px-5 py-3">
+            <div>
               <h2 className="text-sm font-semibold">Settings</h2>
               <p className="text-muted-foreground text-[11px] mt-0.5">Configure Zeus</p>
             </div>
-            <nav className="flex-1 px-2 space-y-0.5">
+            <button
+              onClick={() => onOpenChange(false)}
+              className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden"
+            >
+              <X className="size-4" />
+              <span className="sr-only">Close</span>
+            </button>
+          </div>
+
+          {/* Mobile tab bar — horizontal */}
+          <div className="md:hidden shrink-0 border-b bg-background">
+            <nav className="flex gap-1 px-4 py-2 overflow-x-auto">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-xs transition-colors ${
+                    className={`flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors ${
                       activeTab === tab.id
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                     }`}
                   >
                     <Icon className="size-3.5" />
@@ -88,19 +100,28 @@ function SettingsModal({
             </nav>
           </div>
 
-          {/* Right content */}
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Content header */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-b">
-              <h3 className="text-sm font-medium capitalize">{activeTab}</h3>
-              <button
-                onClick={() => onOpenChange(false)}
-                className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden"
-              >
-                <X className="size-4" />
-                <span className="sr-only">Close</span>
-              </button>
-            </div>
+          {/* Body: sidebar + content */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            {/* Tab nav — vertical on desktop only */}
+            <nav className="hidden md:flex md:w-44 md:shrink-0 md:flex-col md:border-r md:bg-secondary/20 md:py-2 md:px-2 md:space-y-0.5 md:overflow-y-auto">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-xs transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                    }`}
+                  >
+                    <Icon className="size-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
 
             {/* Scrollable content area */}
             <div className="flex-1 overflow-y-auto p-5">
