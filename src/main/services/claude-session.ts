@@ -28,6 +28,7 @@ export interface SessionOptions {
   resumeAtMessageId?: string;
   enableQA?: boolean;
   qaTargetUrl?: string;
+  zeusSessionId?: string;
 }
 
 export interface ApprovalRequest {
@@ -79,7 +80,11 @@ export class ClaudeSession extends EventEmitter {
     this.child = spawn('npx', spawnArgs, {
       cwd: this.options.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NPM_CONFIG_LOGLEVEL: 'error' },
+      env: {
+        ...process.env,
+        NPM_CONFIG_LOGLEVEL: 'error',
+        ...(this.options.zeusSessionId ? { ZEUS_SESSION_ID: this.options.zeusSessionId } : {}),
+      },
     });
 
     this._isRunning = true;
@@ -212,18 +217,17 @@ export class ClaudeSession extends EventEmitter {
       }
     }
 
-    // QA MCP server integration
+    // MCP server integration — always include zeus-bridge so the session can
+    // talk back to Zeus (QA panel, session lifecycle, PinchTab) regardless of
+    // which project directory it runs in.
+    const mcpServers: Record<string, { command: string; args: string[] }> = {};
+
+    const bridgePath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-bridge.mjs');
+    mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath] };
+
     if (this.options.enableQA) {
-      const mcpServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
-      const mcpConfig = JSON.stringify({
-        mcpServers: {
-          'zeus-qa': {
-            command: 'node',
-            args: [mcpServerPath],
-          },
-        },
-      });
-      args.push('--mcp-config', mcpConfig);
+      const qaServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
+      mcpServers['zeus-qa'] = { command: 'node', args: [qaServerPath] };
 
       const targetUrl = this.options.qaTargetUrl || 'http://localhost:5173';
       const qaPrompt = [
@@ -234,6 +238,8 @@ export class ClaudeSession extends EventEmitter {
       ].join(' ');
       args.push('--append-system-prompt', qaPrompt);
     }
+
+    args.push('--mcp-config', JSON.stringify({ mcpServers }));
 
     return args;
   }

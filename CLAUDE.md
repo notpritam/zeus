@@ -185,24 +185,18 @@ npm run build        # Full production build
 
 ## QA Testing
 
-After implementing any UI feature or fix, dispatch the **`qa-tester`** subagent (`.claude/agents/qa-tester.md`) to verify the change works in the browser. The subagent has access to all PinchTab MCP tools (`qa_*`) and zeus-bridge tools (`zeus_*`) and will return a structured test report.
+After implementing any UI feature or fix, use the `zeus_qa_run` MCP tool (via zeus-bridge) to spawn a server-side QA agent. The agent runs independently with full browser automation and results appear in the Zeus QA panel.
 
-Usage: Launch the `qa-tester` agent with a prompt describing what feature to test and the target URL (default `http://localhost:5173`).
+Usage: Call `zeus_qa_run` with a `task` describing what to test. The `target_url` defaults to `http://localhost:5173`.
 
-### Screenshot Handling (Two Flows)
+### Screenshot Handling
 
 Screenshots are displayed as actual images in the Zeus QA panel, not just text summaries.
 
-**Flow 1 — Internal QA Agent (Zeus-spawned Claude session):**
 - The QA agent calls `qa_screenshot` (via `qa-server.ts` MCP).
 - `websocket.ts` detects the screenshot tool result and re-fetches the image from PinchTab.
 - The base64 data URL is attached as `imageData` on the `tool_result` log entry.
 - `QAPanel.tsx` renders the image inline in both full and compressed agent log views.
-
-**Flow 2 — External QA Agent (Claude Code qa-tester subagent):**
-- The subagent takes a screenshot via `pinchtab_screenshot`.
-- It then calls `zeus_qa_log` with `kind: "tool_result"` and passes the base64 data URL in the `image_data` parameter.
-- Zeus broadcasts the entry with `imageData` to the renderer, which renders the image inline.
 
 **Type:** `QaAgentLogEntry` `tool_result` kind has an optional `imageData?: string` field (base64 data URL).
 

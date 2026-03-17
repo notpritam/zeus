@@ -297,7 +297,7 @@ server.tool(
         type: 'register_external_qa',
         task,
         targetUrl: target_url ?? 'http://localhost:5173',
-        parentSessionId: parent_session_id ?? 'external',
+        parentSessionId: parent_session_id ?? process.env.ZEUS_SESSION_ID ?? 'external',
         parentSessionType: 'claude',
         name: name ?? undefined,
       });
@@ -429,6 +429,42 @@ server.tool(
       });
     } catch (err) {
       return textResult({ connected: false, error: (err as Error).message });
+    }
+  },
+);
+
+server.tool(
+  'zeus_qa_run',
+  'Spawn a QA testing agent in Zeus. The agent runs server-side with full browser automation. Results appear in the QA panel. Use this instead of doing QA testing yourself.',
+  {
+    task: z.string().describe('What to test (e.g. "Test login flow with valid and invalid credentials")'),
+    target_url: z.string().optional().describe('URL to test (default: http://localhost:5173)'),
+    parent_session_id: z.string().optional().describe('Zeus session ID (auto-detected from env if omitted)'),
+    name: z.string().optional().describe('Display name for the QA agent'),
+    working_dir: z.string().optional().describe('Working directory (default: cwd)'),
+  },
+  async ({ task, target_url, parent_session_id, name, working_dir }) => {
+    try {
+      await connectWs();
+      const sessionId = parent_session_id ?? process.env.ZEUS_SESSION_ID ?? '';
+      // Wait up to 10 minutes — the QA agent runs to completion before responding
+      const response = await sendAndWait('qa', {
+        type: 'start_qa_agent',
+        task,
+        name: name ?? undefined,
+        workingDir: working_dir ?? process.cwd(),
+        targetUrl: target_url ?? 'http://localhost:5173',
+        parentSessionId: sessionId,
+        parentSessionType: 'claude',
+      }, 600_000);
+      const data = response as Record<string, unknown>;
+      return textResult({
+        qaAgentId: data.qaAgentId,
+        status: data.status ?? 'done',
+        summary: data.summary ?? 'QA agent completed.',
+      });
+    } catch (err) {
+      return errorResult(`QA agent failed: ${(err as Error).message}`);
     }
   },
 );
