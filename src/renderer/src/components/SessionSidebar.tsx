@@ -479,18 +479,18 @@ function SessionSidebar({
       className="bg-card flex h-full flex-col"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-1">
+      <div className="border-border flex items-center justify-between border-b px-3 py-3">
         <div className="flex items-center gap-2">
           <Zap className="text-primary size-4" />
           <span className="text-foreground text-xs font-semibold tracking-tight">Zeus</span>
         </div>
         {onCloseSidebar && (
           <button
-            className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
+            className="text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded transition-colors [-webkit-app-region:no-drag]"
             onClick={onCloseSidebar}
             title="Close sidebar"
           >
-            <PanelLeftClose className="size-4.5" />
+            <PanelLeftClose className="size-4" />
           </button>
         )}
       </div>
@@ -551,7 +551,7 @@ function SessionSidebar({
       </ScrollArea>
 
       {/* Bottom bar — settings */}
-      <div className="border-border bg-card flex items-center justify-between border-t px-4 py-3">
+      <div className="border-border bg-card flex items-center justify-between border-t px-4 py-3.5">
         <span className="text-muted-foreground/50 text-sm">
           {allClaude.length + allTerminal.length} session{allClaude.length + allTerminal.length !== 1 ? 's' : ''}
         </span>

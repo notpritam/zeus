@@ -581,7 +581,7 @@ function ClaudeView({
   return (
     <div data-testid="claude-view" className="bg-background flex h-full flex-col">
       {/* Header bar */}
-      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2">
+      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-primary text-sm font-bold truncate max-w-[200px]">{session.name || 'Claude'}</span>
         </div>
@@ -589,11 +589,11 @@ function ClaudeView({
           <Button
             variant="ghost"
             size="icon-xs"
-            className={`size-6 ${compressed ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`size-7 ${compressed ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => setCompressed(!compressed)}
             title={compressed ? 'Expand all' : 'Compress view'}
           >
-            {compressed ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
+            {compressed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
           </Button>
           {(session.status === 'error' || session.status === 'done') && (
             <Button
@@ -602,7 +602,7 @@ function ClaudeView({
               className="text-muted-foreground hover:text-primary"
               onClick={onResume}
             >
-              <RotateCcw className="size-3" />
+              <RotateCcw className="size-3.5" />
               Resume
             </Button>
           )}

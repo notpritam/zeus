@@ -173,7 +173,7 @@ export default function FileExplorer() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-1 border-b px-2 py-3">
         <span className="text-text-secondary truncate text-[11px] font-medium">{dirName}</span>
         <div className="ml-auto flex gap-0.5">
           <button

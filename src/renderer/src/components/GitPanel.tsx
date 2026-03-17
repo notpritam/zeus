@@ -289,7 +289,7 @@ function GitPanelInner() {
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-border flex shrink-0 items-center justify-between border-b px-3 py-2">
+      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center justify-between border-b px-3 py-3">
         <div className="flex items-center gap-2">
           <span className="text-foreground text-xs font-semibold">Source Control</span>
           {/* Connection indicator */}
