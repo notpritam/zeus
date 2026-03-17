@@ -76,11 +76,15 @@ function ActivityBarIcon({
   tab,
   tooltip,
   badge,
+  count,
+  pulse,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings';
   tooltip: string;
-  badge?: number;
+  badge?: number;   // red error badge (top-right)
+  count?: number;   // themed count badge (top-right, lower priority than badge)
+  pulse?: boolean;  // green pulsing dot (bottom-right, for active state)
 }) {
   const activeRightTab = useZeusStore((s) => s.activeRightTab);
   const setActiveRightTab = useZeusStore((s) => s.setActiveRightTab);
@@ -89,12 +93,15 @@ function ActivityBarIcon({
 
   const handleClick = () => {
     if (isActive) {
-      // Clicking active tab collapses the panel
       setActiveRightTab(null);
     } else {
       setActiveRightTab(tab);
     }
   };
+
+  // badge (red) takes priority over count (themed) for the top-right slot
+  const showBadge = badge !== undefined && badge > 0;
+  const showCount = !showBadge && count !== undefined && count > 0;
 
   return (
     <Tooltip>
@@ -109,9 +116,20 @@ function ActivityBarIcon({
           }`}
         >
           <Icon className="size-5" />
-          {badge !== undefined && badge > 0 && (
+          {showBadge && (
             <span className="absolute top-0.5 right-1 flex size-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold leading-none text-white">
-              {badge > 9 ? '!' : badge}
+              {badge! > 9 ? '!' : badge}
+            </span>
+          )}
+          {showCount && (
+            <span className="absolute top-0.5 right-0.5 flex min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold leading-none text-primary-foreground">
+              {count! > 99 ? '99+' : count}
+            </span>
+          )}
+          {pulse && (
+            <span className="absolute bottom-0.5 right-1.5 flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex size-2 rounded-full bg-green-400" />
             </span>
           )}
         </button>
@@ -126,6 +144,31 @@ function ActivityBarIcon({
 function RightPanel() {
   const activeRightTab = useZeusStore((s) => s.activeRightTab);
   const qaJsErrorCount = useZeusStore((s) => s.qaJsErrors.length);
+
+  // Git changes count for active session
+  const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
+  const claudeSessions = useZeusStore((s) => s.claudeSessions);
+  const gitStatus = useZeusStore((s) => s.gitStatus);
+  const session = claudeSessions.find((s) => s.id === activeClaudeId)
+    ?? claudeSessions.find((s) => s.workingDir);
+  const sessionGit = session ? gitStatus[session.id] : undefined;
+  const gitChangeCount = sessionGit
+    ? sessionGit.staged.length + sessionGit.unstaged.length
+    : 0;
+
+  // QA running agents count (across all parent sessions)
+  const qaAgents = useZeusStore((s) => s.qaAgents);
+  const runningQaAgentCount = Object.values(qaAgents)
+    .flat()
+    .filter((a) => a.info.status === 'running')
+    .length;
+
+  // Pending approvals count
+  const pendingApprovals = useZeusStore((s) => s.pendingApprovals);
+  const pendingCount = pendingApprovals.length;
+
+  // Running claude sessions count
+  const runningClaudeCount = claudeSessions.filter((s) => s.status === 'running').length;
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -142,10 +185,41 @@ function RightPanel() {
 
         {/* Activity Bar - always visible */}
         <div className="bg-bg border-border w-10 shrink-0 flex flex-col items-center border-l pt-2 gap-3">
-          <ActivityBarIcon icon={Info} tab="info" tooltip="Session Info" />
-          <ActivityBarIcon icon={GitBranch} tab="source-control" tooltip="Source Control" />
+          <ActivityBarIcon
+            icon={Info}
+            tab="info"
+            tooltip={
+              pendingCount > 0
+                ? `Session Info (${pendingCount} pending approval${pendingCount > 1 ? 's' : ''})`
+                : runningClaudeCount > 0
+                  ? `Session Info (${runningClaudeCount} running)`
+                  : 'Session Info'
+            }
+            badge={pendingCount}
+            pulse={runningClaudeCount > 0 && pendingCount === 0}
+          />
+          <ActivityBarIcon
+            icon={GitBranch}
+            tab="source-control"
+            tooltip={gitChangeCount > 0 ? `Source Control (${gitChangeCount} changes)` : 'Source Control'}
+            count={gitChangeCount}
+          />
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
-          <ActivityBarIcon icon={Eye} tab="qa" tooltip="QA Preview" badge={qaJsErrorCount} />
+          <ActivityBarIcon
+            icon={Eye}
+            tab="qa"
+            tooltip={
+              runningQaAgentCount > 0 && qaJsErrorCount > 0
+                ? `QA Preview (${runningQaAgentCount} running, ${qaJsErrorCount} errors)`
+                : runningQaAgentCount > 0
+                  ? `QA Preview (${runningQaAgentCount} agent${runningQaAgentCount > 1 ? 's' : ''} running)`
+                  : qaJsErrorCount > 0
+                    ? `QA Preview (${qaJsErrorCount} JS errors)`
+                    : 'QA Preview'
+            }
+            badge={qaJsErrorCount}
+            pulse={runningQaAgentCount > 0}
+          />
           <div className="mt-auto pb-2">
             <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />
           </div>

@@ -73,8 +73,8 @@ export class ClaudeLogProcessor {
 
       case 'user':
         // User messages are added optimistically by the renderer store.
-        // Skip echoes from Claude to avoid duplicates.
-        return [];
+        // But user messages also carry tool_result content blocks — extract those.
+        return this.processUserMessage(msg);
 
       case 'tool_use':
         return this.processToolUse(msg);
@@ -173,6 +173,115 @@ export class ClaudeLogProcessor {
       default:
         return [];
     }
+  }
+
+  private processUserMessage(msg: ClaudeJson): NormalizedEntry[] {
+    const userMsg = msg as {
+      message?: { content?: unknown[] | string };
+      tool_use_result?: unknown;
+    };
+
+    // Only interested in user messages that contain tool_result content blocks
+    const content = userMsg.message?.content;
+    if (!content || typeof content === 'string') return [];
+
+    const entries: NormalizedEntry[] = [];
+    for (const block of content) {
+      const b = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
+      if (b.type !== 'tool_result' || !b.tool_use_id) continue;
+
+      const tracked = this.toolMap.get(b.tool_use_id);
+      if (!tracked) continue;
+
+      const status = b.is_error ? 'failed' : 'success';
+
+      // Extract output: prefer structured tool_use_result, fall back to content block text
+      let resultOutput = '';
+
+      // Check structured tool_use_result first (contains stdout, file content, etc.)
+      const structured = userMsg.tool_use_result as Record<string, unknown> | undefined;
+      if (structured) {
+        resultOutput = this.extractStructuredOutput(structured, tracked.toolName);
+      }
+
+      // Fall back to the tool_result content block text
+      if (!resultOutput) {
+        const raw = b.content;
+        if (typeof raw === 'string') {
+          resultOutput = raw;
+        } else if (Array.isArray(raw)) {
+          // Content can be an array of text/image blocks
+          resultOutput = raw
+            .map((item: { type?: string; text?: string }) =>
+              item.type === 'text' ? item.text || '' : ''
+            )
+            .filter(Boolean)
+            .join('\n');
+        } else if (raw) {
+          resultOutput = JSON.stringify(raw).slice(0, 5000);
+        }
+      }
+
+      this.toolMap.delete(b.tool_use_id);
+      this.setActivity({ state: 'streaming' });
+
+      entries.push({
+        id: tracked.entryId,
+        entryType: {
+          type: 'tool_use',
+          toolName: tracked.toolName,
+          actionType: tracked.actionType,
+          status: status as 'success' | 'failed',
+        },
+        content: tracked.content,
+        metadata: { output: resultOutput },
+      });
+    }
+
+    return entries;
+  }
+
+  /** Extract meaningful text from the structured tool_use_result object */
+  private extractStructuredOutput(result: Record<string, unknown>, toolName: string): string {
+    // Bash tool: { stdout, stderr, interrupted }
+    if (toolName === 'Bash') {
+      const parts: string[] = [];
+      if (result.stdout) parts.push(String(result.stdout));
+      if (result.stderr) parts.push(String(result.stderr));
+      return parts.join('\n').slice(0, 5000);
+    }
+
+    // Read tool: { type, file: { filePath, content, numLines } }
+    if (toolName === 'Read') {
+      const file = result.file as Record<string, unknown> | undefined;
+      if (file?.content) return String(file.content).slice(0, 5000);
+    }
+
+    // Edit/Write tool: { filePath, structuredPatch, gitDiff }
+    if (toolName === 'Edit' || toolName === 'Write' || toolName === 'MultiEdit') {
+      if (result.gitDiff) return String(result.gitDiff).slice(0, 5000);
+      if (result.structuredPatch) return JSON.stringify(result.structuredPatch).slice(0, 5000);
+    }
+
+    // Glob: { filenames, numFiles }
+    if (toolName === 'Glob') {
+      const files = result.filenames as string[] | undefined;
+      if (files) return files.join('\n').slice(0, 5000);
+    }
+
+    // Grep: { filenames, content, numMatches }
+    if (toolName === 'Grep') {
+      if (result.content) return String(result.content).slice(0, 5000);
+      const files = result.filenames as string[] | undefined;
+      if (files) return files.join('\n').slice(0, 5000);
+    }
+
+    // Generic fallback: stringify the result
+    try {
+      const str = JSON.stringify(result);
+      if (str && str !== '{}') return str.slice(0, 5000);
+    } catch { /* ignore */ }
+    return '';
   }
 
   private processToolUse(msg: ClaudeJson): NormalizedEntry[] {
