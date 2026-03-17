@@ -1,9 +1,46 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Sparkles, Settings, Trash2, Archive, Eye, Pencil, Check, X, Palette, Terminal, Zap } from 'lucide-react';
+import {
+  Plus, Settings, Trash2, Eye, Pencil, Check, X, Palette,
+  PanelLeftClose, Zap,
+  // Session icons pool
+  Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
+  Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
+} from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
+
+// ─── Auto icon / color system ───
+
+const ICON_POOL = [
+  Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
+  Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
+];
+
+const COLOR_POOL = [
+  '#f87171', '#fb923c', '#fbbf24', '#a3e635',
+  '#34d399', '#22d3ee', '#60a5fa', '#a78bfa',
+  '#f472b6', '#e879f9', '#c084fc', '#38bdf8',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function SessionIcon({ id, size = 'size-3.5' }: { id: string; size?: string }) {
+  const hash = useMemo(() => hashString(id), [id]);
+  const Icon = ICON_POOL[hash % ICON_POOL.length];
+  const color = COLOR_POOL[hash % COLOR_POOL.length];
+  return <Icon className={`${size} shrink-0`} style={{ color }} />;
+}
+
+// ─── Session colors for manual override ───
 
 const SESSION_COLORS = [
   null,
@@ -29,6 +66,7 @@ interface SessionSidebarProps {
   onDeleteTerminalSession: (id: string) => void;
   onArchiveTerminalSession: (id: string) => void;
   onOpenSettings: () => void;
+  onCloseSidebar?: () => void;
 }
 
 // ─── Color Picker Popover ───
@@ -61,7 +99,7 @@ function ColorPicker({
       {SESSION_COLORS.map((c) => (
         <button
           key={c ?? 'none'}
-          className={`size-4.5 rounded-full border-2 transition-transform hover:scale-110 ${
+          className={`size-4 rounded-full border-2 transition-transform hover:scale-110 ${
             (c ?? undefined) === value ? 'border-foreground scale-110' : 'border-transparent'
           }`}
           style={{ backgroundColor: c ?? 'transparent' }}
@@ -74,7 +112,7 @@ function ColorPicker({
   );
 }
 
-// ─── Activity Label ───
+// ─── Activity helpers ───
 
 function activityLabel(activity: SessionActivity): string | null {
   if (activity.state === 'idle') return null;
@@ -82,29 +120,15 @@ function activityLabel(activity: SessionActivity): string | null {
   return activity.state.replace('_', ' ');
 }
 
-// ─── Status Dot ───
-
-function StatusDot({ session, activity, color }: { session: ClaudeSessionInfo; activity: SessionActivity; color?: string }) {
-  const isActive = session.status === 'running' && activity.state !== 'idle';
-  const needsApproval = activity.state === 'waiting_approval';
-
-  const dotColor =
-    color ? '' :
-    session.status === 'error' ? 'bg-red-400' :
-    session.status === 'done' ? 'bg-muted-foreground/40' :
-    needsApproval ? 'bg-orange-400' :
-    activity.state === 'thinking' ? 'bg-yellow-400' :
-    activity.state === 'streaming' ? 'bg-green-400' :
-    activity.state === 'tool_running' ? 'bg-blue-400' :
-    activity.state === 'starting' ? 'bg-purple-400' :
-    'bg-muted-foreground/40';
-
-  return (
-    <span
-      className={`inline-block size-2 shrink-0 rounded-full ${dotColor} ${isActive || needsApproval ? 'animate-pulse' : ''}`}
-      style={color ? { backgroundColor: color } : undefined}
-    />
-  );
+function statusDotColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
+  if (session.status === 'error') return 'bg-red-400';
+  if (session.status === 'done') return 'bg-muted-foreground/30';
+  if (activity.state === 'waiting_approval') return 'bg-orange-400';
+  if (activity.state === 'thinking') return 'bg-yellow-400';
+  if (activity.state === 'streaming') return 'bg-green-400';
+  if (activity.state === 'tool_running') return 'bg-blue-400';
+  if (activity.state === 'starting') return 'bg-purple-400';
+  return 'bg-muted-foreground/30';
 }
 
 // ─── Claude Session Card ───
@@ -116,7 +140,6 @@ function ClaudeCard({
   onSelect,
   onUpdate,
   onDelete,
-  onArchive,
 }: {
   session: ClaudeSessionInfo;
   active: boolean;
@@ -124,7 +147,6 @@ function ClaudeCard({
   onSelect: () => void;
   onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
-  onArchive: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -149,6 +171,7 @@ function ClaudeCard({
   const needsApproval = activity.state === 'waiting_approval';
   const isActive = session.status === 'running' && activity.state !== 'idle';
   const label = activityLabel(activity);
+  const dotClass = statusDotColor(session, activity);
 
   const attentionClass =
     needsApproval ? 'zeus-attention-approval' :
@@ -156,30 +179,28 @@ function ClaudeCard({
     session.status === 'error' ? 'zeus-attention-error' :
     '';
 
-  // Display name: session name > first 40 chars of prompt > fallback
   const displayName = session.name || (session.prompt ? session.prompt.slice(0, 40) : 'Untitled');
 
   return (
     <button
       data-testid={`claude-card-${session.id}`}
-      className={`group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-all [-webkit-app-region:no-drag] ${
+      className={`group relative flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
         active
           ? 'bg-primary/10 text-foreground'
           : 'text-foreground/80 hover:bg-secondary/60'
       } ${attentionClass}`}
-      style={session.color ? { borderLeft: `2px solid ${session.color}` } : undefined}
       onClick={onSelect}
     >
       {/* Approval ping */}
       {needsApproval && (
-        <span className="absolute -top-0.5 -right-0.5 flex size-2">
+        <span className="absolute -top-0.5 -right-0.5 z-10 flex size-2">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-orange-400 opacity-75" />
           <span className="relative inline-flex size-2 rounded-full bg-orange-400" />
         </span>
       )}
 
-      {/* Status dot */}
-      <StatusDot session={session} activity={activity} color={session.color} />
+      {/* Auto icon */}
+      <SessionIcon id={session.id} size="size-3.5" />
 
       {/* Content */}
       <div className="min-w-0 flex-1">
@@ -198,10 +219,10 @@ function ClaudeCard({
               className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[11px] outline-none"
               placeholder="Session name..."
             />
-            <button onClick={commitRename} className="text-green-400 hover:text-green-300">
+            <button onClick={commitRename} className="shrink-0 text-green-400 hover:text-green-300">
               <Check className="size-3" />
             </button>
-            <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground">
+            <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground shrink-0">
               <X className="size-3" />
             </button>
           </div>
@@ -210,35 +231,40 @@ function ClaudeCard({
             <span className={`block truncate text-[11px] leading-tight ${active ? 'font-medium' : ''}`}>
               {displayName}
             </span>
-            {(label || (session.qaAgentCount ?? 0) > 0) && (
-              <div className="mt-0.5 flex items-center gap-1.5">
-                {label && (
-                  <span className={`text-[9px] capitalize ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-                    {label}
-                  </span>
-                )}
-                {(session.qaAgentCount ?? 0) > 0 && (
-                  <span className="text-muted-foreground flex items-center gap-0.5 text-[9px]">
-                    <Eye className="size-2.5" />
-                    {session.qaAgentCount}
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="mt-0.5 flex items-center gap-1.5">
+              {/* Status dot */}
+              <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass} ${isActive || needsApproval ? 'animate-pulse' : ''}`} />
+              {label && (
+                <span className={`truncate text-[9px] capitalize ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {label}
+                </span>
+              )}
+              {!label && (
+                <span className="text-muted-foreground truncate text-[9px]">
+                  {session.status === 'done' ? 'done' : session.status === 'error' ? 'error' : 'idle'}
+                </span>
+              )}
+              {(session.qaAgentCount ?? 0) > 0 && (
+                <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[9px]">
+                  <Eye className="size-2.5" />
+                  {session.qaAgentCount}
+                </span>
+              )}
+            </div>
           </>
         )}
       </div>
 
-      {/* Hover actions — reduced to 2 essential + color */}
+      {/* Hover actions */}
       {!editing && (
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
           <div className="relative">
             <button
               className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
               onClick={(e) => { e.stopPropagation(); setShowColorPicker(!showColorPicker); }}
               title="Color"
             >
-              <Palette className="size-3" style={session.color ? { color: session.color } : undefined} />
+              <Palette className="size-3" />
             </button>
             {showColorPicker && (
               <ColorPicker
@@ -270,10 +296,9 @@ function ClaudeCard({
 
 // ─── Section Header ───
 
-function SectionHeader({ label, count, action }: { label: string; count: number; action?: { icon: React.ReactNode; onClick: () => void; title: string } }) {
-  if (count === 0 && !action) return null;
+function SectionHeader({ label, action }: { label: string; action?: { icon: React.ReactNode; onClick: () => void; title: string } }) {
   return (
-    <div className="flex items-center justify-between px-2.5 pt-3 pb-1">
+    <div className="flex items-center justify-between px-2 pt-3 pb-1">
       <span className="text-muted-foreground text-[9px] font-semibold uppercase tracking-widest">
         {label}
       </span>
@@ -310,6 +335,7 @@ function SessionSidebar({
   onDeleteTerminalSession,
   onArchiveTerminalSession,
   onOpenSettings,
+  onCloseSidebar,
 }: SessionSidebarProps) {
   const activeSessions = sessions.filter((s) => s.status === 'active');
   const completedSessions = sessions.filter((s) => s.status !== 'active');
@@ -325,33 +351,32 @@ function SessionSidebar({
       className="bg-card flex h-full flex-col"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-2">
+      <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <div className="flex items-center gap-2">
           <Zap className="text-primary size-3.5" />
           <span className="text-foreground text-xs font-semibold tracking-tight">Zeus</span>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-          onClick={onOpenSettings}
-          title="Settings"
-        >
-          <Settings className="size-3.5" />
-        </Button>
+        {onCloseSidebar && (
+          <button
+            className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
+            onClick={onCloseSidebar}
+            title="Close sidebar"
+          >
+            <PanelLeftClose className="size-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Session List */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="px-1.5 pb-3">
           {/* Claude Section */}
           <SectionHeader
             label="Claude"
-            count={allClaude.length}
             action={{ icon: <Plus className="size-3" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
           />
           {allClaude.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1">
               {allClaude.map((s) => (
                 <ClaudeCard
                   key={s.id}
@@ -361,12 +386,11 @@ function SessionSidebar({
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
-                  onArchive={() => onArchiveClaudeSession(s.id)}
                 />
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground/50 px-2.5 py-3 text-center text-[10px]">
+            <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
               No Claude sessions
             </p>
           )}
@@ -374,11 +398,10 @@ function SessionSidebar({
           {/* Terminal Section */}
           <SectionHeader
             label="Terminal"
-            count={allTerminal.length}
             action={{ icon: <Plus className="size-3" />, onClick: onNewSession, title: 'New terminal session' }}
           />
           {allTerminal.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1">
               {allTerminal.map((s) => (
                 <SessionCard
                   key={s.id}
@@ -392,12 +415,26 @@ function SessionSidebar({
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground/50 px-2.5 py-3 text-center text-[10px]">
+            <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
               No terminal sessions
             </p>
           )}
         </div>
       </ScrollArea>
+
+      {/* Bottom bar — settings */}
+      <div className="border-border flex items-center justify-between border-t px-3 py-2">
+        <span className="text-muted-foreground/50 text-[9px]">
+          {allClaude.length + allTerminal.length} session{allClaude.length + allTerminal.length !== 1 ? 's' : ''}
+        </span>
+        <button
+          className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
+          onClick={onOpenSettings}
+          title="Settings"
+        >
+          <Settings className="size-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

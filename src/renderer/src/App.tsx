@@ -69,6 +69,7 @@ function App() {
   } = useZeusStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
 
@@ -188,6 +189,7 @@ function App() {
             onDeleteTerminalSession={deleteTerminalSession}
             onArchiveTerminalSession={archiveTerminalSession}
             onOpenSettings={() => setShowSettings(true)}
+            onCloseSidebar={() => setSidebarOpen(false)}
           />
         </div>
 
