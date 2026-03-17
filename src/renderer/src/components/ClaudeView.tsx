@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -139,8 +139,33 @@ function ClaudeView({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const userScrolledUp = useRef(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // Pagination — read from store
+  const meta = useZeusStore((s) => session ? s.claudeEntriesMeta[session.id] : null);
+  const loadMoreEntries = useZeusStore((s) => s.loadMoreEntries);
 
-  // Track if user has scrolled away from bottom
+  // Preserve scroll position when older entries are prepended
+  const prevScrollHeightRef = useRef<number>(0);
+  const firstEntryIdRef = useRef<string | undefined>(entries[0]?.id);
+
+  // Snapshot scrollHeight before render so we can compare after
+  // This runs before browser paint to avoid visual flicker
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const prevFirstId = firstEntryIdRef.current;
+    const newFirstId = entries[0]?.id;
+    // If the first entry ID changed, entries were prepended
+    if (prevFirstId && newFirstId && prevFirstId !== newFirstId && prevScrollHeightRef.current > 0) {
+      const heightAdded = el.scrollHeight - prevScrollHeightRef.current;
+      if (heightAdded > 0) {
+        el.scrollTop = el.scrollTop + heightAdded;
+      }
+    }
+    firstEntryIdRef.current = newFirstId;
+    prevScrollHeightRef.current = el.scrollHeight;
+  });
+
+  // Track if user has scrolled away from bottom + load more on scroll near top
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -148,10 +173,15 @@ function ClaudeView({
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       userScrolledUp.current = !atBottom;
       setShowScrollToBottom(!atBottom);
+
+      // Load more entries when scrolled near top
+      if (el.scrollTop < 200 && session) {
+        loadMoreEntries(session.id);
+      }
     };
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [session?.id, loadMoreEntries]);
 
   // Auto-scroll to bottom on new entries (unless user scrolled up)
   useEffect(() => {
@@ -357,6 +387,15 @@ function ClaudeView({
 
       {/* Entry list */}
       <div className="relative min-h-0 flex-1">
+        {/* Floating "loading older" badge */}
+        {meta?.loading && (
+          <div className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
+              <Loader2 className="size-3 animate-spin" />
+              Loading...
+            </div>
+          </div>
+        )}
         <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
           {compressed ? (
             groupEntriesByUser(entries).map((group, i, arr) => (

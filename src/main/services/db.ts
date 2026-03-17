@@ -369,6 +369,60 @@ export function getClaudeEntries(sessionId: string): NormalizedEntry[] {
 }
 
 /**
+ * Paginated variant — returns the last `limit` entries before `beforeSeq`.
+ * Used for incremental "scroll-up" loading.
+ * If `beforeSeq` is undefined, returns the most recent `limit` entries.
+ * Returns entries in ascending seq order (oldest first) along with totalCount.
+ */
+export function getClaudeEntriesPaginated(
+  sessionId: string,
+  limit: number,
+  beforeSeq?: number,
+): { entries: NormalizedEntry[]; totalCount: number; oldestSeq: number | null } {
+  if (!db) return { entries: [], totalCount: 0, oldestSeq: null };
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) as cnt FROM claude_entries WHERE session_id = ?`)
+    .get(sessionId) as { cnt: number };
+  const totalCount = countRow.cnt;
+
+  let rows: ClaudeEntryDbRow[];
+  if (beforeSeq !== undefined) {
+    // Load `limit` entries with seq < beforeSeq, ordered newest-first, then reverse
+    rows = db
+      .prepare(
+        `SELECT * FROM claude_entries WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, beforeSeq, limit) as ClaudeEntryDbRow[];
+    rows.reverse(); // back to ascending order
+  } else {
+    // Load the most recent `limit` entries
+    rows = db
+      .prepare(
+        `SELECT * FROM claude_entries WHERE session_id = ? ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, limit) as ClaudeEntryDbRow[];
+    rows.reverse();
+  }
+
+  const entries: NormalizedEntry[] = [];
+  let oldestSeq: number | null = null;
+  for (const r of rows) {
+    if (oldestSeq === null || r.seq < oldestSeq) oldestSeq = r.seq;
+    const raw = {
+      id: r.id,
+      entryType: JSON.parse(r.entry_type),
+      content: r.content,
+      metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
+      timestamp: r.timestamp ?? undefined,
+    };
+    const parsed = safeParseNormalizedEntry(raw, `db-read:${sessionId.slice(-6)}:${r.id.slice(-6)}`);
+    if (parsed) entries.push(parsed);
+  }
+  return { entries, totalCount, oldestSeq };
+}
+
+/**
  * Finalize all tool_use entries stuck at "created" → "success" for a completed session.
  * This is a safety net for cases where tool_result messages weren't persisted during streaming.
  */

@@ -67,6 +67,7 @@ interface ZeusState {
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
   claudeEntries: Record<string, NormalizedEntry[]>;
+  claudeEntriesMeta: Record<string, { oldestSeq: number | null; totalCount: number; hasMore: boolean; loading: boolean }>;
   pendingApprovals: ClaudeApprovalInfo[];
   sessionActivity: Record<string, SessionActivity>;
   messageQueue: Record<string, Array<{ id: string; content: string }>>;
@@ -156,6 +157,7 @@ interface ZeusState {
   queueMessage: (content: string) => void;
   editQueuedMessage: (msgId: string, content: string) => void;
   removeQueuedMessage: (msgId: string) => void;
+  loadMoreEntries: (sessionId: string) => void;
   updateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => void;
   deleteClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
@@ -245,6 +247,8 @@ interface ZeusState {
   refreshThemes: () => void;
   openThemesFolder: () => void;
 }
+
+const ENTRIES_PAGE_SIZE = 50;
 
 let claudeIdCounter = 0;
 let drainInFlight: Record<string, boolean> = {};
@@ -348,6 +352,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   claudeSessions: [],
   activeClaudeId: null,
   claudeEntries: {},
+  claudeEntriesMeta: {},
   pendingApprovals: [],
   sessionActivity: {},
   messageQueue: {},
@@ -532,11 +537,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           const mostRecent = running ?? sessions.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
           activeId = mostRecent.id;
           set({ activeClaudeId: activeId, viewMode: 'claude' });
-          // Lazy-load entries from DB for the auto-selected session
+          // Lazy-load latest page of entries from DB for the auto-selected session
           zeusWs.send({
             channel: 'claude',
             sessionId: activeId,
-            payload: { type: 'get_claude_history' },
+            payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
             auth: '',
           });
         }
@@ -569,10 +574,45 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
 
       if (payload.type === 'claude_history') {
-        const { entries } = envelope.payload as { entries: NormalizedEntry[] };
-        set((state) => ({
-          claudeEntries: { ...state.claudeEntries, [sid]: entries },
-        }));
+        const p = envelope.payload as {
+          entries: NormalizedEntry[];
+          totalCount?: number;
+          oldestSeq?: number | null;
+          isPaginated?: boolean;
+          prepend?: boolean; // set by loadMoreEntries to signal prepend
+        };
+        const { entries, totalCount, oldestSeq, isPaginated } = p;
+
+        if (isPaginated) {
+          set((state) => {
+            const meta = state.claudeEntriesMeta[sid];
+            const isLoadMore = meta && meta.oldestSeq !== null; // already had entries
+            const existingEntries = isLoadMore ? (state.claudeEntries[sid] ?? []) : [];
+            // Prepend older entries (loadMore) or set initial page
+            const merged = isLoadMore ? [...entries, ...existingEntries] : entries;
+            return {
+              claudeEntries: { ...state.claudeEntries, [sid]: merged },
+              claudeEntriesMeta: {
+                ...state.claudeEntriesMeta,
+                [sid]: {
+                  oldestSeq: oldestSeq ?? null,
+                  totalCount: totalCount ?? 0,
+                  hasMore: (oldestSeq ?? 0) > 0 && merged.length < (totalCount ?? 0),
+                  loading: false,
+                },
+              },
+            };
+          });
+        } else {
+          // Legacy full-load
+          set((state) => ({
+            claudeEntries: { ...state.claudeEntries, [sid]: entries },
+            claudeEntriesMeta: {
+              ...state.claudeEntriesMeta,
+              [sid]: { oldestSeq: null, totalCount: entries.length, hasMore: false, loading: false },
+            },
+          }));
+        }
         return;
       }
 
@@ -675,6 +715,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           claudeSessions: state.claudeSessions.filter((s) => s.id !== deletedId),
           claudeEntries: Object.fromEntries(
             Object.entries(state.claudeEntries).filter(([k]) => k !== deletedId),
+          ),
+          claudeEntriesMeta: Object.fromEntries(
+            Object.entries(state.claudeEntriesMeta).filter(([k]) => k !== deletedId),
           ),
           pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== deletedId),
           activeClaudeId: state.activeClaudeId === deletedId ? null : state.activeClaudeId,
@@ -1502,6 +1545,28 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     }));
   },
 
+  loadMoreEntries: (sessionId: string) => {
+    const meta = get().claudeEntriesMeta[sessionId];
+    if (!meta || !meta.hasMore || meta.loading) return;
+    // Mark loading
+    set((state) => ({
+      claudeEntriesMeta: {
+        ...state.claudeEntriesMeta,
+        [sessionId]: { ...state.claudeEntriesMeta[sessionId], loading: true },
+      },
+    }));
+    zeusWs.send({
+      channel: 'claude',
+      sessionId,
+      payload: {
+        type: 'get_claude_history',
+        limit: ENTRIES_PAGE_SIZE,
+        beforeSeq: meta.oldestSeq ?? undefined,
+      },
+      auth: '',
+    });
+  },
+
   selectClaudeSession: (id: string | null) => {
     const state = get();
     let newViewMode: ViewMode = id ? 'claude' : state.viewMode;
@@ -1524,12 +1589,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
     set({ activeClaudeId: id, viewMode: newViewMode, activeDiffTabId: newActiveDiffTabId });
     if (id) {
-      // Lazy-load entries from DB if not already loaded
+      // Lazy-load latest page of entries from DB if not already loaded
       if (!get().claudeEntries[id] || get().claudeEntries[id].length === 0) {
         zeusWs.send({
           channel: 'claude',
           sessionId: id,
-          payload: { type: 'get_claude_history' },
+          payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
           auth: '',
         });
       }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Settings, Trash2, Eye, Pencil, Check, X,
@@ -6,7 +6,7 @@ import {
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
   Crown, Diamond, Target, Compass, Anchor, Feather, Ghost,
-  Terminal as TerminalIcon,
+  Terminal as TerminalIcon, Square,
 } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import {
@@ -15,8 +15,59 @@ import {
   TooltipContent,
   TooltipProvider,
 } from '@/components/ui/tooltip';
+import { BottomSheet, BottomSheetItem } from '@/components/ui/bottom-sheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName } from '../../../shared/types';
 import { SESSION_ICON_COLORS } from '../../../shared/types';
+
+// ─── Long press hook ───
+
+function useLongPress(onLongPress: () => void, delay = 500) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress = useRef(false);
+
+  const start = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    // Only handle touch for long-press (desktop has hover actions)
+    if (!('touches' in e)) return;
+    didLongPress.current = false;
+    timerRef.current = setTimeout(() => {
+      didLongPress.current = true;
+      onLongPress();
+    }, delay);
+  }, [onLongPress, delay]);
+
+  const cancel = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const onClick = useCallback((e: React.MouseEvent) => {
+    if (didLongPress.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      didLongPress.current = false;
+    }
+  }, []);
+
+  useEffect(() => cancel, [cancel]);
+
+  return {
+    onTouchStart: start,
+    onTouchEnd: cancel,
+    onTouchMove: cancel,
+    onClickCapture: onClick,
+  };
+}
 
 // ─── Icon name → component map ───
 
@@ -116,6 +167,7 @@ function ClaudeCard({
   onSelect,
   onUpdate,
   onDelete,
+  onLongPress,
 }: {
   session: ClaudeSessionInfo;
   active: boolean;
@@ -123,6 +175,7 @@ function ClaudeCard({
   onSelect: () => void;
   onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
+  onLongPress: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -150,6 +203,7 @@ function ClaudeCard({
   const stLabel = statusLabel(session, activity);
 
   const displayName = session.name || (session.prompt ? session.prompt.slice(0, 40) : 'Untitled');
+  const longPressHandlers = useLongPress(onLongPress);
 
   return (
     <button
@@ -160,6 +214,7 @@ function ClaudeCard({
           : 'text-foreground/80 hover:bg-secondary/60'
       }`}
       onClick={onSelect}
+      {...longPressHandlers}
     >
       {/* Approval ping */}
       {needsApproval && (
@@ -445,6 +500,25 @@ function SessionSidebar({
   onCloseSidebar,
   onExpandSidebar,
 }: SessionSidebarProps) {
+  // ─── Bottom sheet / edit modal state ───
+  type SheetTarget =
+    | { type: 'claude'; session: ClaudeSessionInfo }
+    | { type: 'terminal'; session: SessionRecord };
+  const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
+  const [editModal, setEditModal] = useState<{ id: string; name: string } | null>(null);
+  const [editName, setEditName] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<SheetTarget | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editModal) {
+      setEditName(editModal.name);
+      requestAnimationFrame(() => editInputRef.current?.focus());
+    }
+  }, [editModal]);
+
+  const closeSheet = () => setSheetTarget(null);
+
   // Collapsed view — thin activity bar with session icons
   if (collapsed) {
     return (
@@ -514,6 +588,7 @@ function SessionSidebar({
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
+                  onLongPress={() => setSheetTarget({ type: 'claude', session: s })}
                 />
               ))}
             </div>
@@ -539,6 +614,7 @@ function SessionSidebar({
                   onStop={() => onStopSession(s.id)}
                   onDelete={s.status !== 'active' ? () => onDeleteTerminalSession(s.id) : undefined}
                   onArchive={s.status !== 'active' ? () => onArchiveTerminalSession(s.id) : undefined}
+                  onLongPress={() => setSheetTarget({ type: 'terminal', session: s })}
                 />
               ))}
             </div>
@@ -549,6 +625,133 @@ function SessionSidebar({
           )}
         </div>
       </ScrollArea>
+
+      {/* ─── Long-press bottom sheet ─── */}
+      <BottomSheet open={!!sheetTarget} onClose={closeSheet}>
+        {sheetTarget?.type === 'claude' && (() => {
+          const s = sheetTarget.session;
+          const displayName = s.name || (s.prompt ? s.prompt.slice(0, 40) : 'Untitled');
+          return (
+            <>
+              <div className="mb-1 flex items-center gap-2 px-4 py-2">
+                <SessionIcon iconName={s.icon} id={s.id} size="size-5" />
+                <span className="truncate text-sm font-medium">{displayName}</span>
+              </div>
+              <BottomSheetItem
+                icon={<Pencil className="size-4" />}
+                label="Rename"
+                onClick={() => {
+                  closeSheet();
+                  setEditModal({ id: s.id, name: s.name || '' });
+                }}
+              />
+              <BottomSheetItem
+                icon={<Trash2 className="size-4" />}
+                label="Delete"
+                destructive
+                onClick={() => {
+                  closeSheet();
+                  setDeleteConfirm(sheetTarget);
+                }}
+              />
+            </>
+          );
+        })()}
+        {sheetTarget?.type === 'terminal' && (() => {
+          const s = sheetTarget.session;
+          const shell = s.shell.split('/').pop() || 'shell';
+          const isActive = s.status === 'active';
+          return (
+            <>
+              <div className="mb-1 flex items-center gap-2 px-4 py-2">
+                <TerminalIcon className="size-5 shrink-0 text-muted-foreground" />
+                <span className="truncate text-sm font-medium">{shell}</span>
+              </div>
+              {isActive && (
+                <BottomSheetItem
+                  icon={<Square className="size-4" />}
+                  label="Stop"
+                  destructive
+                  onClick={() => { closeSheet(); onStopSession(s.id); }}
+                />
+              )}
+              {!isActive && (
+                <BottomSheetItem
+                  icon={<Trash2 className="size-4" />}
+                  label="Delete"
+                  destructive
+                  onClick={() => {
+                    closeSheet();
+                    setDeleteConfirm(sheetTarget);
+                  }}
+                />
+              )}
+            </>
+          );
+        })()}
+      </BottomSheet>
+
+      {/* ─── Rename modal ─── */}
+      <Dialog open={!!editModal} onOpenChange={(open) => { if (!open) setEditModal(null); }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">Rename Session</DialogTitle>
+          </DialogHeader>
+          <Input
+            ref={editInputRef}
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && editModal) {
+                onUpdateClaudeSession(editModal.id, { name: editName.trim() || undefined });
+                setEditModal(null);
+              }
+            }}
+            placeholder="Session name..."
+          />
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setEditModal(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (editModal) {
+                  onUpdateClaudeSession(editModal.id, { name: editName.trim() || undefined });
+                  setEditModal(null);
+                }
+              }}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Delete confirmation modal ─── */}
+      <Dialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">Delete Session?</DialogTitle>
+          </DialogHeader>
+          <p className="text-muted-foreground text-sm">This action cannot be undone.</p>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (deleteConfirm?.type === 'claude') {
+                  onDeleteClaudeSession(deleteConfirm.session.id);
+                } else if (deleteConfirm?.type === 'terminal') {
+                  onDeleteTerminalSession(deleteConfirm.session.id);
+                }
+                setDeleteConfirm(null);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bottom bar — settings */}
       <div className="border-border bg-card flex items-center justify-between border-t px-4 py-3.5">

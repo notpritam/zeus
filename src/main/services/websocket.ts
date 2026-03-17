@@ -45,6 +45,7 @@ import {
   upsertClaudeEntry,
   getAllClaudeSessions,
   getClaudeEntries,
+  getClaudeEntriesPaginated,
   deleteClaudeSession,
   archiveClaudeSession,
   insertTerminalSession,
@@ -853,7 +854,6 @@ function adoptClaudeSession(ws: WebSocket, sessionId: string): void {
 
 async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   const payload = envelope.payload as { type: string };
-
   if (payload.type === 'start_claude') {
     const opts = envelope.payload as ClaudeStartPayload;
     const workingDir = opts.workingDir || process.env.HOME || '/';
@@ -1176,13 +1176,33 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       auth: '',
     });
   } else if (payload.type === 'get_claude_history') {
-    const entries = getClaudeEntries(envelope.sessionId);
-    sendEnvelope(ws, {
-      channel: 'claude',
-      sessionId: envelope.sessionId,
-      payload: { type: 'claude_history', entries },
-      auth: '',
-    });
+    const limit = (payload as Record<string, unknown>).limit as number | undefined;
+    const beforeSeq = (payload as Record<string, unknown>).beforeSeq as number | undefined;
+    if (typeof limit === 'number') {
+      // Paginated request
+      const result = getClaudeEntriesPaginated(envelope.sessionId, limit, beforeSeq);
+      sendEnvelope(ws, {
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: {
+          type: 'claude_history',
+          entries: result.entries,
+          totalCount: result.totalCount,
+          oldestSeq: result.oldestSeq,
+          isPaginated: true,
+        },
+        auth: '',
+      });
+    } else {
+      // Legacy: full load (backward compat)
+      const entries = getClaudeEntries(envelope.sessionId);
+      sendEnvelope(ws, {
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: { type: 'claude_history', entries },
+        auth: '',
+      });
+    }
   } else if (payload.type === 'update_claude_session') {
     const updates: { name?: string; color?: string | null } = {};
     if (payload.name !== undefined) updates.name = payload.name;
@@ -2451,7 +2471,6 @@ function handleMessage(ws: WebSocket, raw: string): void {
     sendError(ws, '', 'Invalid JSON');
     return;
   }
-
 
   switch (envelope.channel) {
     case 'control':

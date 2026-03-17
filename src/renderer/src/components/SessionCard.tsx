@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Square, Trash2, Terminal, Monitor, Code2, Hash, Cpu, Server, HardDrive, Disc } from 'lucide-react';
 import type { SessionRecord } from '../../../shared/types';
@@ -10,6 +10,7 @@ interface SessionCardProps {
   onStop: () => void;
   onDelete?: () => void;
   onArchive?: () => void;
+  onLongPress?: () => void;
 }
 
 // ─── Auto icon / color for terminal sessions ───
@@ -37,13 +38,31 @@ function formatTime(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCardProps) {
+function SessionCard({ session, active, onSelect, onStop, onDelete, onLongPress }: SessionCardProps) {
   const isActive = session.status === 'active';
   const shell = session.shell.split('/').pop() || 'shell';
 
   const hash = useMemo(() => hashStr(session.id), [session.id]);
   const Icon = TERM_ICONS[hash % TERM_ICONS.length];
   const iconColor = TERM_COLORS[hash % TERM_COLORS.length];
+
+  // Long press for mobile
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress = useRef(false);
+  const handleTouchStart = useCallback(() => {
+    didLongPress.current = false;
+    timerRef.current = setTimeout(() => {
+      didLongPress.current = true;
+      onLongPress?.();
+    }, 500);
+  }, [onLongPress]);
+  const cancelTouch = useCallback(() => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+  }, []);
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (didLongPress.current) { e.preventDefault(); e.stopPropagation(); didLongPress.current = false; }
+  }, []);
+  useEffect(() => cancelTouch, [cancelTouch]);
 
   return (
     <button
@@ -54,6 +73,10 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
           : 'text-foreground/80 hover:bg-secondary/60'
       }`}
       onClick={onSelect}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={cancelTouch}
+      onTouchMove={cancelTouch}
+      onClickCapture={handleClick}
     >
       {/* Auto icon */}
       <Icon className="size-4.5 shrink-0" style={{ color: iconColor }} />
