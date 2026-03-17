@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import { ToolCard } from '@/components/ToolCard';
+import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { QaAgentLogEntry, NormalizedEntryType, ActionType, ToolStatus } from '../../../shared/types';
 
