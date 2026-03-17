@@ -1,4 +1,4 @@
-import { useState, Component, type ReactNode } from 'react';
+import { useState, useEffect, Component, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -165,6 +165,11 @@ function GitPanelInner() {
   const [stagedOpen, setStagedOpen] = useState(true);
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
+
+  // Reset initializing state when repo status changes
+  useEffect(() => {
+    if (!isNotARepo) setIsInitializing(false);
+  }, [isNotARepo]);
 
   const stagedChanges = gitStatus?.staged ?? [];
   const unstagedChanges = gitStatus?.unstaged ?? [];
@@ -468,6 +473,14 @@ function GitPanelInner() {
         </>
       )}
     </div>
+  );
+}
+
+function GitPanel() {
+  return (
+    <GitPanelErrorBoundary>
+      <GitPanelInner />
+    </GitPanelErrorBoundary>
   );
 }
 

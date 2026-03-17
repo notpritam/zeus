@@ -501,7 +501,7 @@ function SessionSidebar({
           {/* Claude Section */}
           <SectionHeader
             label="Claude"
-            action={{ icon: <Plus className="size-3" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
+            action={{ icon: <Plus className="size-3.5" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
           />
           {allClaude.length > 0 ? (
             <div className="flex flex-col gap-0.5">
@@ -526,7 +526,7 @@ function SessionSidebar({
           {/* Terminal Section */}
           <SectionHeader
             label="Terminal"
-            action={{ icon: <Plus className="size-3" />, onClick: onNewSession, title: 'New terminal session' }}
+            action={{ icon: <Plus className="size-3.5" />, onClick: onNewSession, title: 'New terminal session' }}
           />
           {allTerminal.length > 0 ? (
             <div className="flex flex-col gap-0.5">
