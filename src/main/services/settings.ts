@@ -5,8 +5,9 @@ import { app } from 'electron';
 import type { ZeusSettings, SavedProject, ClaudeDefaults } from '../../shared/types';
 import { insertProject, getAllProjects, deleteProject } from './db';
 import { getThemeMeta } from './themes';
+import { zeusEnv } from './env';
 
-const SETTINGS_FILE = 'zeus-settings.json';
+const SETTINGS_FILE = zeusEnv.settingsFile;
 
 interface SettingsOnDisk {
   claudeDefaults: ClaudeDefaults;

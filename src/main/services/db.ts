@@ -1,9 +1,8 @@
 import Database from 'better-sqlite3';
-import { app } from 'electron';
-import path from 'path';
 import type { SessionRecord, SavedProject } from '../../shared/types';
 import type { NormalizedEntry } from '../services/claude-types';
 import { validateNormalizedEntry, safeParseNormalizedEntry } from '../../shared/validators';
+import { zeusEnv } from './env';
 
 let db: Database.Database | null = null;
 
@@ -112,7 +111,7 @@ function runMigrations(database: Database.Database): void {
 // ─── Lifecycle ───
 
 export function initDatabase(): void {
-  const dbPath = path.join(app.getPath('userData'), 'zeus.db');
+  const dbPath = zeusEnv.dbPath();
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   runMigrations(db);

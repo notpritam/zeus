@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "out/main/index.mjs",
   "scripts": {
-    "dev": "electron-vite build && electron-vite dev",
+    "dev": "ZEUS_ENV=development electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "serve": "electron-vite build && electron-vite preview",
+    "serve": "electron-vite build && ZEUS_ENV=production electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",

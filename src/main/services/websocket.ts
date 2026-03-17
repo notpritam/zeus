@@ -2432,7 +2432,13 @@ export async function startWebSocketServer(port = 8888): Promise<void> {
       });
     });
 
-    httpServer.on('error', reject);
+    httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[Zeus] Port ${port} already in use. Is another Zeus instance running on this port?`);
+        console.error(`[Zeus] Tip: Set ZEUS_WS_PORT=<port> or use ZEUS_ENV=development for port 8889.`);
+      }
+      reject(err);
+    });
 
     httpServer.listen(port, '0.0.0.0', () => {
       server = httpServer;

@@ -15,6 +15,7 @@ import { loadAllThemes } from './services/themes';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
 import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleQaAgentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
+import { zeusEnv } from './services/env';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -30,7 +31,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    mainWindow.loadURL('http://127.0.0.1:8888');
+    mainWindow.loadURL(`http://127.0.0.1:${zeusEnv.wsPort}`);
   }
 
   mainWindow.on('closed', () => {
@@ -39,8 +40,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  const isDev = !!process.env.ELECTRON_RENDERER_URL;
-  const wsPort = isDev ? 8889 : 8888;
+  const { isDev, wsPort, shouldTunnel, label } = zeusEnv;
+  console.log(`[Zeus ${label}] Starting on port ${wsPort}...`);
 
   // Expose WS port so child processes (MCP bridges) connect to the right server
   process.env.ZEUS_WS_URL = `ws://127.0.0.1:${wsPort}`;
@@ -56,11 +57,11 @@ app.whenReady().then(async () => {
   pruneOldSessions(30);
   await startWebSocketServer(wsPort);
 
-  if (!isDev) {
+  if (shouldTunnel) {
     const tunnelUrl = await startTunnel(wsPort);
     if (tunnelUrl) notifyTunnelStatus();
   } else {
-    console.log('[Zeus] Dev mode — tunnel disabled, WS on port', wsPort);
+    console.log(`[Zeus ${label}] Tunnel disabled, WS on port ${wsPort}`);
   }
 
   createWindow();
