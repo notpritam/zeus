@@ -400,6 +400,7 @@ function QAPanel() {
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [compressedLog, setCompressedLog] = useState(true);
   const [agentTargetUrl, setAgentTargetUrl] = useState('http://localhost:5173');
+  const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
 
@@ -455,8 +456,9 @@ function QAPanel() {
       console.warn('[QAPanel] Blocked: agentTask empty or no parentSessionId', { agentTask: agentTask.trim(), parentSessionId });
       return;
     }
-    startQAAgent(agentTask.trim(), sessionCtx?.workingDir || '/', parentSessionId, parentSessionType, agentTargetUrl);
+    startQAAgent(agentTask.trim(), sessionCtx?.workingDir || '/', parentSessionId, parentSessionType, agentTargetUrl, agentName.trim() || undefined);
     setAgentTask('');
+    setAgentName('');
     setShowNewAgentForm(false);
   };
 
