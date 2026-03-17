@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { X } from 'lucide-react';
 import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
@@ -73,6 +74,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
 
   useEffect(() => {
     const cleanup = connect();
@@ -137,7 +139,7 @@ function App() {
   }, [handleKeyDown]);
 
   return (
-    <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
+    <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none" style={{ height: '100dvh' }}>
       {/* macOS traffic light clearance — only when main Header is visible on mobile */}
       <div className={`h-6 w-full shrink-0 md:hidden ${viewMode === 'claude' ? 'hidden' : ''}`} />
 
@@ -225,12 +227,43 @@ function App() {
               onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
               onOpenSettings={() => setShowSettings(true)}
               onOpenCommandPalette={() => setShowCommandPalette(true)}
+              onToggleRightPanel={() => {
+                if (!activeRightTab) {
+                  // Auto-select first tab when opening with no tab active
+                  useZeusStore.getState().setActiveRightTab('info');
+                }
+                setMobileRightPanelOpen(true);
+              }}
               connected={connected}
             />
           ) : (
             <TerminalView sessionId={activeSessionId} />
           )}
         </div>
+
+        {/* Mobile right panel — full-width overlay */}
+        {mobileRightPanelOpen && (
+          <>
+            <div
+              className="absolute inset-0 z-20 bg-black/50"
+              onClick={() => setMobileRightPanelOpen(false)}
+            />
+            <div className="bg-background absolute inset-0 z-30 flex flex-col">
+              <div className="border-border flex items-center justify-between border-b px-4 pt-8 pb-2.5 [-webkit-app-region:drag]">
+                <span className="text-foreground text-sm font-semibold [-webkit-app-region:no-drag]">Panels</span>
+                <button
+                  onClick={() => setMobileRightPanelOpen(false)}
+                  className="text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <RightPanel />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Desktop 3-panel layout */}

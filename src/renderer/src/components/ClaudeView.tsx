@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2, Menu, Settings } from 'lucide-react';
+import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2, Menu, Settings, PanelRight, ArrowDown } from 'lucide-react';
 import { Kbd } from '@/components/ui/kbd';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
@@ -436,6 +436,7 @@ interface ClaudeViewProps {
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
   onOpenCommandPalette?: () => void;
+  onToggleRightPanel?: () => void;
   connected?: boolean;
 }
 
@@ -456,6 +457,7 @@ function ClaudeView({
   onToggleSidebar,
   onOpenSettings,
   onOpenCommandPalette,
+  onToggleRightPanel,
   connected,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
@@ -470,6 +472,7 @@ function ClaudeView({
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const userScrolledUp = useRef(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   // Track if user has scrolled away from bottom
   useEffect(() => {
@@ -478,6 +481,7 @@ function ClaudeView({
     const handleScroll = () => {
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       userScrolledUp.current = !atBottom;
+      setShowScrollToBottom(!atBottom);
     };
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
@@ -489,6 +493,12 @@ function ClaudeView({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [entries.length, entries[entries.length - 1]?.id]);
+
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, []);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -640,6 +650,18 @@ function ClaudeView({
               Resume
             </Button>
           )}
+          {/* Right panel toggle — mobile only */}
+          {onToggleRightPanel && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="md:hidden"
+              onClick={onToggleRightPanel}
+              title="Panels"
+            >
+              <PanelRight className="size-4" />
+            </Button>
+          )}
           {/* Command palette — mobile only */}
           {onOpenCommandPalette && (
             <Button
@@ -679,40 +701,52 @@ function ClaudeView({
       </div>
 
       {/* Entry list */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
-        {compressed ? (
-          groupEntriesByUser(entries).map((group, i, arr) => (
-            <CompressedGroup
-              key={group.userEntry?.id ?? `group-${i}`}
-              group={group}
-              isLast={i === arr.length - 1}
-              sessionDone={session.status !== 'running'}
-            />
-          ))
-        ) : (
-          entries.map((entry, i) => (
-            <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
-          ))
-        )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
+          {compressed ? (
+            groupEntriesByUser(entries).map((group, i, arr) => (
+              <CompressedGroup
+                key={group.userEntry?.id ?? `group-${i}`}
+                group={group}
+                isLast={i === arr.length - 1}
+                sessionDone={session.status !== 'running'}
+              />
+            ))
+          ) : (
+            entries.map((entry, i) => (
+              <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
+            ))
+          )}
 
-        {/* Queued messages */}
-        {queue.length > 0 && (
-          <div className="space-y-2">
-            {queue.map((msg) => (
-              <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
-            ))}
-          </div>
-        )}
+          {/* Queued messages */}
+          {queue.length > 0 && (
+            <div className="space-y-2">
+              {queue.map((msg) => (
+                <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+              ))}
+            </div>
+          )}
 
-        {entries.length === 0 && session.status === 'running' && (
-          <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <Loader2 className="size-3 animate-spin" />
-            Starting Claude session...
-          </div>
-        )}
+          {entries.length === 0 && session.status === 'running' && (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <Loader2 className="size-3 animate-spin" />
+              Starting Claude session...
+            </div>
+          )}
 
-        {/* Scroll anchor — keeps content pinned to bottom */}
-        <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
+          {/* Scroll anchor — keeps content pinned to bottom */}
+          <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
+        </div>
+
+        {/* Floating scroll-to-bottom button */}
+        {showScrollToBottom && (
+          <button
+            onClick={scrollToBottom}
+            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
+          >
+            <ArrowDown className="size-4" />
+          </button>
+        )}
       </div>
 
       {/* Approval cards */}
@@ -750,7 +784,7 @@ function ClaudeView({
       )}
 
       {/* Input area */}
-      <div className="border-border bg-card border-t">
+      <div className="border-border bg-card shrink-0 border-t">
         {(session.status === 'error' || session.status === 'done') ? (
           <form
             onSubmit={(e) => {
