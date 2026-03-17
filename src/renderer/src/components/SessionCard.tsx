@@ -48,7 +48,7 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
   return (
     <button
       data-testid={`session-card-${session.id}`}
-      className={`group flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
+      className={`group relative flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
         active
           ? 'bg-primary/10 text-foreground'
           : 'text-foreground/80 hover:bg-secondary/60'
@@ -73,24 +73,28 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions — overlaid on right side */}
       {isActive ? (
-        <button
-          data-testid={`session-stop-${session.id}`}
-          className="text-muted-foreground hover:text-destructive shrink-0 rounded p-0.5 opacity-0 transition-all [-webkit-app-region:no-drag] group-hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onStop(); }}
-          title="Stop"
-        >
-          <Square className="size-3" />
-        </button>
+        <div className="bg-inherit absolute inset-y-0 right-0 flex items-center rounded-r-md px-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            data-testid={`session-stop-${session.id}`}
+            className="text-muted-foreground hover:text-destructive rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
+            onClick={(e) => { e.stopPropagation(); onStop(); }}
+            title="Stop"
+          >
+            <Square className="size-3" />
+          </button>
+        </div>
       ) : onDelete ? (
-        <button
-          className="text-muted-foreground hover:text-destructive shrink-0 rounded p-0.5 opacity-0 transition-all group-hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          title="Delete"
-        >
-          <Trash2 className="size-3" />
-        </button>
+        <div className="bg-inherit absolute inset-y-0 right-0 flex items-center rounded-r-md px-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            className="text-muted-foreground hover:text-destructive rounded p-0.5 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Delete"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </div>
       ) : null}
     </button>
   );

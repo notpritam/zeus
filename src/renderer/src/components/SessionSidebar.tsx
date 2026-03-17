@@ -263,9 +263,9 @@ function ClaudeCard({
         )}
       </div>
 
-      {/* Hover actions */}
+      {/* Hover actions — overlaid on right side */}
       {!editing && (
-        <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="bg-inherit absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md px-1 opacity-0 transition-opacity group-hover:opacity-100">
           <div className="relative">
             <button
               className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
@@ -370,7 +370,7 @@ function CollapsedSidebar({
               className="text-muted-foreground hover:text-foreground flex w-full items-center justify-center py-1.5 transition-colors [-webkit-app-region:no-drag]"
               onClick={onExpandSidebar}
             >
-              <PanelLeftOpen className="size-3.5" />
+              <PanelLeftOpen className="size-4.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" sideOffset={4}>Expand sidebar</TooltipContent>
@@ -385,7 +385,7 @@ function CollapsedSidebar({
               className="flex w-full items-center justify-center py-1 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
               onClick={onNewClaudeSession}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-4.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" sideOffset={4}>New Claude session</TooltipContent>
@@ -413,7 +413,7 @@ function CollapsedSidebar({
                       }`}
                       onClick={() => onSelectClaudeSession(s.id)}
                     >
-                      <SessionIcon id={s.id} size="size-3.5" />
+                      <SessionIcon id={s.id} size="size-4.5" />
                       {/* Status dot */}
                       <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${dotClass} ${isRunning || needsApproval ? 'animate-pulse' : ''}`} />
                       {/* Approval ping */}
@@ -451,7 +451,7 @@ function CollapsedSidebar({
                       }`}
                       onClick={() => onSelectSession(s.id)}
                     >
-                      <TerminalIcon className="size-3.5" style={{ color }} />
+                      <TerminalIcon className="size-4.5" style={{ color }} />
                       <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${isRunning ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
                     </button>
                   </TooltipTrigger>
@@ -472,7 +472,7 @@ function CollapsedSidebar({
                 className="flex w-full items-center justify-center py-2 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
                 onClick={onOpenSettings}
               >
-                <Settings className="size-3.5" />
+                <Settings className="size-4.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={4}>Settings</TooltipContent>
@@ -552,7 +552,7 @@ function SessionSidebar({
             onClick={onCloseSidebar}
             title="Close sidebar"
           >
-            <PanelLeftClose className="size-3.5" />
+            <PanelLeftClose className="size-4.5" />
           </button>
         )}
       </div>

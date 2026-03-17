@@ -9,11 +9,23 @@ const USER_THEMES_DIR = 'zeus-themes';
 let cachedThemes: ThemeFile[] = [];
 
 function getBuiltInDir(): string {
-  // In development: src/main/themes (via __dirname which points to dist/main)
-  // In production: resources/themes
-  const devPath = path.join(__dirname, '../../../src/main/themes');
-  if (fs.existsSync(devPath)) return devPath;
-  return path.join(process.resourcesPath ?? __dirname, 'themes');
+  // app.getAppPath() → project root in dev, app.asar in production
+  const appRoot = app.getAppPath();
+  const devPath = path.join(appRoot, 'src/main/themes');
+  if (fs.existsSync(devPath)) {
+    console.log('[Zeus Themes] Using dev themes dir:', devPath);
+    return devPath;
+  }
+  // Fallback: relative from __dirname (out/main → project root)
+  const altDevPath = path.join(__dirname, '../../src/main/themes');
+  if (fs.existsSync(altDevPath)) {
+    console.log('[Zeus Themes] Using alt dev themes dir:', altDevPath);
+    return altDevPath;
+  }
+  // Production: resources/themes
+  const prodPath = path.join(process.resourcesPath ?? __dirname, 'themes');
+  console.log('[Zeus Themes] Using prod themes dir:', prodPath);
+  return prodPath;
 }
 
 export function getThemesDir(): string {
