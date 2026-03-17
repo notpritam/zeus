@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -179,12 +180,12 @@ function SessionSettingsPanel() {
   // ─── Empty state ───
   if (!activeClaudeId || !session) {
     return (
-      <div className="flex flex-col">
+      <div className="flex h-full flex-col overflow-hidden">
         <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <Settings className="text-muted-foreground size-3.5" />
           <span className="text-foreground text-xs font-semibold">Session Settings</span>
         </div>
-        <div className="flex flex-col items-center justify-center gap-2 p-4">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
           <Settings className="text-muted-foreground size-6" />
           <p className="text-muted-foreground text-xs">No active session</p>
         </div>
@@ -215,14 +216,14 @@ function SessionSettingsPanel() {
   const cancelEdit = () => setEditing(false);
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
         <Settings className="text-muted-foreground size-3.5" />
         <span className="text-foreground text-xs font-semibold">Session Settings</span>
       </div>
 
-      <div>
+      <ScrollArea className="min-h-0 flex-1">
         {/* ─── Identity ─── */}
         <SectionHeader title="Identity" />
 
@@ -416,7 +417,7 @@ function SessionSettingsPanel() {
             <Trash2 className="size-3" /> Delete Session
           </Button>
         </div>
-      </div>
+      </ScrollArea>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

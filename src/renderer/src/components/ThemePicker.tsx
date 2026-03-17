@@ -1,4 +1,4 @@
-import { Check, FolderOpen, RefreshCw, Palette } from 'lucide-react';
+import { Check, FolderOpen, RefreshCw } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -93,19 +93,13 @@ export default function ThemePicker() {
   const openThemesFolder = useZeusStore((s) => s.openThemesFolder);
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Section Header */}
-      <div className="border-border border-b px-3 py-1.5">
-        <div className="flex items-center gap-1.5">
-          <Palette className="text-muted-foreground size-3" />
-          <span className="text-foreground text-[10px] font-semibold uppercase tracking-wider">
-            Appearance
-          </span>
-        </div>
-      </div>
+    <div className="flex flex-col gap-3">
+      <h3 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
+        Theme
+      </h3>
 
       {/* Theme Grid */}
-      <div className="grid grid-cols-2 gap-2 px-3">
+      <div className="grid grid-cols-2 gap-2">
         {themes.map((theme) => (
           <ThemeCard
             key={theme.id}
@@ -120,7 +114,7 @@ export default function ThemePicker() {
       </div>
 
       {/* Custom Themes Actions */}
-      <div className="flex items-center gap-1.5 px-3 pb-2">
+      <div className="flex items-center gap-1.5">
         <Button
           variant="outline"
           size="sm"

@@ -1,14 +1,20 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Settings, Trash2, Eye, Pencil, Check, X, Palette,
-  PanelLeftClose, Zap,
+  PanelLeftClose, PanelLeftOpen, Zap,
   // Session icons pool
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
+  Terminal as TerminalIcon,
 } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
 
 // ─── Auto icon / color system ───
@@ -49,6 +55,7 @@ const SESSION_COLORS = [
 ];
 
 interface SessionSidebarProps {
+  collapsed?: boolean;
   sessions: SessionRecord[];
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
@@ -67,6 +74,7 @@ interface SessionSidebarProps {
   onArchiveTerminalSession: (id: string) => void;
   onOpenSettings: () => void;
   onCloseSidebar?: () => void;
+  onExpandSidebar?: () => void;
 }
 
 // ─── Color Picker Popover ───
@@ -184,7 +192,7 @@ function ClaudeCard({
   return (
     <button
       data-testid={`claude-card-${session.id}`}
-      className={`group relative flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
+      className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
         active
           ? 'bg-primary/10 text-foreground'
           : 'text-foreground/80 hover:bg-secondary/60'
@@ -203,9 +211,9 @@ function ClaudeCard({
       <SessionIcon id={session.id} size="size-3.5" />
 
       {/* Content */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {editing ? (
-          <div className="flex min-w-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <input
               ref={inputRef}
               type="text"
@@ -315,9 +323,170 @@ function SectionHeader({ label, action }: { label: string; action?: { icon: Reac
   );
 }
 
+// ─── Collapsed Activity Bar ───
+
+function CollapsedSidebar({
+  sessions,
+  claudeSessions,
+  activeSessionId,
+  activeClaudeId,
+  viewMode,
+  sessionActivity,
+  onExpandSidebar,
+  onNewClaudeSession,
+  onNewSession,
+  onSelectClaudeSession,
+  onSelectSession,
+  onOpenSettings,
+}: {
+  sessions: SessionRecord[];
+  claudeSessions: ClaudeSessionInfo[];
+  activeSessionId: string | null;
+  activeClaudeId: string | null;
+  viewMode: 'terminal' | 'claude' | 'diff';
+  sessionActivity: Record<string, SessionActivity>;
+  onExpandSidebar?: () => void;
+  onNewClaudeSession: () => void;
+  onNewSession: () => void;
+  onSelectClaudeSession: (id: string) => void;
+  onSelectSession: (id: string) => void;
+  onOpenSettings: () => void;
+}) {
+  const runningClaude = claudeSessions.filter((s) => s.status === 'running');
+  const doneClaude = claudeSessions.filter((s) => s.status !== 'running');
+  const allClaude = [...runningClaude, ...doneClaude];
+
+  const activeSessions = sessions.filter((s) => s.status === 'active');
+  const completedSessions = sessions.filter((s) => s.status !== 'active');
+  const allTerminal = [...activeSessions, ...completedSessions];
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="bg-card border-border flex h-full w-10 flex-col items-center border-r pt-2">
+        {/* Expand button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className="text-muted-foreground hover:text-foreground flex w-full items-center justify-center py-1.5 transition-colors [-webkit-app-region:no-drag]"
+              onClick={onExpandSidebar}
+            >
+              <PanelLeftOpen className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={4}>Expand sidebar</TooltipContent>
+        </Tooltip>
+
+        <div className="bg-border mx-2 my-1 h-px w-5" />
+
+        {/* New Claude session */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className="flex w-full items-center justify-center py-1 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
+              onClick={onNewClaudeSession}
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={4}>New Claude session</TooltipContent>
+        </Tooltip>
+
+        {/* Claude session icons */}
+        <ScrollArea className="min-h-0 flex-1 w-full">
+          <div className="flex flex-col items-center gap-0.5 py-1">
+            {allClaude.map((s) => {
+              const activity = sessionActivity[s.id] ?? { state: 'idle' as const };
+              const isActive = (viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId;
+              const needsApproval = activity.state === 'waiting_approval';
+              const dotClass = statusDotColor(s, activity);
+              const isRunning = s.status === 'running' && activity.state !== 'idle';
+              const displayName = s.name || (s.prompt ? s.prompt.slice(0, 30) : 'Untitled');
+
+              return (
+                <Tooltip key={s.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={`relative flex w-full items-center justify-center py-1.5 transition-colors [-webkit-app-region:no-drag] ${
+                        isActive
+                          ? 'border-primary bg-primary/10 text-foreground border-l-2'
+                          : 'text-muted-foreground/60 hover:text-foreground border-l-2 border-transparent'
+                      }`}
+                      onClick={() => onSelectClaudeSession(s.id)}
+                    >
+                      <SessionIcon id={s.id} size="size-3.5" />
+                      {/* Status dot */}
+                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${dotClass} ${isRunning || needsApproval ? 'animate-pulse' : ''}`} />
+                      {/* Approval ping */}
+                      {needsApproval && (
+                        <span className="absolute top-0.5 right-1 flex size-2">
+                          <span className="absolute inline-flex size-full animate-ping rounded-full bg-orange-400 opacity-75" />
+                          <span className="relative inline-flex size-2 rounded-full bg-orange-400" />
+                        </span>
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={4}>{displayName}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+
+            {allTerminal.length > 0 && (
+              <div className="bg-border mx-2 my-1 h-px w-5" />
+            )}
+
+            {allTerminal.map((s) => {
+              const isActive = viewMode === 'terminal' && s.id === activeSessionId;
+              const isRunning = s.status === 'active';
+              const hash = hashString(s.id);
+              const color = COLOR_POOL[hash % COLOR_POOL.length];
+
+              return (
+                <Tooltip key={s.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={`relative flex w-full items-center justify-center py-1.5 transition-colors [-webkit-app-region:no-drag] ${
+                        isActive
+                          ? 'border-primary bg-primary/10 text-foreground border-l-2'
+                          : 'text-muted-foreground/60 hover:text-foreground border-l-2 border-transparent'
+                      }`}
+                      onClick={() => onSelectSession(s.id)}
+                    >
+                      <TerminalIcon className="size-3.5" style={{ color }} />
+                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${isRunning ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={4}>
+                    {s.shell.split('/').pop() || 'shell'}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </ScrollArea>
+
+        {/* Settings at bottom */}
+        <div className="border-border border-t">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="flex w-full items-center justify-center py-2 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
+                onClick={onOpenSettings}
+              >
+                <Settings className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={4}>Settings</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
 // ─── Sidebar ───
 
 function SessionSidebar({
+  collapsed,
   sessions,
   activeSessionId,
   claudeSessions,
@@ -336,7 +505,28 @@ function SessionSidebar({
   onArchiveTerminalSession,
   onOpenSettings,
   onCloseSidebar,
+  onExpandSidebar,
 }: SessionSidebarProps) {
+  // Collapsed view — thin activity bar with session icons
+  if (collapsed) {
+    return (
+      <CollapsedSidebar
+        sessions={sessions}
+        claudeSessions={claudeSessions}
+        activeSessionId={activeSessionId}
+        activeClaudeId={activeClaudeId}
+        viewMode={viewMode}
+        sessionActivity={sessionActivity}
+        onExpandSidebar={onExpandSidebar}
+        onNewClaudeSession={onNewClaudeSession}
+        onNewSession={onNewSession}
+        onSelectClaudeSession={onSelectClaudeSession}
+        onSelectSession={onSelectSession}
+        onOpenSettings={onOpenSettings}
+      />
+    );
+  }
+
   const activeSessions = sessions.filter((s) => s.status === 'active');
   const completedSessions = sessions.filter((s) => s.status !== 'active');
   const runningClaude = claudeSessions.filter((s) => s.status === 'running');
@@ -376,7 +566,7 @@ function SessionSidebar({
             action={{ icon: <Plus className="size-3" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
           />
           {allClaude.length > 0 ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
               {allClaude.map((s) => (
                 <ClaudeCard
                   key={s.id}
@@ -401,7 +591,7 @@ function SessionSidebar({
             action={{ icon: <Plus className="size-3" />, onClick: onNewSession, title: 'New terminal session' }}
           />
           {allTerminal.length > 0 ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
               {allTerminal.map((s) => (
                 <SessionCard
                   key={s.id}

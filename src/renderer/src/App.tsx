@@ -232,29 +232,58 @@ function App() {
           defaultLayout={defaultLayout}
           onLayoutChanged={onLayoutChanged}
         >
-          <ResizablePanel id="sidebar" defaultSize="15%" minSize="200px" maxSize="25%">
-            <SessionSidebar
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              claudeSessions={claudeSessions}
-              activeClaudeId={activeClaudeId}
-              viewMode={viewMode}
-              sessionActivity={sessionActivity}
-              onNewSession={() => startSession()}
-              onNewClaudeSession={() => openNewClaudeModal()}
-              onSelectSession={(id) => selectSession(id)}
-              onStopSession={stopSession}
-              onSelectClaudeSession={(id) => selectClaudeSession(id)}
-              onUpdateClaudeSession={updateClaudeSession}
-              onDeleteClaudeSession={deleteClaudeSession}
-              onArchiveClaudeSession={archiveClaudeSession}
-              onDeleteTerminalSession={deleteTerminalSession}
-              onArchiveTerminalSession={archiveTerminalSession}
-              onOpenSettings={() => setShowSettings(true)}
-            />
-          </ResizablePanel>
-
-          <ResizableHandle />
+          {sidebarCollapsed ? (
+            <div className="shrink-0">
+              <SessionSidebar
+                collapsed
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                claudeSessions={claudeSessions}
+                activeClaudeId={activeClaudeId}
+                viewMode={viewMode}
+                sessionActivity={sessionActivity}
+                onNewSession={() => startSession()}
+                onNewClaudeSession={() => openNewClaudeModal()}
+                onSelectSession={(id) => selectSession(id)}
+                onStopSession={stopSession}
+                onSelectClaudeSession={(id) => selectClaudeSession(id)}
+                onUpdateClaudeSession={updateClaudeSession}
+                onDeleteClaudeSession={deleteClaudeSession}
+                onArchiveClaudeSession={archiveClaudeSession}
+                onDeleteTerminalSession={deleteTerminalSession}
+                onArchiveTerminalSession={archiveTerminalSession}
+                onOpenSettings={() => setShowSettings(true)}
+                onCloseSidebar={() => setSidebarCollapsed(true)}
+                onExpandSidebar={() => setSidebarCollapsed(false)}
+              />
+            </div>
+          ) : (
+            <>
+              <ResizablePanel id="sidebar" defaultSize="15%" minSize="150px" maxSize="25%">
+                <SessionSidebar
+                  sessions={sessions}
+                  activeSessionId={activeSessionId}
+                  claudeSessions={claudeSessions}
+                  activeClaudeId={activeClaudeId}
+                  viewMode={viewMode}
+                  sessionActivity={sessionActivity}
+                  onNewSession={() => startSession()}
+                  onNewClaudeSession={() => openNewClaudeModal()}
+                  onSelectSession={(id) => selectSession(id)}
+                  onStopSession={stopSession}
+                  onSelectClaudeSession={(id) => selectClaudeSession(id)}
+                  onUpdateClaudeSession={updateClaudeSession}
+                  onDeleteClaudeSession={deleteClaudeSession}
+                  onArchiveClaudeSession={archiveClaudeSession}
+                  onDeleteTerminalSession={deleteTerminalSession}
+                  onArchiveTerminalSession={archiveTerminalSession}
+                  onOpenSettings={() => setShowSettings(true)}
+                  onCloseSidebar={() => setSidebarCollapsed(true)}
+                />
+              </ResizablePanel>
+              <ResizableHandle />
+            </>
+          )}
 
           <ResizablePanel
             id="content"

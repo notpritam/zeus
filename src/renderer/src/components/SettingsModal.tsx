@@ -11,8 +11,9 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Kbd } from '@/components/ui/kbd';
-import { Wifi, WifiOff, Link, Zap, Activity, Keyboard, Settings } from 'lucide-react';
+import { Wifi, WifiOff, Link, Zap, Activity, Keyboard, Settings, Palette } from 'lucide-react';
 import PerformanceTab from './PerformanceTab';
+import ThemePicker from './ThemePicker';
 
 interface SettingsModalProps {
   open: boolean;
@@ -31,10 +32,11 @@ const shortcuts = [
   ['⌘B', 'Toggle Side Panel'],
 ] as const;
 
-type SettingsTab = 'general' | 'performance' | 'shortcuts';
+type SettingsTab = 'general' | 'appearance' | 'performance' | 'shortcuts';
 
 const tabs: { id: SettingsTab; label: string; icon: typeof Settings }[] = [
   { id: 'general', label: 'General', icon: Settings },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'performance', label: 'Performance', icon: Activity },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ];
@@ -142,6 +144,9 @@ function SettingsModal({
             )}
           </div>
         )}
+
+        {/* Appearance tab */}
+        {activeTab === 'appearance' && <ThemePicker />}
 
         {/* Performance tab */}
         {activeTab === 'performance' && <PerformanceTab />}
