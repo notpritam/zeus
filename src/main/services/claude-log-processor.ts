@@ -106,14 +106,16 @@ export class ClaudeLogProcessor {
       }
 
       case 'tool_use_summary': {
-        // Summary emitted after tool completes (in non-streaming mode)
+        // Summary emitted after tool completes — but keep tool in map
+        // because the richer user message with full tool output arrives after.
+        // Only emit a summary-based update; processUserMessage will override
+        // with the full output when it arrives.
         const summary = msg as { tool_use_id?: string; tool_name?: string; summary?: string };
         const toolUseId = summary.tool_use_id;
         if (toolUseId) {
           const tracked = this.toolMap.get(toolUseId);
           if (tracked) {
-            const status = 'success' as const;
-            this.toolMap.delete(toolUseId);
+            // Emit with summary as interim output — DO NOT delete from toolMap
             this.setActivity({ state: 'streaming' });
             return [{
               id: tracked.entryId,
@@ -121,7 +123,7 @@ export class ClaudeLogProcessor {
                 type: 'tool_use',
                 toolName: tracked.toolName,
                 actionType: tracked.actionType,
-                status,
+                status: 'success',
               },
               content: tracked.content,
               metadata: { output: summary.summary || '' },

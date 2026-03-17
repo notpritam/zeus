@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
+import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -608,36 +608,6 @@ function TextShimmer({ text, active = true }: { text: string; active?: boolean }
   return <span className={active ? 'zeus-shimmer' : 'text-muted-foreground'}>{text}</span>;
 }
 
-// ─── Activity Indicator ───
-
-function ActivityIndicator({ activity }: { activity: SessionActivity }) {
-  if (activity.state === 'idle') return null;
-
-  return (
-    <div className="flex justify-start">
-      <div className="bg-card border-border inline-flex items-center gap-2.5 rounded-xl rounded-bl-sm border px-3 py-2">
-        {/* Icon */}
-        {activity.state === 'thinking' && <Brain className="text-primary size-3.5" />}
-        {activity.state === 'streaming' && <Sparkles className="text-primary size-3.5" />}
-        {activity.state === 'tool_running' && <Terminal className="text-primary size-3.5" />}
-        {activity.state === 'waiting_approval' && <ShieldAlert className="text-warn size-3.5" />}
-        {activity.state === 'starting' && <Loader2 className="text-primary size-3.5 animate-spin" />}
-
-        {/* Shimmer label */}
-        <span className="text-xs font-medium">
-          {activity.state === 'thinking' && <TextShimmer text="Thinking..." />}
-          {activity.state === 'streaming' && <TextShimmer text="Writing..." />}
-          {activity.state === 'tool_running' && <TextShimmer text={activity.description} />}
-          {activity.state === 'waiting_approval' && (
-            <span className="text-warn">Waiting for approval: {activity.toolName}</span>
-          )}
-          {activity.state === 'starting' && <TextShimmer text="Starting session..." />}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Queue Item ───
 
 function QueuedMessageItem({
@@ -743,15 +713,29 @@ function ClaudeView({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const userScrolledUp = useRef(false);
 
-  // Auto-scroll to bottom on new entries
+  // Track if user has scrolled away from bottom
   useEffect(() => {
-    if (scrollRef.current) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      userScrolledUp.current = !atBottom;
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll to bottom on new entries (unless user scrolled up)
+  useEffect(() => {
+    if (!userScrolledUp.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [entries.length]);
+  }, [entries.length, entries[entries.length - 1]?.id]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -896,7 +880,7 @@ function ClaudeView({
       </div>
 
       {/* Entry list */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
         {compressed ? (
           groupEntriesByUser(entries).map((group, i, arr) => (
             <CompressedGroup
@@ -910,11 +894,6 @@ function ClaudeView({
           entries.map((entry, i) => (
             <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
           ))
-        )}
-
-        {/* Activity indicator */}
-        {session.status === 'running' && entries.length > 0 && (
-          <ActivityIndicator activity={activity} />
         )}
 
         {/* Queued messages */}
@@ -932,6 +911,9 @@ function ClaudeView({
             Starting Claude session...
           </div>
         )}
+
+        {/* Scroll anchor — keeps content pinned to bottom */}
+        <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
       </div>
 
       {/* Approval cards */}
