@@ -1,9 +1,22 @@
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Plus, Sparkles, Settings, Trash2, Archive, Eye } from 'lucide-react';
+import { Plus, Sparkles, Settings, Trash2, Archive, Eye, Pencil, Check, X, Palette } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
+
+const SESSION_COLORS = [
+  null, // default / no color
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#ec4899', // pink
+];
 
 interface SessionSidebarProps {
   sessions: SessionRecord[];
@@ -17,11 +30,58 @@ interface SessionSidebarProps {
   onSelectSession: (id: string) => void;
   onStopSession: (id: string) => void;
   onSelectClaudeSession: (id: string) => void;
+  onUpdateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => void;
   onDeleteClaudeSession: (id: string) => void;
   onArchiveClaudeSession: (id: string) => void;
   onDeleteTerminalSession: (id: string) => void;
   onArchiveTerminalSession: (id: string) => void;
   onOpenSettings: () => void;
+}
+
+// ─── Color Picker Popover ───
+
+function ColorPicker({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: string | undefined;
+  onChange: (color: string | null) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="bg-popover border-border absolute top-full left-0 z-50 mt-1 flex gap-1 rounded-lg border p-1.5 shadow-lg"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {SESSION_COLORS.map((c) => (
+        <button
+          key={c ?? 'none'}
+          className={`size-5 rounded-full border-2 transition-transform hover:scale-110 ${
+            (c ?? undefined) === value ? 'border-foreground scale-110' : 'border-transparent'
+          }`}
+          style={{ backgroundColor: c ?? 'transparent' }}
+          onClick={() => { onChange(c); onClose(); }}
+          title={c ? c : 'Default'}
+        >
+          {!c && (
+            <X className="text-muted-foreground size-full p-0.5" />
+          )}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 // ─── Claude Session Card ───
@@ -31,6 +91,7 @@ function ClaudeCard({
   active,
   activity,
   onSelect,
+  onUpdate,
   onDelete,
   onArchive,
 }: {
@@ -38,11 +99,34 @@ function ClaudeCard({
   active: boolean;
   activity: SessionActivity;
   onSelect: () => void;
+  onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
   onArchive: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setEditValue(session.name || '');
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [editing]);
+
+  const commitRename = () => {
+    const trimmed = editValue.trim();
+    const newName = trimmed || undefined;
+    if (newName !== (session.name || undefined)) {
+      onUpdate({ name: trimmed });
+    }
+    setEditing(false);
+  };
+
   // Color the Sparkles icon based on session/activity state
   const sparklesColor =
+    session.color ? '' :
     session.status === 'error' ? 'text-red-400' :
     session.status === 'done' ? 'text-muted-foreground' :
     activity.state === 'thinking' ? 'text-yellow-400' :
@@ -64,6 +148,8 @@ function ClaudeCard({
     isError ? 'zeus-attention-error' :
     '';
 
+  const accentColor = session.color;
+
   return (
     <button
       data-testid={`claude-card-${session.id}`}
@@ -72,6 +158,7 @@ function ClaudeCard({
           ? 'border-ring/50 bg-primary/10'
           : 'border-border hover:bg-secondary'
       } ${attentionClass}`}
+      style={accentColor ? { borderLeftColor: accentColor, borderLeftWidth: 3 } : undefined}
       onClick={onSelect}
     >
       {/* Attention ping dot */}
@@ -83,10 +170,37 @@ function ClaudeCard({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <Sparkles className={`size-3 shrink-0 transition-colors ${sparklesColor} ${isActive ? 'animate-pulse' : ''}`} />
-          <span className="text-foreground block max-w-[160px] truncate text-xs">
-            {session.name || session.prompt}
-          </span>
+          <Sparkles
+            className={`size-3 shrink-0 transition-colors ${sparklesColor} ${isActive ? 'animate-pulse' : ''}`}
+            style={accentColor ? { color: accentColor } : undefined}
+          />
+          {editing ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditing(false);
+                }}
+                onBlur={commitRename}
+                className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-xs outline-none"
+                placeholder="Session name..."
+              />
+              <button onClick={commitRename} className="text-green-400 hover:text-green-300">
+                <Check className="size-3" />
+              </button>
+              <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-3" />
+              </button>
+            </div>
+          ) : (
+            <span className="text-foreground block max-w-[160px] truncate text-xs">
+              {session.name || session.prompt}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex items-center gap-2 pl-5">
           <span className="text-muted-foreground text-[10px]">{session.id.slice(-6)}</span>
@@ -96,9 +210,41 @@ function ClaudeCard({
               {session.qaAgentCount}
             </span>
           )}
+          {session.status === 'running' && (
+            <span className="text-muted-foreground text-[10px] capitalize">
+              {activity.state === 'idle' ? '' : activity.state === 'tool_running' ? activity.toolName : activity.state.replace('_', ' ')}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="relative">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={(e) => { e.stopPropagation(); setShowColorPicker(!showColorPicker); }}
+            title="Change color"
+          >
+            <Palette className="size-3" style={accentColor ? { color: accentColor } : undefined} />
+          </Button>
+          {showColorPicker && (
+            <ColorPicker
+              value={session.color}
+              onChange={(c) => onUpdate({ color: c })}
+              onClose={() => setShowColorPicker(false)}
+            />
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+          title="Rename session"
+        >
+          <Pencil className="size-3" />
+        </Button>
         <Button
           variant="ghost"
           size="icon-xs"
@@ -136,6 +282,7 @@ function SessionSidebar({
   onSelectSession,
   onStopSession,
   onSelectClaudeSession,
+  onUpdateClaudeSession,
   onDeleteClaudeSession,
   onArchiveClaudeSession,
   onDeleteTerminalSession,
@@ -193,6 +340,7 @@ function SessionSidebar({
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   onSelect={() => onSelectClaudeSession(s.id)}
+                  onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
                   onArchive={() => onArchiveClaudeSession(s.id)}
                 />
@@ -223,6 +371,7 @@ function SessionSidebar({
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   onSelect={() => onSelectClaudeSession(s.id)}
+                  onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => onDeleteClaudeSession(s.id)}
                   onArchive={() => onArchiveClaudeSession(s.id)}
                 />

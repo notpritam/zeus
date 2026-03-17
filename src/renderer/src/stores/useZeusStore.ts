@@ -74,6 +74,7 @@ interface ZeusState {
   gitStatus: Record<string, GitStatusData>;
   gitErrors: Record<string, string>;
   gitWatcherConnected: Record<string, boolean>;
+  gitNotARepo: Record<string, boolean>;
 
   // File tree
   fileTree: Record<string, Record<string, FileTreeEntry[]>>;  // sessionId → dirPath → entries
@@ -147,6 +148,7 @@ interface ZeusState {
   queueMessage: (content: string) => void;
   editQueuedMessage: (msgId: string, content: string) => void;
   removeQueuedMessage: (msgId: string) => void;
+  updateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => void;
   deleteClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
@@ -167,6 +169,7 @@ interface ZeusState {
   unstageAll: (sessionId: string) => void;
   discardFiles: (sessionId: string, files: string[]) => void;
   commitChanges: (sessionId: string, message: string) => void;
+  initGitRepo: (sessionId: string, workingDir: string) => void;
 
   // Diff tab state
   openDiffTabs: DiffTab[];
@@ -338,6 +341,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   gitStatus: {},
   gitErrors: {},
   gitWatcherConnected: {},
+  gitNotARepo: {},
   openDiffTabs: [],
   activeDiffTabId: null,
   previousViewMode: 'terminal' as const,
@@ -668,6 +672,21 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      if (payload.type === 'claude_session_updated') {
+        const { sessionId, name, color } = envelope.payload as { sessionId: string; name?: string; color?: string | null };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  ...(name !== undefined ? { name } : {}),
+                  ...(color !== undefined ? { color: color ?? undefined } : {}),
+                }
+              : s,
+          ),
+        }));
+      }
+
     });
 
     // Subscribe to settings channel
@@ -710,7 +729,21 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         set((state) => ({
           gitErrors: { ...state.gitErrors, [sid]: 'Not a git repository' },
           gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: false },
+          gitNotARepo: { ...state.gitNotARepo, [sid]: true },
         }));
+      }
+
+      if (payload.type === 'git_init_result') {
+        if (payload.success) {
+          set((state) => ({
+            gitNotARepo: { ...state.gitNotARepo, [sid]: false },
+            gitErrors: { ...state.gitErrors, [sid]: undefined as unknown as string },
+          }));
+        } else {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error ?? 'Failed to initialize git' },
+          }));
+        }
       }
 
       // Only process detailed events for the active session
@@ -730,6 +763,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           gitStatus: { ...state.gitStatus, [sid]: payload.data },
           gitErrors: { ...state.gitErrors, [sid]: undefined as unknown as string },
           gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
+          gitNotARepo: { ...state.gitNotARepo, [sid]: false },
         }));
         // Auto-open right panel on first status with changes
         const totalChanges = payload.data.staged.length + payload.data.unstaged.length;
@@ -1450,6 +1484,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     }
   },
 
+  updateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: id,
+      payload: { type: 'update_claude_session', ...updates },
+      auth: '',
+    });
+  },
+
   deleteClaudeSession: (id: string) => {
     zeusWs.send({
       channel: 'claude',
@@ -1735,6 +1778,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'git',
       sessionId,
       payload: { type: 'git_commit', message },
+      auth: '',
+    });
+  },
+
+  initGitRepo: (sessionId: string, workingDir: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_init', workingDir },
       auth: '',
     });
   },

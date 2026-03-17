@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -97,6 +97,10 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN name TEXT`);
   }
 
+  if (currentVersion < 5) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN color TEXT`);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -155,6 +159,7 @@ export interface ClaudeSessionRow {
   status: string;
   prompt: string;
   name: string | null;
+  color: string | null;
   notificationSound: boolean;
   workingDir: string | null;
   permissionMode: string | null;
@@ -166,14 +171,15 @@ export interface ClaudeSessionRow {
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, color, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
     info.status,
     info.prompt,
     info.name,
+    info.color,
     info.notificationSound ? 1 : 0,
     info.workingDir,
     info.permissionMode,
@@ -214,6 +220,7 @@ interface ClaudeSessionDbRow {
   status: string;
   prompt: string;
   name: string | null;
+  color: string | null;
   notification_sound: number;
   working_dir: string | null;
   permission_mode: string | null;
@@ -233,6 +240,7 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     status: r.status,
     prompt: r.prompt,
     name: r.name,
+    color: r.color,
     notificationSound: r.notification_sound === 1,
     workingDir: r.working_dir,
     permissionMode: r.permission_mode,
@@ -240,6 +248,26 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     startedAt: r.started_at,
     endedAt: r.ended_at,
   }));
+}
+
+export function updateClaudeSessionMeta(
+  id: string,
+  updates: { name?: string; color?: string | null },
+): void {
+  if (!db) return;
+  const sets: string[] = [];
+  const values: (string | null)[] = [];
+  if (updates.name !== undefined) {
+    sets.push('name = ?');
+    values.push(updates.name);
+  }
+  if (updates.color !== undefined) {
+    sets.push('color = ?');
+    values.push(updates.color);
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE claude_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...values);
 }
 
 export function deleteClaudeSession(id: string): void {

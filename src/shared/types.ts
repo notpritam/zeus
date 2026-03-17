@@ -98,7 +98,9 @@ export type GitPayload =
   | { type: 'git_commit_result'; success: boolean; error?: string; commitHash?: string }
   | { type: 'refresh' }
   | { type: 'git_error'; message: string }
-  | { type: 'not_a_repo' };
+  | { type: 'not_a_repo' }
+  | { type: 'git_init'; workingDir: string }
+  | { type: 'git_init_result'; success: boolean; error?: string };
 
 // ─── Session ───
 
@@ -282,6 +284,19 @@ export interface ClaudeHistoryPayload {
   entries: NormalizedEntry[];
 }
 
+export interface ClaudeUpdateSessionPayload {
+  type: 'update_claude_session';
+  name?: string;
+  color?: string | null; // null to clear
+}
+
+export interface ClaudeSessionUpdatedPayload {
+  type: 'claude_session_updated';
+  sessionId: string;
+  name?: string;
+  color?: string | null;
+}
+
 export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
@@ -294,6 +309,8 @@ export type ClaudePayload =
   | ClaudeSessionListPayload
   | ClaudeGetHistoryPayload
   | ClaudeHistoryPayload
+  | ClaudeUpdateSessionPayload
+  | ClaudeSessionUpdatedPayload
 ;
 
 // ─── Claude UI Types (renderer-side) ───
@@ -315,6 +332,7 @@ export interface ClaudeSessionInfo {
   status: ClaudeSessionStatus;
   prompt: string;
   name?: string;
+  color?: string; // hex color for sidebar card accent
   notificationSound?: boolean;
   enableGitWatcher?: boolean;
   workingDir?: string;

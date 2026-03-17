@@ -55,6 +55,7 @@ function App() {
     editQueuedMessage,
     removeQueuedMessage,
     selectClaudeSession,
+    updateClaudeSession,
     deleteClaudeSession,
     archiveClaudeSession,
     deleteTerminalSession,
@@ -181,6 +182,7 @@ function App() {
               selectClaudeSession(id);
               setSidebarOpen(false);
             }}
+            onUpdateClaudeSession={updateClaudeSession}
             onDeleteClaudeSession={deleteClaudeSession}
             onArchiveClaudeSession={archiveClaudeSession}
             onDeleteTerminalSession={deleteTerminalSession}
@@ -241,6 +243,7 @@ function App() {
               onSelectSession={(id) => selectSession(id)}
               onStopSession={stopSession}
               onSelectClaudeSession={(id) => selectClaudeSession(id)}
+              onUpdateClaudeSession={updateClaudeSession}
               onDeleteClaudeSession={deleteClaudeSession}
               onArchiveClaudeSession={archiveClaudeSession}
               onDeleteTerminalSession={deleteTerminalSession}

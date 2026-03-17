@@ -282,6 +282,19 @@ export class GitWatcherManager {
   }
 }
 
+// ─── Init ───
+
+export async function initGitRepo(
+  workingDir: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execFileAsync('git', ['init'], { cwd: workingDir });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
 // ─── Parser ───
 
 /**

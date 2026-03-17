@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2 } from 'lucide-react';
+import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2, FolderGit2 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { GitFileChange } from '../../../shared/types';
 
@@ -111,10 +111,14 @@ function GitPanel() {
   );
   const gitStatus = useZeusStore((s) => (activeClaudeId ? s.gitStatus[activeClaudeId] : undefined));
   const gitError = useZeusStore((s) => (activeClaudeId ? s.gitErrors[activeClaudeId] : undefined));
+  const isNotARepo = useZeusStore((s) =>
+    activeClaudeId ? s.gitNotARepo[activeClaudeId] === true : false,
+  );
   const isConnected = useZeusStore((s) =>
     activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false,
   );
   const refreshGitStatus = useZeusStore((s) => s.refreshGitStatus);
+  const initGitRepo = useZeusStore((s) => s.initGitRepo);
   const stageAll = useZeusStore((s) => s.stageAll);
   const unstageAll = useZeusStore((s) => s.unstageAll);
   const commitChanges = useZeusStore((s) => s.commitChanges);
@@ -171,7 +175,37 @@ function GitPanel() {
     );
   }
 
-  // Error only (e.g. not a repo), no status data
+  // Not a git repository — offer to initialize
+  if (isNotARepo) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
+        <FolderGit2 className="text-muted-foreground size-8" />
+        <p className="text-foreground text-xs font-medium">No git repository</p>
+        <p className="text-muted-foreground/60 text-center text-[10px]">
+          This directory is not a git repository.
+          {activeSession?.workingDir && (
+            <span className="text-muted-foreground mt-0.5 block truncate text-[9px]">
+              {activeSession.workingDir}
+            </span>
+          )}
+        </p>
+        <Button
+          size="sm"
+          onClick={() => {
+            if (activeClaudeId && activeSession?.workingDir) {
+              initGitRepo(activeClaudeId, activeSession.workingDir);
+            }
+          }}
+          className="mt-1"
+        >
+          <FolderGit2 className="mr-1.5 size-3.5" />
+          Initialize Repository
+        </Button>
+      </div>
+    );
+  }
+
+  // Error only (non-repo errors), no status data
   if (!gitStatus && gitError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4">

@@ -38,6 +38,7 @@ import {
   insertClaudeSession,
   updateClaudeSessionId,
   updateClaudeSessionStatus,
+  updateClaudeSessionMeta,
   upsertClaudeEntry,
   getAllClaudeSessions,
   getClaudeEntries,
@@ -60,7 +61,7 @@ import {
   finalizeCreatedToolEntries,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../../shared/types';
-import { GitWatcherManager } from './git';
+import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
 import { SystemMonitorService } from './system-monitor';
@@ -768,6 +769,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         status: 'running',
         prompt: opts.prompt,
         name: opts.sessionName ?? null,
+        color: null,
         notificationSound: opts.notificationSound ?? true,
         workingDir,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
@@ -871,6 +873,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         status: 'running',
         prompt: opts.prompt,
         name: null,
+        color: null,
         notificationSound: true,
         workingDir,
         permissionMode: 'bypassPermissions',
@@ -1016,6 +1019,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         status,
         prompt: s.prompt,
         name: s.name ?? undefined,
+        color: s.color ?? undefined,
         notificationSound: s.notificationSound,
         workingDir: s.workingDir ?? undefined,
         startedAt: s.startedAt,
@@ -1034,6 +1038,17 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       channel: 'claude',
       sessionId: envelope.sessionId,
       payload: { type: 'claude_history', entries },
+      auth: '',
+    });
+  } else if (payload.type === 'update_claude_session') {
+    const updates: { name?: string; color?: string | null } = {};
+    if (payload.name !== undefined) updates.name = payload.name;
+    if (payload.color !== undefined) updates.color = payload.color;
+    updateClaudeSessionMeta(envelope.sessionId, updates);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_session_updated', sessionId: envelope.sessionId, ...updates },
       auth: '',
     });
   } else if (payload.type === 'delete_claude_session') {
@@ -1282,6 +1297,59 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'git_error', message: 'No active git watcher for this session' },
         auth: '',
       });
+    }
+  } else if (payload.type === 'git_init') {
+    const result = await initGitRepo(payload.workingDir);
+    broadcastEnvelope({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_init_result', ...result },
+      auth: '',
+    });
+    // If init succeeded, auto-start watching
+    if (result.success) {
+      const { watcher, isNew } = await gitManager.startWatching(sessionId, payload.workingDir);
+      if (isNew) {
+        watcher.on('connected', () => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_connected' },
+            auth: '',
+          });
+        });
+        watcher.on('heartbeat', () => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_heartbeat' },
+            auth: '',
+          });
+        });
+        watcher.on('status', (data) => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_status', data },
+            auth: '',
+          });
+        });
+        watcher.on('error', (err: Error) => {
+          broadcastEnvelope({
+            channel: 'git',
+            sessionId,
+            payload: { type: 'git_error', message: err.message },
+            auth: '',
+          });
+        });
+      }
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_connected' },
+        auth: '',
+      });
+      await watcher.refresh();
     }
   } else {
     sendError(_ws, sessionId, `Unknown git type: ${(payload as { type: string }).type}`);
