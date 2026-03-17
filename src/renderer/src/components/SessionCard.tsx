@@ -56,19 +56,19 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
       onClick={onSelect}
     >
       {/* Auto icon */}
-      <Icon className="size-4 shrink-0" style={{ color: iconColor }} />
+      <Icon className="size-4.5 shrink-0" style={{ color: iconColor }} />
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <span className={`block truncate text-[11px] leading-tight ${active ? 'font-medium' : ''}`}>
+        <span className={`block truncate text-xs leading-tight ${active ? 'font-medium' : ''}`}>
           {shell}
         </span>
         <div className="mt-0.5 flex items-center gap-1.5">
           <span className={`inline-block size-1.5 shrink-0 rounded-full ${
             isActive ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'
           }`} />
-          <span className="text-muted-foreground truncate text-[9px]">
-            {isActive ? 'running' : session.status} · {formatTime(session.startedAt)}
+          <span className="text-muted-foreground truncate text-[10px]">
+            {isActive ? 'Running' : session.status === 'exited' ? 'Exited' : session.status === 'killed' ? 'Killed' : session.status} · {formatTime(session.startedAt)}
           </span>
         </div>
       </div>
@@ -82,7 +82,7 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
             onClick={(e) => { e.stopPropagation(); onStop(); }}
             title="Stop"
           >
-            <Square className="size-3" />
+            <Square className="size-3.5" />
           </button>
         </div>
       ) : onDelete ? (
@@ -92,7 +92,7 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             title="Delete"
           >
-            <Trash2 className="size-3" />
+            <Trash2 className="size-3.5" />
           </button>
         </div>
       ) : null}

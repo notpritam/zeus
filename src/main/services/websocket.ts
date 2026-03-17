@@ -62,7 +62,8 @@ import {
   markStaleQaAgentsErrored,
   finalizeCreatedToolEntries,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload, SessionIconName } from '../../shared/types';
+import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
@@ -894,13 +895,15 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         zeusSessionId: envelope.sessionId,
       });
 
-      // Persist to DB
+      // Persist to DB — assign a random icon
+      const randomIcon = SESSION_ICON_NAMES[Math.floor(Math.random() * SESSION_ICON_NAMES.length)];
       insertClaudeSession({
         id: envelope.sessionId,
         claudeSessionId: null,
         status: 'running',
         prompt: opts.prompt,
         name: opts.sessionName ?? null,
+        icon: randomIcon,
         color: null,
         notificationSound: opts.notificationSound ?? true,
         workingDir,
@@ -1003,13 +1006,14 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         { workingDir, zeusSessionId: envelope.sessionId },
       );
 
-      // Persist resumed session to DB — carry over name & color from original
+      // Persist resumed session to DB — carry over name, icon & color from original
       insertClaudeSession({
         id: envelope.sessionId,
         claudeSessionId: opts.claudeSessionId,
         status: 'running',
         prompt: opts.prompt,
         name: opts.name ?? null,
+        icon: SESSION_ICON_NAMES[Math.floor(Math.random() * SESSION_ICON_NAMES.length)],
         color: opts.color ?? null,
         notificationSound: true,
         workingDir,
@@ -1156,6 +1160,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         status,
         prompt: s.prompt,
         name: s.name ?? undefined,
+        icon: (s.icon as SessionIconName) ?? undefined,
         color: s.color ?? undefined,
         notificationSound: s.notificationSound,
         workingDir: s.workingDir ?? undefined,
@@ -1229,6 +1234,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       status: 'running',
       prompt: payload.prompt || 'External session',
       name: payload.name || null,
+      icon: SESSION_ICON_NAMES[Math.floor(Math.random() * SESSION_ICON_NAMES.length)],
       color: null,
       notificationSound: true,
       workingDir: payload.workingDir || process.env.HOME || '/',
@@ -1365,14 +1371,16 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         });
       }
 
-      // Always send current state (whether new or existing watcher)
-      broadcastEnvelope({
-        channel: 'git',
-        sessionId,
-        payload: { type: 'git_connected' },
-        auth: '',
-      });
-      await watcher.refresh();
+      // Only send connected + refresh if this is actually a git repo
+      if (watcher.isRepo) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_connected' },
+          auth: '',
+        });
+        await watcher.refresh();
+      }
     } catch (err) {
       sendError(_ws, sessionId, `Failed to start git watcher: ${(err as Error).message}`);
     }

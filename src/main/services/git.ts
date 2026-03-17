@@ -24,6 +24,7 @@ export class GitWatcher extends EventEmitter {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private _isRepo = false;
 
   constructor(workingDir: string) {
     super();
@@ -34,16 +35,22 @@ export class GitWatcher extends EventEmitter {
     return this.workingDir;
   }
 
+  get isRepo(): boolean {
+    return this._isRepo;
+  }
+
   async start(): Promise<void> {
     try {
       await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
         cwd: this.workingDir,
       });
     } catch {
+      this._isRepo = false;
       this.emit('not_a_repo');
       return;
     }
 
+    this._isRepo = true;
     await this.refresh();
     this.emit('connected');
 

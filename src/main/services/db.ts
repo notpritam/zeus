@@ -9,7 +9,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -102,6 +102,10 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE claude_sessions ADD COLUMN color TEXT`);
   }
 
+  if (currentVersion < 6) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN icon TEXT`);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -160,6 +164,7 @@ export interface ClaudeSessionRow {
   status: string;
   prompt: string;
   name: string | null;
+  icon: string | null;
   color: string | null;
   notificationSound: boolean;
   workingDir: string | null;
@@ -172,14 +177,15 @@ export interface ClaudeSessionRow {
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, color, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
     info.status,
     info.prompt,
     info.name,
+    info.icon,
     info.color,
     info.notificationSound ? 1 : 0,
     info.workingDir,
@@ -221,6 +227,7 @@ interface ClaudeSessionDbRow {
   status: string;
   prompt: string;
   name: string | null;
+  icon: string | null;
   color: string | null;
   notification_sound: number;
   working_dir: string | null;
@@ -241,6 +248,7 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     status: r.status,
     prompt: r.prompt,
     name: r.name,
+    icon: r.icon,
     color: r.color,
     notificationSound: r.notification_sound === 1,
     workingDir: r.working_dir,

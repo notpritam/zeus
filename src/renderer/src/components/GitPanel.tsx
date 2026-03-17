@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, Component, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2, FolderGit2 } from 'lucide-react';
+import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2, FolderGit2, AlertTriangle } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { GitFileChange } from '../../../shared/types';
 
@@ -102,9 +102,47 @@ function FileEntry({
   );
 }
 
+// ─── Error Boundary ───
+
+class GitPanelErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
+          <AlertTriangle className="text-warn size-6" />
+          <p className="text-foreground text-xs font-medium">Source Control Error</p>
+          <p className="text-muted-foreground text-center text-[10px]">
+            {this.state.error?.message || 'Something went wrong'}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => this.setState({ hasError: false, error: null })}
+          >
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── Main GitPanel ───
 
-function GitPanel() {
+function GitPanelInner() {
   const activeClaudeId = useZeusStore((s) => s.activeClaudeId);
   const activeSession = useZeusStore((s) =>
     s.claudeSessions.find((cs) => cs.id === s.activeClaudeId),
@@ -126,6 +164,7 @@ function GitPanel() {
   const [commitMessage, setCommitMessage] = useState('');
   const [stagedOpen, setStagedOpen] = useState(true);
   const [unstagedOpen, setUnstagedOpen] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   const stagedChanges = gitStatus?.staged ?? [];
   const unstagedChanges = gitStatus?.unstaged ?? [];
@@ -177,29 +216,56 @@ function GitPanel() {
 
   // Not a git repository — offer to initialize
   if (isNotARepo) {
+    const dirName = activeSession?.workingDir?.split('/').pop() || 'this directory';
+
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
-        <FolderGit2 className="text-muted-foreground size-8" />
-        <p className="text-foreground text-xs font-medium">No git repository</p>
-        <p className="text-muted-foreground/60 text-center text-[10px]">
-          This directory is not a git repository.
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
+        <div className="bg-muted/30 flex size-14 items-center justify-center rounded-xl border border-dashed border-white/10">
+          <FolderGit2 className="text-muted-foreground size-7" />
+        </div>
+        <div className="space-y-1 text-center">
+          <p className="text-foreground text-xs font-medium">No Git Repository</p>
+          <p className="text-muted-foreground/60 text-[10px] leading-relaxed">
+            The directory <span className="text-muted-foreground font-medium">{dirName}</span> is not
+            tracked by Git. Initialize a repository to enable source control.
+          </p>
           {activeSession?.workingDir && (
-            <span className="text-muted-foreground mt-0.5 block truncate text-[9px]">
+            <p className="text-muted-foreground/40 truncate text-[9px]" title={activeSession.workingDir}>
               {activeSession.workingDir}
-            </span>
+            </p>
           )}
-        </p>
+        </div>
+
+        {gitError && (
+          <div className="bg-destructive/10 border-destructive/20 w-full rounded-md border px-3 py-2">
+            <p className="text-destructive text-[10px]">{gitError}</p>
+          </div>
+        )}
+
         <Button
           size="sm"
+          disabled={isInitializing}
           onClick={() => {
             if (activeClaudeId && activeSession?.workingDir) {
+              setIsInitializing(true);
               initGitRepo(activeClaudeId, activeSession.workingDir);
+              // Reset after a timeout in case the response doesn't come
+              setTimeout(() => setIsInitializing(false), 5000);
             }
           }}
-          className="mt-1"
+          className="mt-1 w-full max-w-[200px]"
         >
-          <FolderGit2 className="mr-1.5 size-3.5" />
-          Initialize Repository
+          {isInitializing ? (
+            <>
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              Initializing...
+            </>
+          ) : (
+            <>
+              <FolderGit2 className="mr-1.5 size-3.5" />
+              Initialize Repository
+            </>
+          )}
         </Button>
       </div>
     );

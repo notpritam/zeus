@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Plus, Settings, Trash2, Eye, Pencil, Check, X, Palette,
+  Plus, Settings, Trash2, Eye, Pencil, Check, X,
   PanelLeftClose, PanelLeftOpen, Zap,
-  // Session icons pool
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
+  Crown, Diamond, Target, Compass, Anchor, Feather, Ghost,
   Terminal as TerminalIcon,
 } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
@@ -15,20 +15,21 @@ import {
   TooltipContent,
   TooltipProvider,
 } from '@/components/ui/tooltip';
-import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
+import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName } from '../../../shared/types';
+import { SESSION_ICON_COLORS } from '../../../shared/types';
 
-// ─── Auto icon / color system ───
+// ─── Icon name → component map ───
 
-const ICON_POOL = [
-  Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
-  Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
-];
+const ICON_MAP: Record<SessionIconName, React.ComponentType<{ className?: string }>> = {
+  sparkles: Sparkles, star: Star, flame: Flame, gem: Gem,
+  hexagon: Hexagon, pentagon: Pentagon, triangle: Triangle, orbit: Orbit,
+  atom: Atom, rocket: Rocket, leaf: Leaf, moon: Moon,
+  sun: Sun, waves: Waves, wind: Wind, snowflake: Snowflake,
+  bolt: Zap, crown: Crown, diamond: Diamond, target: Target,
+  compass: Compass, anchor: Anchor, feather: Feather, ghost: Ghost,
+};
 
-const COLOR_POOL = [
-  '#f87171', '#fb923c', '#fbbf24', '#a3e635',
-  '#34d399', '#22d3ee', '#60a5fa', '#a78bfa',
-  '#f472b6', '#e879f9', '#c084fc', '#38bdf8',
-];
+const ICON_KEYS = Object.keys(ICON_MAP) as SessionIconName[];
 
 function hashString(str: string): number {
   let hash = 0;
@@ -39,20 +40,14 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-function SessionIcon({ id, size = 'size-4' }: { id: string; size?: string }) {
+function SessionIcon({ iconName, id, size = 'size-4' }: { iconName?: SessionIconName; id: string; size?: string }) {
   const hash = useMemo(() => hashString(id), [id]);
-  const Icon = ICON_POOL[hash % ICON_POOL.length];
-  const color = COLOR_POOL[hash % COLOR_POOL.length];
+  const Icon = iconName
+    ? (ICON_MAP[iconName] ?? ICON_MAP[ICON_KEYS[hash % ICON_KEYS.length]])
+    : ICON_MAP[ICON_KEYS[hash % ICON_KEYS.length]];
+  const color = SESSION_ICON_COLORS[hash % SESSION_ICON_COLORS.length];
   return <Icon className={`${size} shrink-0`} style={{ color }} />;
 }
-
-// ─── Session colors for manual override ───
-
-const SESSION_COLORS = [
-  null,
-  '#ef4444', '#f97316', '#eab308', '#22c55e',
-  '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899',
-];
 
 interface SessionSidebarProps {
   collapsed?: boolean;
@@ -77,56 +72,7 @@ interface SessionSidebarProps {
   onExpandSidebar?: () => void;
 }
 
-// ─── Color Picker Popover ───
-
-function ColorPicker({
-  value,
-  onChange,
-  onClose,
-}: {
-  value: string | undefined;
-  onChange: (color: string | null) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={ref}
-      className="bg-popover border-border absolute top-full left-0 z-50 mt-1 flex gap-1 rounded-lg border p-1.5 shadow-lg"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {SESSION_COLORS.map((c) => (
-        <button
-          key={c ?? 'none'}
-          className={`size-4 rounded-full border-2 transition-transform hover:scale-110 ${
-            (c ?? undefined) === value ? 'border-foreground scale-110' : 'border-transparent'
-          }`}
-          style={{ backgroundColor: c ?? 'transparent' }}
-          onClick={() => { onChange(c); onClose(); }}
-        >
-          {!c && <X className="text-muted-foreground size-full p-0.5" />}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ─── Activity helpers ───
-
-function activityLabel(activity: SessionActivity): string | null {
-  if (activity.state === 'idle') return null;
-  if (activity.state === 'tool_running') return activity.toolName || 'tool';
-  return activity.state.replace('_', ' ');
-}
 
 function statusDotColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
   if (session.status === 'error') return 'bg-red-400';
@@ -151,11 +97,14 @@ function statusTextColor(session: ClaudeSessionInfo, activity: SessionActivity):
 }
 
 function statusLabel(session: ClaudeSessionInfo, activity: SessionActivity): string {
-  if (activity.state === 'tool_running') return activity.toolName || 'tool';
-  if (activity.state !== 'idle') return activity.state.replace('_', ' ');
-  if (session.status === 'done') return 'completed';
-  if (session.status === 'error') return 'error';
-  return 'idle';
+  if (activity.state === 'thinking') return 'Thinking...';
+  if (activity.state === 'streaming') return 'Writing...';
+  if (activity.state === 'tool_running') return activity.description || activity.toolName || 'Running tool...';
+  if (activity.state === 'waiting_approval') return `Approval: ${activity.toolName}`;
+  if (activity.state === 'starting') return 'Starting...';
+  if (session.status === 'done') return 'Completed';
+  if (session.status === 'error') return 'Error';
+  return 'Idle';
 }
 
 // ─── Claude Session Card ───
@@ -177,7 +126,6 @@ function ClaudeCard({
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
-  const [showColorPicker, setShowColorPicker] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -221,8 +169,8 @@ function ClaudeCard({
         </span>
       )}
 
-      {/* Auto icon */}
-      <SessionIcon id={session.id} size="size-4" />
+      {/* Auto icon — uses stored icon name */}
+      <SessionIcon iconName={session.icon} id={session.id} size="size-4.5" />
 
       {/* Content */}
       <div className="min-w-0 flex-1 overflow-hidden">
@@ -238,29 +186,29 @@ function ClaudeCard({
                 if (e.key === 'Escape') setEditing(false);
               }}
               onBlur={commitRename}
-              className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[11px] outline-none"
+              className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-xs outline-none"
               placeholder="Session name..."
             />
             <button onClick={commitRename} className="shrink-0 text-green-400 hover:text-green-300">
-              <Check className="size-3" />
+              <Check className="size-3.5" />
             </button>
             <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground shrink-0">
-              <X className="size-3" />
+              <X className="size-3.5" />
             </button>
           </div>
         ) : (
           <>
-            <span className={`block truncate text-[11px] leading-tight ${active ? 'font-medium' : ''}`}>
+            <span className={`block truncate text-xs leading-tight ${active ? 'font-medium' : ''}`}>
               {displayName}
             </span>
             <div className="mt-0.5 flex items-center gap-1.5">
               <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass} ${isRunning || needsApproval ? 'animate-pulse' : ''}`} />
-              <span className={`truncate text-[9px] capitalize ${textClass}`}>
+              <span className={`truncate text-[10px] ${textClass}`}>
                 {stLabel}
               </span>
               {(session.qaAgentCount ?? 0) > 0 && (
-                <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[9px]">
-                  <Eye className="size-2.5" />
+                <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[10px]">
+                  <Eye className="size-3" />
                   {session.qaAgentCount}
                 </span>
               )}
@@ -272,22 +220,6 @@ function ClaudeCard({
       {/* Hover actions — overlaid on right side */}
       {!editing && (
         <div className="bg-inherit absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md px-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <div className="relative">
-            <button
-              className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
-              onClick={(e) => { e.stopPropagation(); setShowColorPicker(!showColorPicker); }}
-              title="Color"
-            >
-              <Palette className="size-3" />
-            </button>
-            {showColorPicker && (
-              <ColorPicker
-                value={session.color}
-                onChange={(c) => onUpdate({ color: c })}
-                onClose={() => setShowColorPicker(false)}
-              />
-            )}
-          </div>
           <button
             className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
             onClick={(e) => { e.stopPropagation(); setEditing(true); }}
@@ -312,8 +244,8 @@ function ClaudeCard({
 
 function SectionHeader({ label, action }: { label: string; action?: { icon: React.ReactNode; onClick: () => void; title: string } }) {
   return (
-    <div className="flex items-center justify-between px-2 pt-3 pb-1">
-      <span className="text-muted-foreground text-[9px] font-semibold uppercase tracking-widest">
+    <div className="flex items-center justify-between px-2 pt-3 pb-1.5">
+      <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
         {label}
       </span>
       {action && (
@@ -405,7 +337,7 @@ function CollapsedSidebar({
               const isActive = (viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId;
               const needsApproval = activity.state === 'waiting_approval';
               const dotClass = statusDotColor(s, activity);
-              const isRunning = s.status === 'running' && activity.state !== 'idle';
+              const isSessionRunning = s.status === 'running' && activity.state !== 'idle';
               const displayName = s.name || (s.prompt ? s.prompt.slice(0, 30) : 'Untitled');
 
               return (
@@ -419,9 +351,9 @@ function CollapsedSidebar({
                       }`}
                       onClick={() => onSelectClaudeSession(s.id)}
                     >
-                      <SessionIcon id={s.id} size="size-4.5" />
+                      <SessionIcon iconName={s.icon} id={s.id} size="size-4.5" />
                       {/* Status dot */}
-                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${dotClass} ${isRunning || needsApproval ? 'animate-pulse' : ''}`} />
+                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${dotClass} ${isSessionRunning || needsApproval ? 'animate-pulse' : ''}`} />
                       {/* Approval ping */}
                       {needsApproval && (
                         <span className="absolute top-0.5 right-1 flex size-2">
@@ -442,9 +374,9 @@ function CollapsedSidebar({
 
             {allTerminal.map((s) => {
               const isActive = viewMode === 'terminal' && s.id === activeSessionId;
-              const isRunning = s.status === 'active';
+              const isTermRunning = s.status === 'active';
               const hash = hashString(s.id);
-              const color = COLOR_POOL[hash % COLOR_POOL.length];
+              const color = SESSION_ICON_COLORS[hash % SESSION_ICON_COLORS.length];
 
               return (
                 <Tooltip key={s.id}>
@@ -458,7 +390,7 @@ function CollapsedSidebar({
                       onClick={() => onSelectSession(s.id)}
                     >
                       <TerminalIcon className="size-4.5" style={{ color }} />
-                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${isRunning ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
+                      <span className={`absolute bottom-0.5 right-1.5 size-1.5 rounded-full ${isTermRunning ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={4}>
@@ -475,10 +407,10 @@ function CollapsedSidebar({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex w-full items-center justify-center py-2 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
+                className="flex w-full items-center justify-center py-3 text-muted-foreground/60 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
                 onClick={onOpenSettings}
               >
-                <Settings className="size-4.5" />
+                <Settings className="size-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={4}>Settings</TooltipContent>
@@ -619,16 +551,16 @@ function SessionSidebar({
       </ScrollArea>
 
       {/* Bottom bar — settings */}
-      <div className="border-border flex items-center justify-between border-t px-3 py-2">
-        <span className="text-muted-foreground/50 text-[9px]">
+      <div className="border-border bg-card flex items-center justify-between border-t px-4 py-3">
+        <span className="text-muted-foreground/50 text-sm">
           {allClaude.length + allTerminal.length} session{allClaude.length + allTerminal.length !== 1 ? 's' : ''}
         </span>
         <button
-          className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
+          className="text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded transition-colors [-webkit-app-region:no-drag]"
           onClick={onOpenSettings}
           title="Settings"
         >
-          <Settings className="size-3.5" />
+          <Settings className="size-4" />
         </button>
       </div>
     </div>

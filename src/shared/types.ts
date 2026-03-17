@@ -349,12 +349,30 @@ export type SessionActivity =
   | { state: 'waiting_approval'; toolName: string }
   | { state: 'starting' };
 
+export type SessionIconName =
+  | 'sparkles' | 'star' | 'flame' | 'gem' | 'hexagon' | 'pentagon' | 'triangle' | 'orbit'
+  | 'atom' | 'rocket' | 'leaf' | 'moon' | 'sun' | 'waves' | 'wind' | 'snowflake'
+  | 'bolt' | 'crown' | 'diamond' | 'target' | 'compass' | 'anchor' | 'feather' | 'ghost';
+
+export const SESSION_ICON_NAMES: SessionIconName[] = [
+  'sparkles', 'star', 'flame', 'gem', 'hexagon', 'pentagon', 'triangle', 'orbit',
+  'atom', 'rocket', 'leaf', 'moon', 'sun', 'waves', 'wind', 'snowflake',
+  'bolt', 'crown', 'diamond', 'target', 'compass', 'anchor', 'feather', 'ghost',
+];
+
+export const SESSION_ICON_COLORS = [
+  '#f87171', '#fb923c', '#fbbf24', '#a3e635',
+  '#34d399', '#22d3ee', '#60a5fa', '#a78bfa',
+  '#f472b6', '#e879f9', '#c084fc', '#38bdf8',
+];
+
 export interface ClaudeSessionInfo {
   id: string; // envelope sessionId (client-generated)
   claudeSessionId: string | null; // real Claude session ID (from stream)
   status: ClaudeSessionStatus;
   prompt: string;
   name?: string;
+  icon?: SessionIconName; // auto-assigned random icon
   color?: string; // hex color for sidebar card accent
   notificationSound?: boolean;
   enableGitWatcher?: boolean;
