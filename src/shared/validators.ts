@@ -124,8 +124,18 @@ export function validateActionType(v: unknown, path: string): ValidationResult {
     case 'web_fetch':
       return isString(a.url, `${path}.url`);
 
-    case 'task_create':
-      return isString(a.description, `${path}.description`);
+    case 'task_create': {
+      const r = isString(a.description, `${path}.description`);
+      if (a.agentName !== undefined && typeof a.agentName !== 'string') {
+        r.errors.push({ path: `${path}.agentName`, message: 'expected string' });
+        r.valid = false;
+      }
+      if (a.agentType !== undefined && typeof a.agentType !== 'string') {
+        r.errors.push({ path: `${path}.agentType`, message: 'expected string' });
+        r.valid = false;
+      }
+      return r;
+    }
 
     case 'plan_presentation':
       return isString(a.plan, `${path}.plan`);

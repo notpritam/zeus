@@ -189,7 +189,9 @@ export class ClaudeSession extends EventEmitter {
 
   /** Kill the session process */
   kill(): void {
-    this._isRunning = false;
+    // Don't set _isRunning = false here — let the exit/close handler do it
+    // so that the 'done' event is properly emitted and listeners (e.g. wireQAAgent)
+    // can run cleanup like broadcasting qa_agent_stopped.
     this.child?.kill('SIGTERM');
   }
 

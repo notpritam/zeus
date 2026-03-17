@@ -1057,20 +1057,27 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
       if (payload.type === 'qa_agent_started') {
         const { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl } = payload;
-        const newAgent: QaAgentClient = {
-          info: { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl, status: 'running', startedAt: Date.now() },
-          entries: [],
-        };
-        set((state) => ({
-          qaAgents: {
-            ...state.qaAgents,
-            [parentSessionId]: [...(state.qaAgents[parentSessionId] ?? []), newAgent],
-          },
-          activeQaAgentId: {
-            ...state.activeQaAgentId,
-            [parentSessionId]: qaAgentId,
-          },
-        }));
+        set((state) => {
+          const existing = (state.qaAgents[parentSessionId] ?? []).find((a) => a.info.qaAgentId === qaAgentId);
+          let agents: QaAgentClient[];
+          if (existing) {
+            // Agent already exists (resume) — update status back to running
+            agents = (state.qaAgents[parentSessionId] ?? []).map((a) =>
+              a.info.qaAgentId === qaAgentId ? { ...a, info: { ...a.info, status: 'running' as const } } : a,
+            );
+          } else {
+            // New agent
+            const newAgent: QaAgentClient = {
+              info: { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl, status: 'running', startedAt: Date.now() },
+              entries: [],
+            };
+            agents = [...(state.qaAgents[parentSessionId] ?? []), newAgent];
+          }
+          return {
+            qaAgents: { ...state.qaAgents, [parentSessionId]: agents },
+            activeQaAgentId: { ...state.activeQaAgentId, [parentSessionId]: qaAgentId },
+          };
+        });
       }
       if (payload.type === 'qa_agent_stopped') {
         const { qaAgentId, parentSessionId } = payload;
@@ -1119,14 +1126,18 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'qa_agent_entries') {
-        const { qaAgentId, entries } = payload;
+        const { qaAgentId, entries: dbEntries } = payload;
         set((state) => {
-          // Find the agent across all parent sessions and load its entries
           const updated = { ...state.qaAgents };
           for (const parentId of Object.keys(updated)) {
-            updated[parentId] = updated[parentId].map((a) =>
-              a.info.qaAgentId === qaAgentId ? { ...a, entries } : a,
-            );
+            updated[parentId] = updated[parentId].map((a) => {
+              if (a.info.qaAgentId !== qaAgentId) return a;
+              // Merge: DB entries are the base, append any streamed entries
+              // that arrived after the last DB entry (by timestamp)
+              const lastDbTs = dbEntries.length > 0 ? dbEntries[dbEntries.length - 1].timestamp : 0;
+              const newer = a.entries.filter((e) => e.timestamp > lastDbTs);
+              return { ...a, entries: [...dbEntries, ...newer] };
+            });
           }
           return { qaAgents: updated };
         });

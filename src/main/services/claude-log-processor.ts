@@ -497,6 +497,15 @@ export class ClaudeLogProcessor {
           this.streamingToolInput = '';
           this.streamingToolEntryId = crypto.randomUUID();
           this.setActivity({ state: 'tool_running', toolName: toolBlock.name, description: toolBlock.name });
+
+          // Emit a preliminary entry immediately so the UI shows the tool right away.
+          // content_block_stop will re-emit with full parsed input.
+          const prelimActionType = this.extractActionType(toolBlock.name, {});
+          entries.push({
+            id: this.streamingToolEntryId,
+            entryType: { type: 'tool_use', toolName: toolBlock.name, actionType: prelimActionType, status: 'created' },
+            content: toolBlock.name,
+          });
         }
         break;
       }
@@ -632,6 +641,8 @@ export class ClaudeLogProcessor {
         return {
           action: 'task_create',
           description: ((msg.description || msg.prompt) as string) || '',
+          agentName: (msg.name as string) || undefined,
+          agentType: (msg.subagent_type as string) || undefined,
         };
 
       case 'ExitPlanMode':

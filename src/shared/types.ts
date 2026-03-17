@@ -431,7 +431,7 @@ export type ActionType =
   | { action: 'command_run'; command: string; exitCode?: number; output?: string }
   | { action: 'search'; query: string }
   | { action: 'web_fetch'; url: string }
-  | { action: 'task_create'; description: string }
+  | { action: 'task_create'; description: string; agentName?: string; agentType?: string }
   | { action: 'plan_presentation'; plan: string }
   | { action: 'mcp_tool'; server: string; method: string; input: string }
   | { action: 'other'; description: string };

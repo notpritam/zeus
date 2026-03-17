@@ -100,7 +100,12 @@ interface QaAgentRecord {
   name?: string;
   task: string;
   targetUrl?: string;
-  session: ClaudeSession;
+  workingDir: string;
+  session: ClaudeSession | null;
+  /** Claude session ID for --resume after process exits */
+  claudeSessionId?: string;
+  /** Last message ID for resume */
+  lastMessageId?: string;
   startedAt: number;
   /** Stored responseId from zeus_qa_run so we can reply when the agent finishes */
   pendingResponseId?: string;
@@ -119,7 +124,7 @@ let qaAgentIdCounter = 0;
 function stopQaAgentsByParent(parentSessionId: string): void {
   for (const [id, record] of qaAgentSessions) {
     if (record.parentSessionId === parentSessionId) {
-      try { record.session.kill(); } catch { /* already dead */ }
+      try { if (record.session) record.session.kill(); } catch { /* already dead */ }
       qaAgentSessions.delete(id);
     }
   }
@@ -800,6 +805,11 @@ function wireQAAgent(record: QaAgentRecord): void {
     flushPendingThinking();
     updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
 
+    // Save Claude session data for --resume support
+    record.claudeSessionId = session.sessionId ?? undefined;
+    record.lastMessageId = session.lastMessageId ?? undefined;
+    record.session = null; // process is dead but record stays for resume
+
     // Send deferred response to zeus_qa_run caller with the final summary
     if (record.pendingResponseId && record.pendingResponseWs) {
       const lastEntries = record.collectedTextEntries;
@@ -826,7 +836,7 @@ function wireQAAgent(record: QaAgentRecord): void {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
     });
-    qaAgentSessions.delete(qaAgentId);
+    // Don't delete from qaAgentSessions — keep record for resume
   });
 
   session.on('error', (err) => {
@@ -835,6 +845,11 @@ function wireQAAgent(record: QaAgentRecord): void {
     const crashEntry = { kind: 'error' as const, message: `Agent crashed: ${err.message}`, timestamp: Date.now() };
     insertQaAgentEntry(qaAgentId, crashEntry.kind, JSON.stringify(crashEntry), crashEntry.timestamp);
     updateQaAgentSessionStatus(qaAgentId, 'error', Date.now());
+
+    // Save Claude session data for --resume support
+    record.claudeSessionId = session.sessionId ?? undefined;
+    record.lastMessageId = session.lastMessageId ?? undefined;
+    record.session = null;
 
     // Send deferred error response to zeus_qa_run caller
     if (record.pendingResponseId && record.pendingResponseWs) {
@@ -867,7 +882,7 @@ function wireQAAgent(record: QaAgentRecord): void {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
     });
-    qaAgentSessions.delete(qaAgentId);
+    // Don't delete — keep record for resume
   });
 }
 
@@ -1950,6 +1965,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         name: agentName,
         task: payload.task,
         targetUrl,
+        workingDir: payload.workingDir,
         session,
         startedAt: Date.now(),
         pendingResponseId: payload.responseId,
@@ -2000,8 +2016,35 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     }
   } else if (payload.type === 'stop_qa_agent') {
     const record = qaAgentSessions.get(payload.qaAgentId);
-    if (record) {
-      record.session.kill();
+    if (record && record.session && record.session.isRunning) {
+      // Interrupt (not kill) — keeps the session alive so the user can send follow-up messages
+      try {
+        await record.session.interrupt();
+        // Broadcast a status entry so the user sees the interrupt happened
+        const interruptEntry: import('../../shared/types').QaAgentLogEntry = {
+          kind: 'status',
+          message: 'Agent interrupted — you can send a new message.',
+          timestamp: Date.now(),
+        };
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'qa_agent_entry',
+            qaAgentId: payload.qaAgentId,
+            parentSessionId: record.parentSessionId,
+            entry: interruptEntry,
+          },
+        });
+        insertQaAgentEntry(payload.qaAgentId, interruptEntry.kind, JSON.stringify(interruptEntry), interruptEntry.timestamp);
+      } catch {
+        // If interrupt fails (process already dead), fall back to broadcasting stopped
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
+        });
+      }
+    } else if (record) {
+      // Already stopped — no-op, user can send a new message to resume
     } else {
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
@@ -2012,7 +2055,9 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     // Stop if running, then delete from DB and notify clients
     const record = qaAgentSessions.get(payload.qaAgentId);
     if (record) {
-      record.session.kill();
+      if (record.session && record.session.isRunning) {
+        record.session.kill();
+      }
       qaAgentSessions.delete(payload.qaAgentId);
     }
     deleteQaAgentSession(payload.qaAgentId);
@@ -2021,12 +2066,13 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       payload: { type: 'qa_agent_deleted', qaAgentId: payload.qaAgentId, parentSessionId: payload.parentSessionId },
     });
   } else if (payload.type === 'list_qa_agents') {
-    // Merge in-memory running agents with completed agents from DB
-    const runningIds = new Set<string>();
-    const runningAgents = Array.from(qaAgentSessions.values())
+    // Merge in-memory agents (running or stopped-but-resumable) with completed agents from DB
+    const inMemoryIds = new Set<string>();
+    const inMemoryAgents = Array.from(qaAgentSessions.values())
       .filter((r) => r.parentSessionId === payload.parentSessionId)
       .map((r) => {
-        runningIds.add(r.qaAgentId);
+        inMemoryIds.add(r.qaAgentId);
+        const isAlive = r.session !== null && r.session.isRunning;
         return {
           qaAgentId: r.qaAgentId,
           parentSessionId: r.parentSessionId,
@@ -2034,14 +2080,14 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           name: r.name,
           task: r.task,
           targetUrl: r.targetUrl,
-          status: 'running' as const,
+          status: isAlive ? 'running' as const : 'stopped' as const,
           startedAt: r.startedAt,
         };
       });
 
-    // Get completed/errored agents from DB (skip ones currently running in memory)
+    // Get completed/errored agents from DB (skip ones already in memory)
     const dbAgents = getQaAgentSessionsByParent(payload.parentSessionId)
-      .filter((r) => !runningIds.has(r.id))
+      .filter((r) => !inMemoryIds.has(r.id))
       .map((r) => ({
         qaAgentId: r.id,
         parentSessionId: r.parentSessionId,
@@ -2053,7 +2099,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         startedAt: r.startedAt,
       }));
 
-    const agents = [...runningAgents, ...dbAgents];
+    const agents = [...inMemoryAgents, ...dbAgents];
     sendEnvelope(ws, {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_list', parentSessionId: payload.parentSessionId, agents },
@@ -2081,7 +2127,46 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     insertQaAgentEntry(payload.qaAgentId, userMsgEntry.kind, JSON.stringify(userMsgEntry), userMsgEntry.timestamp);
 
     try {
-      await record.session.sendMessage(payload.text);
+      if (record.session && record.session.isRunning) {
+        // Session is alive — send message directly
+        await record.session.sendMessage(payload.text);
+      } else if (record.claudeSessionId) {
+        // Session is dead — resume with --resume
+        const resumedSession = new ClaudeSession({
+          workingDir: record.workingDir,
+          permissionMode: 'bypassPermissions',
+          enableQA: true,
+          qaTargetUrl: record.targetUrl,
+          zeusSessionId: record.parentSessionId,
+          resumeSessionId: record.claudeSessionId,
+          resumeAtMessageId: record.lastMessageId ?? undefined,
+        });
+        record.session = resumedSession;
+        record.collectedTextEntries = [];
+        wireQAAgent(record);
+
+        // Broadcast that the agent is running again
+        updateQaAgentSessionStatus(record.qaAgentId, 'running');
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'qa_agent_started',
+            qaAgentId: record.qaAgentId,
+            parentSessionId: record.parentSessionId,
+            parentSessionType: record.parentSessionType,
+            name: record.name,
+            task: record.task,
+            targetUrl: record.targetUrl,
+          },
+        });
+
+        await resumedSession.start(payload.text);
+      } else {
+        sendEnvelope(ws, {
+          channel: 'qa', sessionId: '', auth: '',
+          payload: { type: 'qa_error', message: 'Agent session ended and cannot be resumed' },
+        });
+      }
     } catch (err) {
       sendEnvelope(ws, {
         channel: 'qa', sessionId: '', auth: '',

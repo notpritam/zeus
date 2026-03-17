@@ -402,10 +402,10 @@ function QAPanel() {
     }
   }, [parentSessionId, sessionAgents.length]);
 
-  // Auto-fetch entries from DB when selecting a completed agent with no entries loaded
+  // Auto-fetch entries from DB when selecting an agent with no entries loaded
   useEffect(() => {
     if (!selectedAgent) return;
-    if (selectedAgent.info.status !== 'running' && selectedAgent.entries.length === 0) {
+    if (selectedAgent.entries.length === 0) {
       fetchQaAgentEntries(selectedAgent.info.qaAgentId);
     }
   }, [selectedAgentId]);
@@ -964,7 +964,7 @@ function QAPanel() {
                           selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
                         }`} />
                         <span className="text-foreground flex-1 truncate text-[10px] font-medium">
-                          {selectedAgent.info.name || (selectedAgent.info.status === 'running' ? 'Agent running' : 'Agent stopped')}
+                          {selectedAgent.info.name || selectedAgent.info.task.slice(0, 40)}
                         </span>
                         <Button
                           variant="ghost"
@@ -984,27 +984,6 @@ function QAPanel() {
                         >
                           <Trash2 className="size-3" />
                         </Button>
-                        {selectedAgent.info.status === 'running' ? (
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="text-muted-foreground hover:text-destructive size-5"
-                            onClick={() => stopQAAgent(selectedAgent.info.qaAgentId)}
-                            title="Stop agent"
-                          >
-                            <Square className="size-3" />
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="text-muted-foreground hover:text-destructive size-5"
-                            onClick={() => deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId)}
-                            title="Delete agent"
-                          >
-                            <X className="size-3" />
-                          </Button>
-                        )}
                       </div>
                       <div ref={agentLogRef} className={`min-h-0 flex-1 overflow-y-auto p-4 ${compressedLog ? 'space-y-1.5' : 'space-y-3'}`}>
                         {selectedAgent.entries.length === 0 ? (
@@ -1017,8 +996,45 @@ function QAPanel() {
                           ))
                         )}
                       </div>
-                      {selectedAgent.info.status === 'running' && (
-                        <div className="border-border flex shrink-0 items-center gap-1.5 border-t px-2 py-1.5">
+
+                      {/* Bottom interaction bar */}
+                      <div className="border-border shrink-0 border-t">
+                        {/* Status indicator */}
+                        <div className={`flex items-center gap-2 px-3 py-1.5 ${selectedAgent.info.status === 'running' ? 'bg-primary/5' : 'bg-secondary/30'}`}>
+                          {selectedAgent.info.status === 'running' ? (
+                            <>
+                              <Loader2 className="text-primary size-3 animate-spin" />
+                              <span className="text-primary flex-1 text-[10px] font-medium">Agent is working...</span>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                className="h-6 gap-1 px-2 text-[10px]"
+                                onClick={() => stopQAAgent(selectedAgent.info.qaAgentId)}
+                              >
+                                <Square className="size-2.5" />
+                                Stop
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="bg-muted-foreground/40 size-2 rounded-full" />
+                              <span className="text-muted-foreground flex-1 text-[10px]">
+                                Agent {selectedAgent.info.status === 'stopped' ? 'stopped' : 'errored'} — send a message to resume
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive h-6 gap-1 px-2 text-[10px]"
+                                onClick={() => deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId)}
+                              >
+                                <Trash2 className="size-2.5" />
+                                Delete
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                        {/* Message input — always visible */}
+                        <div className="flex items-center gap-1.5 px-2 py-2">
                           <input
                             type="text"
                             value={agentFollowUp}
@@ -1029,25 +1045,26 @@ function QAPanel() {
                                 setAgentFollowUp('');
                               }
                             }}
-                            className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-1 text-[10px] outline-none"
-                            placeholder="Follow-up instruction..."
+                            className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded-md border border-transparent px-2.5 py-1.5 text-xs outline-none focus:border-primary/40"
+                            placeholder={selectedAgent.info.status === 'running' ? 'Send a message to the agent...' : 'Send a message to resume the agent...'}
                           />
                           <Button
-                            variant="ghost"
+                            variant="default"
                             size="icon-xs"
-                            className="size-5 shrink-0"
+                            className="size-7 shrink-0"
+                            disabled={!agentFollowUp.trim()}
                             onClick={() => {
                               if (agentFollowUp.trim()) {
                                 sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
                                 setAgentFollowUp('');
                               }
                             }}
-                            title="Send"
+                            title="Send message"
                           >
-                            <Send className="size-3" />
+                            <Send className="size-3.5" />
                           </Button>
                         </div>
-                      )}
+                      </div>
                     </>
                   )}
                 </>

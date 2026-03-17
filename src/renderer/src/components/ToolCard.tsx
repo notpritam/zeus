@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, ClipboardCheck, ChevronDown, Terminal, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
+import { Copy, ClipboardCheck, ChevronDown, Terminal, Glasses, Code2, Search, Globe, ListTree, FileCode2, Bot } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
@@ -303,7 +303,7 @@ function getToolIcon(actionType: ActionType): React.ReactNode {
     case 'web_fetch':
       return <Globe className="size-3.5" />;
     case 'task_create':
-      return <ListTree className="size-3.5" />;
+      return <Bot className="size-3.5" />;
     case 'mcp_tool':
       return <Globe className="size-3.5" />;
     default:
@@ -318,7 +318,7 @@ function getToolTitle(actionType: ActionType): string {
     case 'command_run': return 'Shell';
     case 'search': return 'Search';
     case 'web_fetch': return 'Fetch';
-    case 'task_create': return 'Agent';
+    case 'task_create': return actionType.agentName || actionType.agentType || 'Agent';
     case 'plan_presentation': return 'Plan';
     case 'mcp_tool': return actionType.server;
     case 'other': return actionType.description;
@@ -350,6 +350,74 @@ function getToolDirectory(actionType: ActionType): string | null {
 
 // ─── ToolCard ───
 
+function AgentCard({ actionType, status, content, output, sessionDone, isLastEntry }: {
+  actionType: ActionType & { action: 'task_create' };
+  status: string;
+  content: string;
+  output: string;
+  sessionDone?: boolean;
+  isLastEntry?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isRunning = status === 'created' && !sessionDone && isLastEntry === true;
+  const isSuccess = status === 'success' || (status === 'created' && sessionDone);
+  const isFailed = status === 'failed';
+
+  const agentLabel = actionType.agentName || actionType.agentType || 'Agent';
+  const typeBadge = actionType.agentType && actionType.agentType !== agentLabel ? actionType.agentType : null;
+
+  const borderColor = isRunning ? 'border-primary/30 bg-primary/[0.03]' : isFailed ? 'border-red-400/30' : '';
+  const hasOutput = output.length > 0;
+
+  return (
+    <div className={`bg-secondary border-border rounded-lg border ${borderColor} transition-colors`}>
+      <button
+        onClick={() => !isRunning && hasOutput && setExpanded(!expanded)}
+        className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left ${!isRunning && hasOutput ? 'cursor-pointer' : 'cursor-default'}`}
+      >
+        {/* Agent icon */}
+        <span className={`shrink-0 ${isRunning ? 'text-primary animate-pulse' : isSuccess ? 'text-green-400' : isFailed ? 'text-red-400' : 'text-muted-foreground'}`}>
+          <Bot className="size-4" />
+        </span>
+
+        {/* Agent info */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-semibold ${isRunning ? 'zeus-shimmer-accent' : 'text-foreground/90'}`}>
+              {agentLabel}
+            </span>
+            {typeBadge && (
+              <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[9px] font-medium">
+                {typeBadge}
+              </span>
+            )}
+            {isRunning && (
+              <span className="zeus-shimmer text-[10px]">working...</span>
+            )}
+          </div>
+          <span className="text-muted-foreground truncate text-[11px] leading-tight">
+            {actionType.description || content}
+          </span>
+        </div>
+
+        {/* Status + chevron */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className={`inline-block size-1.5 rounded-full ${isRunning ? 'bg-primary animate-pulse' : isSuccess ? 'bg-green-400' : isFailed ? 'bg-red-400' : 'bg-muted-foreground'}`} />
+          {!isRunning && hasOutput && (
+            <ChevronDown className={`text-muted-foreground size-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          )}
+        </div>
+      </button>
+
+      {expanded && !isRunning && hasOutput && (
+        <div className="border-border border-t px-3 pb-2">
+          <GenericToolBody output={output} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { entryType: NormalizedEntryType; content: string; metadata?: unknown; sessionDone?: boolean; isLastEntry?: boolean }) {
   if (entryType.type !== 'tool_use') return null;
   const { toolName, actionType, status } = entryType;
@@ -361,6 +429,24 @@ export function ToolCard({ entryType, content, metadata, sessionDone, isLastEntr
   const isDenied = statusLabel === 'denied';
   const isFailed = statusLabel === 'failed';
   const isSuccess = statusLabel === 'success' || (statusLabel === 'created' && sessionDone);
+
+  const meta = metadata as { output?: string; images?: string[] } | undefined;
+  const output = meta?.output || '';
+  const images = meta?.images || [];
+
+  // Agent/task_create gets its own dedicated card
+  if (actionType.action === 'task_create') {
+    return (
+      <AgentCard
+        actionType={actionType}
+        status={statusLabel}
+        content={content}
+        output={output}
+        sessionDone={sessionDone}
+        isLastEntry={isLastEntry}
+      />
+    );
+  }
 
   const borderColor =
     isPending ? 'border-orange-400/40 bg-orange-400/5' :
@@ -375,10 +461,6 @@ export function ToolCard({ entryType, content, metadata, sessionDone, isLastEntr
     isSuccess ? 'bg-green-400' :
     (isDenied || isFailed) ? 'bg-red-400' :
     'bg-muted-foreground';
-
-  const meta = metadata as { output?: string; images?: string[] } | undefined;
-  const output = meta?.output || '';
-  const images = meta?.images || [];
 
   const title = getToolTitle(actionType);
   const subtitle = getToolSubtitle(actionType);
