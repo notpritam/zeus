@@ -71,7 +71,13 @@ export default function DiffView() {
   const gitStatus = useZeusStore((s) => s.gitStatus);
   const updateDiffContent = useZeusStore((s) => s.updateDiffContent);
   const saveDiffFile = useZeusStore((s) => s.saveDiffFile);
+  const activeThemeColors = useZeusStore((s) => s.activeThemeColors);
   const [renderSideBySide, setRenderSideBySide] = useState(true);
+
+  // Re-register Monaco theme when Zeus theme changes
+  useEffect(() => {
+    ensureTheme();
+  }, [activeThemeColors]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | monaco.editor.IStandaloneCodeEditor | null>(null);
