@@ -5,6 +5,7 @@ import FileExplorer from '@/components/FileExplorer';
 import QAPanel from '@/components/QAPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
 import SessionSettingsPanel from '@/components/SessionSettingsPanel';
+import ThemePicker from '@/components/ThemePicker';
 import {
   Tooltip,
   TooltipTrigger,
@@ -177,7 +178,12 @@ function RightPanel() {
         {activeRightTab && (
           <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
             <div className="min-h-0 flex-1 overflow-hidden">
-              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <QAPanel />}
+              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? (
+                <div className="flex h-full flex-col overflow-y-auto">
+                  <SessionSettingsPanel />
+                  <ThemePicker />
+                </div>
+              ) : <QAPanel />}
             </div>
             <WatcherStatusBar />
           </div>

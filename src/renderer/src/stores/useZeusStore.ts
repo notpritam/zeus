@@ -28,6 +28,8 @@ import type {
   QaAgentSessionInfo,
   SystemMetrics,
   PerfPayload,
+  ThemeMeta,
+  ThemeFile,
 } from '../../../shared/types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
@@ -86,6 +88,11 @@ interface ZeusState {
   claudeDefaults: ClaudeDefaults;
   lastUsedProjectId: string | null;
   settingsError: string | null;
+
+  // Themes
+  themes: ThemeMeta[];
+  activeThemeId: string;
+  activeThemeColors: Record<string, string> | null;
 
   // New Claude session modal
   showNewClaudeModal: boolean;
@@ -232,6 +239,11 @@ interface ZeusState {
   addProject: (name: string, path: string, createDir?: boolean) => void;
   removeProject: (id: string) => void;
   updateDefaults: (defaults: Partial<ClaudeDefaults>) => void;
+
+  // Theme actions
+  setTheme: (themeId: string) => void;
+  refreshThemes: () => void;
+  openThemesFolder: () => void;
 }
 
 let claudeIdCounter = 0;
@@ -381,6 +393,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
   lastUsedProjectId: null,
   settingsError: null,
+  themes: [],
+  activeThemeId: 'zeus-dark',
+  activeThemeColors: null,
   showNewClaudeModal: false,
 
   viewMode: 'terminal',
@@ -701,8 +716,23 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           savedProjects: s.savedProjects,
           claudeDefaults: s.claudeDefaults,
           lastUsedProjectId: s.lastUsedProjectId,
+          activeThemeId: s.activeThemeId,
+          themes: s.themes,
           settingsError: null,
         });
+      }
+      if (payload.type === 'theme_colors') {
+        const theme = (payload as { theme: ThemeFile }).theme;
+        const root = document.documentElement;
+        for (const [key, value] of Object.entries(theme.colors)) {
+          root.style.setProperty(`--color-${key}`, value);
+        }
+        if (theme.type === 'dark') {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
+        }
+        set({ activeThemeColors: theme.colors });
       }
       if (payload.type === 'settings_error') {
         const { message } = payload as { message: string };
@@ -2093,6 +2123,33 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'settings',
       sessionId: '',
       payload: { type: 'update_defaults', defaults },
+      auth: '',
+    });
+  },
+
+  setTheme: (themeId: string) => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'set_theme', themeId },
+      auth: '',
+    });
+  },
+
+  refreshThemes: () => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'refresh_themes' },
+      auth: '',
+    });
+  },
+
+  openThemesFolder: () => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'open_themes_folder' },
       auth: '',
     });
   },

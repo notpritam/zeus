@@ -28,28 +28,41 @@ function getFileStatus(
   return STATUS_STYLES[match.status] || STATUS_STYLES['M'];
 }
 
-// Register Zeus dark theme once
-let themeRegistered = false;
+// Register Monaco theme from current Zeus theme colors
+let lastThemeHash = '';
 function ensureTheme() {
-  if (themeRegistered) return;
-  monaco.editor.defineTheme('zeus-dark', {
-    base: 'vs-dark',
+  const root = document.documentElement;
+  const bg = root.style.getPropertyValue('--color-bg') || '#0a0a0a';
+  const fg = root.style.getPropertyValue('--color-foreground') || '#e0e0e0';
+  const ghost = root.style.getPropertyValue('--color-text-ghost') || '#333333';
+  const muted = root.style.getPropertyValue('--color-text-muted') || '#888888';
+  const surface = root.style.getPropertyValue('--color-bg-surface') || '#1a1a1a';
+  const accent = root.style.getPropertyValue('--color-accent') || '#22c55e';
+  const danger = root.style.getPropertyValue('--color-danger') || '#ef4444';
+
+  const hash = `${bg}${fg}${ghost}${muted}${surface}${accent}${danger}`;
+  if (hash === lastThemeHash) return;
+  lastThemeHash = hash;
+
+  const isDark = root.classList.contains('dark');
+  monaco.editor.defineTheme('zeus-theme', {
+    base: isDark ? 'vs-dark' : 'vs',
     inherit: true,
     rules: [],
     colors: {
-      'editor.background': '#0a0a0a',
-      'editor.foreground': '#e0e0e0',
-      'editorLineNumber.foreground': '#333333',
-      'editorLineNumber.activeForeground': '#888888',
-      'diffEditor.insertedTextBackground': '#22c55e18',
-      'diffEditor.removedTextBackground': '#ef444418',
-      'diffEditor.insertedLineBackground': '#22c55e0d',
-      'diffEditor.removedLineBackground': '#ef44440d',
-      'editor.lineHighlightBackground': '#1a1a1a',
-      'editorGutter.background': '#0a0a0a',
+      'editor.background': bg,
+      'editor.foreground': fg,
+      'editorLineNumber.foreground': ghost,
+      'editorLineNumber.activeForeground': muted,
+      'diffEditor.insertedTextBackground': accent + '18',
+      'diffEditor.removedTextBackground': danger + '18',
+      'diffEditor.insertedLineBackground': accent + '0d',
+      'diffEditor.removedLineBackground': danger + '0d',
+      'editor.lineHighlightBackground': surface,
+      'editorGutter.background': bg,
     },
   });
-  themeRegistered = true;
+  monaco.editor.setTheme('zeus-theme');
 }
 
 export default function DiffView() {
@@ -92,7 +105,7 @@ export default function DiffView() {
 
       const editor = monaco.editor.create(containerRef.current, {
         model,
-        theme: 'zeus-dark',
+        theme: 'zeus-theme',
         automaticLayout: true,
         minimap: { enabled: false },
         fontSize: 13,
@@ -133,7 +146,7 @@ export default function DiffView() {
       modifiedModelRef.current = modifiedModel;
 
       const diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
-        theme: 'zeus-dark',
+        theme: 'zeus-theme',
         renderSideBySide,
         originalEditable: false,
         readOnly: false,

@@ -11,14 +11,14 @@ const codeTheme = {
   '::selection': {},
   'pre[class*="language-"]': {
     ...oneDark['pre[class*="language-"]'],
-    background: '#1a1a1a',
+    background: 'transparent',
     margin: 0,
     padding: '0.5rem 0.75rem',
     fontSize: '0.75rem',
   },
   'code[class*="language-"]': {
     ...oneDark['code[class*="language-"]'],
-    background: '#1a1a1a',
+    background: 'transparent',
     fontSize: '0.75rem',
   },
 };
@@ -68,7 +68,7 @@ function CodeOutput({ code, language, label, maxHeight = 'max-h-72' }: {
   code: string; language?: string; label?: string; maxHeight?: string;
 }) {
   return (
-    <div className={`bg-[#1a1a1a] border-border mt-2 overflow-hidden rounded-md border ${maxHeight}`}>
+    <div className={`bg-bg-surface border-border mt-2 overflow-hidden rounded-md border ${maxHeight}`}>
       {label && (
         <div className="border-border flex items-center justify-between border-b px-3 py-1">
           <span className="text-muted-foreground text-[10px] font-medium uppercase">{label}</span>

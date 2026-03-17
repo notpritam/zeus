@@ -102,12 +102,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-text-primary) 10%, transparent);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--color-text-primary) 20%, transparent);
 }
 
 ::-webkit-scrollbar-corner {
@@ -252,7 +252,7 @@
     90deg,
     var(--color-primary) 0%,
     var(--color-primary) 35%,
-    #93c5fd 50%,
+    color-mix(in srgb, var(--color-primary) 60%, white) 50%,
     var(--color-primary) 65%,
     var(--color-primary) 100%
   );

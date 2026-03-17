@@ -1,6 +1,5 @@
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Square, Trash2, Archive } from 'lucide-react';
+import { Square, Trash2, Terminal } from 'lucide-react';
 import type { SessionRecord } from '../../../shared/types';
 
 interface SessionCardProps {
@@ -16,80 +15,61 @@ function formatTime(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
-  active: 'default',
-  exited: 'secondary',
-  killed: 'destructive',
-};
-
 function SessionCard({ session, active, onSelect, onStop, onDelete, onArchive }: SessionCardProps) {
+  const isActive = session.status === 'active';
+  const shell = session.shell.split('/').pop() || 'shell';
+
   return (
     <button
       data-testid={`session-card-${session.id}`}
-      className={`group flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors [-webkit-app-region:no-drag] ${
+      className={`group flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-all [-webkit-app-region:no-drag] ${
         active
-          ? 'border-ring/50 bg-primary/10'
-          : 'border-border hover:bg-secondary'
+          ? 'bg-primary/10 text-foreground'
+          : 'text-foreground/80 hover:bg-secondary/60'
       }`}
       onClick={onSelect}
     >
+      {/* Status dot */}
+      <span className={`inline-block size-2 shrink-0 rounded-full ${
+        isActive ? 'bg-green-400 animate-pulse' : 'bg-muted-foreground/40'
+      }`} />
+
+      {/* Content */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground truncate font-mono text-xs">
-            {session.id.slice(0, 8)}
-          </span>
-          <Badge
-            data-testid={`session-status-${session.id}`}
-            variant={statusVariant[session.status] ?? 'secondary'}
-            className="text-[9px] uppercase tracking-wider"
-          >
-            {session.status}
-          </Badge>
-        </div>
-        <div className="text-muted-foreground mt-0.5 text-[10px]">
-          {session.shell.split('/').pop()} &middot; {formatTime(session.startedAt)}
-        </div>
+        <span className={`block truncate text-[11px] leading-tight ${active ? 'font-medium' : ''}`}>
+          {shell}
+        </span>
+        <span className="text-muted-foreground mt-0.5 block text-[9px]">
+          {formatTime(session.startedAt)}
+        </span>
       </div>
-      {session.status === 'active' ? (
+
+      {/* Actions */}
+      {isActive ? (
         <Button
           data-testid={`session-stop-${session.id}`}
           variant="ghost"
           size="icon-xs"
-          className="text-muted-foreground hover:text-destructive [-webkit-app-region:no-drag]"
-          onClick={(e) => {
-            e.stopPropagation();
-            onStop();
-          }}
-          title="Stop session"
+          className="text-muted-foreground hover:text-destructive shrink-0 opacity-0 transition-opacity [-webkit-app-region:no-drag] group-hover:opacity-100"
+          onClick={(e) => { e.stopPropagation(); onStop(); }}
+          title="Stop"
         >
           <Square className="size-3" />
         </Button>
       ) : (
         <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          {onArchive && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onArchive(); }}
-              title="Archive session"
-            >
-              <Archive className="size-3" />
-            </Button>
-          )}
           {onDelete && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground hover:text-destructive"
+            <button
+              className="text-muted-foreground hover:text-destructive rounded p-0.5 transition-colors"
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              title="Delete session"
+              title="Delete"
             >
               <Trash2 className="size-3" />
-            </Button>
+            </button>
           )}
         </div>
       )}

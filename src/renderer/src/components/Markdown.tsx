@@ -4,20 +4,21 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Component, useState, memo, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 
-// Override oneDark background to match Zeus theme
+// Override oneDark background — use 'transparent' so the container's
+// bg-bg-surface class controls the background (theme-aware).
 const codeTheme = {
   ...oneDark,
   '::selection': {},
   'pre[class*="language-"]': {
     ...oneDark['pre[class*="language-"]'],
-    background: '#1a1a1a',
+    background: 'transparent',
     margin: 0,
     padding: '0.75rem',
     fontSize: '0.8rem',
   },
   'code[class*="language-"]': {
     ...oneDark['code[class*="language-"]'],
-    background: '#1a1a1a',
+    background: 'transparent',
     fontSize: '0.8rem',
   },
 };
