@@ -354,6 +354,7 @@ function QAPanel() {
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [compressedLog, setCompressedLog] = useState(true);
   const [agentTargetUrl, setAgentTargetUrl] = useState('http://localhost:5173');
+  const { lightbox, openLightbox, closeLightbox } = useLightbox();
   const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
@@ -678,11 +679,21 @@ function QAPanel() {
                           <span className="text-muted-foreground text-[10px]">Screenshot</span>
                         </div>
                         {qaScreenshot ? (
-                          <img
-                            src={qaScreenshot}
-                            alt="Page screenshot"
-                            className="border-border w-full rounded border"
-                          />
+                          <>
+                            <img
+                              src={qaScreenshot}
+                              alt="Page screenshot"
+                              className="border-border w-full cursor-pointer rounded border transition-opacity hover:opacity-80"
+                              onClick={() => openLightbox([qaScreenshot], 0)}
+                            />
+                            {lightbox && (
+                              <ImageLightbox
+                                images={lightbox.images}
+                                initialIndex={lightbox.index}
+                                onClose={closeLightbox}
+                              />
+                            )}
+                          </>
                         ) : !qaLoading ? (
                           <p className="text-muted-foreground py-4 text-center text-[10px]">
                             No screenshot yet
