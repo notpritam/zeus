@@ -40,6 +40,7 @@ function App() {
     openDiffTabs,
     connect,
     togglePower,
+    toggleTunnel,
     startSession,
     stopSession,
     selectSession,
@@ -137,18 +138,21 @@ function App() {
 
   return (
     <div className="bg-bg text-text-secondary flex h-screen flex-col overflow-hidden select-none">
-      {/* macOS traffic light clearance */}
-      <div className="h-6 w-full shrink-0 md:hidden" />
+      {/* macOS traffic light clearance — only when main Header is visible on mobile */}
+      <div className={`h-6 w-full shrink-0 md:hidden ${viewMode === 'claude' ? 'hidden' : ''}`} />
 
-      <Header
-        connected={connected}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onToggleRightPanel={toggleRightPanel}
-        rightPanelOpen={activeRightTab !== null}
-        onOpenSettings={() => setShowSettings(true)}
-        onOpenCommandPalette={() => setShowCommandPalette(true)}
-      />
+      {/* Main Header — hidden on mobile when Claude view is active (ClaudeView has its own header) */}
+      <div className={`${viewMode === 'claude' ? 'hidden md:block' : ''}`}>
+        <Header
+          connected={connected}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          onToggleRightPanel={toggleRightPanel}
+          rightPanelOpen={activeRightTab !== null}
+          onOpenSettings={() => setShowSettings(true)}
+          onOpenCommandPalette={() => setShowCommandPalette(true)}
+        />
+      </div>
 
       {/* Mobile layout */}
       <div data-testid="app-shell" className="relative flex min-h-0 flex-1 md:hidden">
@@ -214,10 +218,14 @@ function App() {
               onApprove={approveClaudeTool}
               onDeny={denyClaudeTool}
               onInterrupt={interruptClaude}
-              onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
+              onResume={(prompt) => activeClaudeId && resumeClaudeSession(activeClaudeId, prompt)}
               onQueueMessage={queueMessage}
               onEditQueued={editQueuedMessage}
               onRemoveQueued={removeQueuedMessage}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              onOpenSettings={() => setShowSettings(true)}
+              onOpenCommandPalette={() => setShowCommandPalette(true)}
+              connected={connected}
             />
           ) : (
             <TerminalView sessionId={activeSessionId} />
@@ -307,7 +315,7 @@ function App() {
                     onApprove={approveClaudeTool}
                     onDeny={denyClaudeTool}
                     onInterrupt={interruptClaude}
-                    onResume={() => activeClaudeId && resumeClaudeSession(activeClaudeId)}
+                    onResume={(prompt) => activeClaudeId && resumeClaudeSession(activeClaudeId, prompt)}
                     onQueueMessage={queueMessage}
                     onEditQueued={editQueuedMessage}
                     onRemoveQueued={removeQueuedMessage}
@@ -349,6 +357,7 @@ function App() {
         websocket={websocket}
         tunnel={tunnel}
         onTogglePower={togglePower}
+        onToggleTunnel={toggleTunnel}
       />
 
       {/* New Claude Session Modal */}

@@ -391,6 +391,88 @@ export function finalizeCreatedToolEntries(sessionId: string): void {
   console.log(`[Zeus DB] Finalized ${rows.length} stale tool entries for session ${sessionId.slice(-6)}`);
 }
 
+/**
+ * Copy all entries from previous sessions sharing the same Claude session ID
+ * into a newly-resumed session. This preserves full conversation history in the
+ * DB so that `getClaudeEntries(newSessionId)` returns the complete timeline.
+ *
+ * Each copied entry gets a new ID (prefixed with `h-`) since `id` is the global
+ * PRIMARY KEY — the originals in older sessions remain untouched.
+ */
+export function copyClaudeEntriesForResume(claudeSessionId: string, toSessionId: string): number {
+  if (!db) return 0;
+
+  // Find all previous Zeus session IDs that share this Claude session ID
+  // (excluding the new one we just created), ordered by started_at
+  const prevSessions = db
+    .prepare(
+      `SELECT id FROM claude_sessions
+       WHERE claude_session_id = ? AND id != ?
+       ORDER BY started_at ASC`,
+    )
+    .all(claudeSessionId, toSessionId) as Array<{ id: string }>;
+
+  if (prevSessions.length === 0) return 0;
+
+  const prevIds = prevSessions.map((s) => s.id);
+
+  // Collect all entries across previous sessions, ordered chronologically
+  const placeholders = prevIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT id, entry_type, content, metadata, timestamp
+       FROM claude_entries
+       WHERE session_id IN (${placeholders})
+       ORDER BY seq ASC`,
+    )
+    .all(...prevIds) as Array<{
+    id: string;
+    entry_type: string;
+    content: string;
+    metadata: string | null;
+    timestamp: string | null;
+  }>;
+
+  // Deduplicate by original ID: keep last occurrence (latest streaming update)
+  const entryMap = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    entryMap.set(row.id, row);
+  }
+
+  const uniqueEntries = Array.from(entryMap.values());
+  if (uniqueEntries.length === 0) return 0;
+
+  // Insert copies with new IDs (prefix `h-` for "history") so we don't
+  // collide with the originals that still live under previous session_ids.
+  const insertStmt = db.prepare(
+    `INSERT OR IGNORE INTO claude_entries (id, session_id, entry_type, content, metadata, timestamp, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  const copyAll = db.transaction(() => {
+    let seq = 0;
+    for (const entry of uniqueEntries) {
+      insertStmt.run(
+        `h-${toSessionId.slice(-8)}-${seq}`,
+        toSessionId,
+        entry.entry_type,
+        entry.content,
+        entry.metadata,
+        entry.timestamp,
+        seq,
+      );
+      seq++;
+    }
+    return seq;
+  });
+
+  const count = copyAll();
+  console.log(
+    `[Zeus DB] Copied ${count} history entries into resumed session ${toSessionId.slice(-6)} from ${prevIds.length} prior session(s)`,
+  );
+  return count;
+}
+
 // ─── Terminal Sessions CRUD ───
 
 export function insertTerminalSession(record: SessionRecord): void {

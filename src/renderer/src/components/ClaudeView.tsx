@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2 } from 'lucide-react';
+import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2, Menu, Settings } from 'lucide-react';
+import { Kbd } from '@/components/ui/kbd';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -427,10 +428,15 @@ interface ClaudeViewProps {
   onApprove: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   onDeny: (approvalId: string, reason?: string) => void;
   onInterrupt: () => void;
-  onResume: () => void;
+  onResume: (prompt?: string) => void;
   onQueueMessage: (content: string) => void;
   onEditQueued: (id: string, content: string) => void;
   onRemoveQueued: (id: string) => void;
+  // Mobile header controls (passed only from mobile layout)
+  onToggleSidebar?: () => void;
+  onOpenSettings?: () => void;
+  onOpenCommandPalette?: () => void;
+  connected?: boolean;
 }
 
 function ClaudeView({
@@ -447,8 +453,13 @@ function ClaudeView({
   onQueueMessage,
   onEditQueued,
   onRemoveQueued,
+  onToggleSidebar,
+  onOpenSettings,
+  onOpenCommandPalette,
+  connected,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
+  const [resumeInput, setResumeInput] = useState('');
   const [compressed, setCompressed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
   const [attachedImages, setAttachedImages] = useState<ImageAttachmentLocal[]>([]);
@@ -592,12 +603,23 @@ function ClaudeView({
 
   return (
     <div data-testid="claude-view" className="bg-background flex h-full flex-col">
-      {/* Header bar */}
-      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
+      {/* Header bar — on mobile this replaces the main Header, so add traffic-light padding */}
+      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2.5 md:pt-2.5 pt-8 [-webkit-app-region:drag]">
+        <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
+          {/* Sidebar toggle — mobile only */}
+          {onToggleSidebar && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="md:hidden"
+              onClick={onToggleSidebar}
+            >
+              <Menu className="size-4" />
+            </Button>
+          )}
           <span className="text-primary text-sm font-bold truncate max-w-[200px]">{session.name || 'Claude'}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
           <Button
             variant="ghost"
             size="icon-xs"
@@ -612,11 +634,46 @@ function ClaudeView({
               variant="ghost"
               size="xs"
               className="text-muted-foreground hover:text-primary"
-              onClick={onResume}
+              onClick={() => onResume()}
             >
               <RotateCcw className="size-3.5" />
               Resume
             </Button>
+          )}
+          {/* Command palette — mobile only */}
+          {onOpenCommandPalette && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="md:hidden"
+              onClick={onOpenCommandPalette}
+              title="Command Palette (⌘K)"
+            >
+              <Kbd>⌘K</Kbd>
+            </Button>
+          )}
+          {/* Settings — mobile only */}
+          {onOpenSettings && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="md:hidden"
+              onClick={onOpenSettings}
+              title="Settings"
+            >
+              <Settings className="size-4" />
+            </Button>
+          )}
+          {/* Connection indicator — mobile only */}
+          {connected !== undefined && (
+            <span className="relative flex h-2 w-2 md:hidden">
+              {connected && (
+                <span className="bg-accent absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" />
+              )}
+              <span
+                className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-accent' : 'bg-muted-foreground/30'}`}
+              />
+            </span>
           )}
         </div>
       </div>
@@ -695,15 +752,26 @@ function ClaudeView({
       {/* Input area */}
       <div className="border-border bg-card border-t">
         {(session.status === 'error' || session.status === 'done') ? (
-          <div className="flex items-center justify-between px-4 py-3">
-            <p className="text-muted-foreground text-sm">
-              {session.status === 'error' ? 'Session errored out.' : 'Session ended.'}
-            </p>
-            <Button size="sm" variant="outline" onClick={onResume}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              onResume(resumeInput.trim() || undefined);
+              setResumeInput('');
+            }}
+            className="flex items-center gap-2 px-4 py-3"
+          >
+            <input
+              type="text"
+              value={resumeInput}
+              onChange={(e) => setResumeInput(e.target.value)}
+              placeholder={session.status === 'error' ? 'Resume with message...' : 'Continue with message...'}
+              className="bg-muted text-foreground placeholder:text-muted-foreground flex-1 rounded-md border-none px-3 py-1.5 text-sm outline-none"
+            />
+            <Button size="sm" variant="outline" type="submit">
               <RotateCcw className="size-3" />
-              Resume Session
+              {resumeInput.trim() ? 'Send' : 'Resume'}
             </Button>
-          </div>
+          </form>
         ) : (
           <>
             {/* Attached file chips + image thumbnails */}

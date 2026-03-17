@@ -23,7 +23,7 @@ import type {
 import { createSession, writeToSession, resizeSession, destroySession, getSessionPids } from './terminal';
 import { registerSession, markExited, markKilled, getSession, getAllSessions } from './sessions';
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
-import { getTunnelUrl } from './tunnel';
+import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel } from './tunnel';
 import { validateToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
@@ -61,6 +61,7 @@ import {
   getQaAgentEntries,
   markStaleQaAgentsErrored,
   finalizeCreatedToolEntries,
+  copyClaudeEntriesForResume,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload, SessionIconName } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
@@ -385,6 +386,30 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
       },
       auth: '',
     });
+  } else if (payload.type === 'toggle_tunnel') {
+    (async () => {
+      try {
+        if (isTunnelActive()) {
+          await stopTunnel();
+        } else {
+          await startTunnel(3000);
+        }
+        broadcastEnvelope({
+          channel: 'status',
+          sessionId: '',
+          payload: {
+            type: 'status_update',
+            powerBlock: isPowerBlocked(),
+            websocket: true,
+            tunnel: getTunnelUrl(),
+          },
+          auth: '',
+        });
+      } catch (err) {
+        console.error('[Zeus] Tunnel toggle error:', (err as Error).message);
+        sendError(ws, '', `Tunnel error: ${(err as Error).message}`);
+      }
+    })();
   } else {
     sendError(ws, '', `Unknown status type: ${payload.type}`);
   }
@@ -1022,6 +1047,10 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         startedAt: Date.now(),
         endedAt: null,
       });
+
+      // Copy history entries from previous sessions sharing the same Claude session ID
+      // so the resumed session's DB has the full conversation timeline
+      copyClaudeEntriesForResume(opts.claudeSessionId, envelope.sessionId);
 
       if (!clientClaudeSessions.has(ws)) clientClaudeSessions.set(ws, new Set());
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);

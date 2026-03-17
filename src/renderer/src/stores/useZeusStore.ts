@@ -129,6 +129,7 @@ interface ZeusState {
   // Actions
   connect: () => () => void;
   togglePower: () => void;
+  toggleTunnel: () => void;
   fetchSessions: () => void;
   startSession: (cols?: number, rows?: number) => void;
   stopSession: (sessionId: string) => void;
@@ -152,7 +153,7 @@ interface ZeusState {
   interruptClaude: () => void;
   stopClaude: () => void;
   selectClaudeSession: (id: string | null) => void;
-  resumeClaudeSession: (id: string) => void;
+  resumeClaudeSession: (id: string, prompt?: string) => void;
   queueMessage: (content: string) => void;
   editQueuedMessage: (msgId: string, content: string) => void;
   removeQueuedMessage: (msgId: string) => void;
@@ -1166,6 +1167,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  toggleTunnel: () => {
+    zeusWs.send({
+      channel: 'status',
+      sessionId: '',
+      payload: { type: 'toggle_tunnel' },
+      auth: '',
+    });
+  },
+
   fetchSessions: () => {
     zeusWs.send({
       channel: 'control',
@@ -1382,7 +1392,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     }));
   },
 
-  resumeClaudeSession: (id: string) => {
+  resumeClaudeSession: (id: string, prompt?: string) => {
     const state = get();
     const session = state.claudeSessions.find((s) => s.id === id);
     if (!session || !session.claudeSessionId) return;
@@ -1421,7 +1431,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: {
         type: 'resume_claude',
         claudeSessionId: session.claudeSessionId,
-        prompt: 'Continue working.',
+        prompt: prompt || 'Continue working.',
         workingDir: session.workingDir || '/',
         name: originalName,
         color: session.color,

@@ -9,9 +9,9 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Kbd } from '@/components/ui/kbd';
-import { Wifi, WifiOff, Link, Zap, Activity, Keyboard, Settings, Palette } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Wifi, WifiOff, Link, Zap, Activity, Keyboard, Settings, Palette, RefreshCw, X } from 'lucide-react';
 import PerformanceTab from './PerformanceTab';
 import ThemePicker from './ThemePicker';
 
@@ -22,6 +22,7 @@ interface SettingsModalProps {
   websocket: boolean;
   tunnel: string | null;
   onTogglePower: () => void;
+  onToggleTunnel: () => void;
 }
 
 const shortcuts = [
@@ -48,6 +49,7 @@ function SettingsModal({
   websocket,
   tunnel,
   onTogglePower,
+  onToggleTunnel,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
@@ -57,116 +59,167 @@ function SettingsModal({
         <DialogTitle>Settings</DialogTitle>
         <DialogDescription>System settings, performance, and keyboard shortcuts</DialogDescription>
       </DialogHeader>
-      <DialogContent className="sm:max-w-md">
-        <div className="space-y-1">
-          <h2 className="text-sm font-semibold">Settings</h2>
-          <p className="text-muted-foreground text-xs">System status, performance, and shortcuts.</p>
-        </div>
-
-        {/* Tab navigation */}
-        <div className="bg-secondary/50 flex rounded-lg p-0.5">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="size-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <Separator />
-
-        {/* General tab */}
-        {activeTab === 'general' && (
-          <div className="space-y-4">
-            <h3 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-              System Status
-            </h3>
-
-            {/* Power Lock */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Zap className="text-muted-foreground size-4" />
-                <Label htmlFor="power-lock" className="text-sm">
-                  Power Lock
-                </Label>
-              </div>
-              <div className="flex items-center gap-3">
-                <Badge variant={powerBlock ? 'default' : 'secondary'}>
-                  {powerBlock ? 'Active' : 'Off'}
-                </Badge>
-                <Switch id="power-lock" checked={powerBlock} onCheckedChange={onTogglePower} />
-              </div>
+      <DialogContent showCloseButton={false} className="fixed inset-0 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] sm:max-w-2xl h-[480px] p-0 gap-0 overflow-hidden">
+        <div className="flex h-full">
+          {/* Left sidebar */}
+          <div className="w-48 shrink-0 border-r bg-secondary/30 flex flex-col">
+            <div className="p-4 pb-3">
+              <h2 className="text-sm font-semibold">Settings</h2>
+              <p className="text-muted-foreground text-[11px] mt-0.5">Configure Zeus</p>
             </div>
-
-            {/* WebSocket */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {websocket ? (
-                  <Wifi className="text-muted-foreground size-4" />
-                ) : (
-                  <WifiOff className="text-muted-foreground size-4" />
-                )}
-                <span className="text-sm">WebSocket</span>
-              </div>
-              <Badge variant={websocket ? 'default' : 'destructive'}>
-                {websocket ? 'Connected' : 'Offline'}
-              </Badge>
-            </div>
-
-            {/* Tunnel */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Link className="text-muted-foreground size-4" />
-                <span className="text-sm">Tunnel</span>
-              </div>
-              <Badge variant={tunnel ? 'default' : 'secondary'}>{tunnel ? 'Active' : 'Off'}</Badge>
-            </div>
-
-            {tunnel && (
-              <button
-                className="text-primary hover:text-primary/80 w-full truncate text-left text-xs transition-colors"
-                title={tunnel}
-                onClick={() => navigator.clipboard.writeText(tunnel)}
-              >
-                {tunnel.replace(/^https?:\/\//, '')} — click to copy
-              </button>
-            )}
+            <nav className="flex-1 px-2 space-y-0.5">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-xs transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                    }`}
+                  >
+                    <Icon className="size-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
           </div>
-        )}
 
-        {/* Appearance tab */}
-        {activeTab === 'appearance' && <ThemePicker />}
+          {/* Right content */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Content header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b">
+              <h3 className="text-sm font-medium capitalize">{activeTab}</h3>
+              <button
+                onClick={() => onOpenChange(false)}
+                className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden"
+              >
+                <X className="size-4" />
+                <span className="sr-only">Close</span>
+              </button>
+            </div>
 
-        {/* Performance tab */}
-        {activeTab === 'performance' && <PerformanceTab />}
+            {/* Scrollable content area */}
+            <div className="flex-1 overflow-y-auto p-5">
+              {/* General tab */}
+              {activeTab === 'general' && (
+                <div className="space-y-5">
+                  <div>
+                    <h4 className="text-muted-foreground text-[11px] font-medium uppercase tracking-wider mb-3">
+                      System Status
+                    </h4>
+                    <div className="space-y-3">
+                      {/* Power Lock */}
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-8 items-center justify-center rounded-md bg-secondary">
+                            <Zap className="size-4 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <Label htmlFor="power-lock" className="text-sm font-medium">Power Lock</Label>
+                            <p className="text-muted-foreground text-[11px]">Prevent system sleep</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant={powerBlock ? 'default' : 'secondary'}>
+                            {powerBlock ? 'Active' : 'Off'}
+                          </Badge>
+                          <Switch id="power-lock" checked={powerBlock} onCheckedChange={onTogglePower} />
+                        </div>
+                      </div>
 
-        {/* Shortcuts tab */}
-        {activeTab === 'shortcuts' && (
-          <div className="space-y-3">
-            <h3 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-              Keyboard Shortcuts
-            </h3>
-            <div className="space-y-2">
-              {shortcuts.map(([key, label]) => (
-                <div key={key} className="flex items-center justify-between">
-                  <span className="text-muted-foreground text-xs">{label}</span>
-                  <Kbd>{key}</Kbd>
+                      {/* WebSocket */}
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-8 items-center justify-center rounded-md bg-secondary">
+                            {websocket ? (
+                              <Wifi className="size-4 text-muted-foreground" />
+                            ) : (
+                              <WifiOff className="size-4 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium">WebSocket</span>
+                            <p className="text-muted-foreground text-[11px]">Real-time connection</p>
+                          </div>
+                        </div>
+                        <Badge variant={websocket ? 'default' : 'destructive'}>
+                          {websocket ? 'Connected' : 'Offline'}
+                        </Badge>
+                      </div>
+
+                      {/* Tunnel */}
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-8 items-center justify-center rounded-md bg-secondary">
+                            <Link className="size-4 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium">Tunnel</span>
+                            <p className="text-muted-foreground text-[11px]">Remote access via ngrok</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={tunnel ? 'default' : 'secondary'}>{tunnel ? 'Active' : 'Off'}</Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="size-6"
+                            onClick={onToggleTunnel}
+                            title={tunnel ? 'Restart tunnel' : 'Start tunnel'}
+                          >
+                            <RefreshCw className="size-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {tunnel && (
+                    <div>
+                      <h4 className="text-muted-foreground text-[11px] font-medium uppercase tracking-wider mb-2">
+                        Tunnel URL
+                      </h4>
+                      <button
+                        className="text-primary hover:text-primary/80 w-full truncate rounded-md border px-3 py-2 text-left text-xs transition-colors"
+                        title={tunnel}
+                        onClick={() => navigator.clipboard.writeText(tunnel)}
+                      >
+                        {tunnel.replace(/^https?:\/\//, '')} — click to copy
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
+
+              {/* Appearance tab */}
+              {activeTab === 'appearance' && <ThemePicker />}
+
+              {/* Performance tab */}
+              {activeTab === 'performance' && <PerformanceTab />}
+
+              {/* Shortcuts tab */}
+              {activeTab === 'shortcuts' && (
+                <div className="space-y-3">
+                  <h4 className="text-muted-foreground text-[11px] font-medium uppercase tracking-wider">
+                    Keyboard Shortcuts
+                  </h4>
+                  <div className="space-y-1">
+                    {shortcuts.map(([key, label]) => (
+                      <div key={key} className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+                        <span className="text-muted-foreground text-xs">{label}</span>
+                        <Kbd>{key}</Kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );
