@@ -112,7 +112,8 @@ export interface ClaudeUserMsg {
   message: ClaudeMessage;
   isSynthetic?: boolean;
   isReplay?: boolean;
-  /** Structured tool output data — the actual parsed result from Claude Code's built-in tools */
+  /** Structured tool output data (camelCase from CLI, snake_case from SDK docs) */
+  toolUseResult?: unknown;
   tool_use_result?: unknown;
 }
 

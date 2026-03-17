@@ -178,6 +178,8 @@ export class ClaudeLogProcessor {
   private processUserMessage(msg: ClaudeJson): NormalizedEntry[] {
     const userMsg = msg as {
       message?: { content?: unknown[] | string };
+      // Claude CLI uses camelCase (toolUseResult), SDK docs say snake_case — handle both
+      toolUseResult?: unknown;
       tool_use_result?: unknown;
     };
 
@@ -195,11 +197,11 @@ export class ClaudeLogProcessor {
 
       const status = b.is_error ? 'failed' : 'success';
 
-      // Extract output: prefer structured tool_use_result, fall back to content block text
+      // Extract output: prefer structured toolUseResult, fall back to content block text
       let resultOutput = '';
 
-      // Check structured tool_use_result first (contains stdout, file content, etc.)
-      const structured = userMsg.tool_use_result as Record<string, unknown> | undefined;
+      // Check structured result first — Claude CLI sends camelCase `toolUseResult`
+      const structured = (userMsg.toolUseResult ?? userMsg.tool_use_result) as Record<string, unknown> | undefined;
       if (structured) {
         resultOutput = this.extractStructuredOutput(structured, tracked.toolName);
       }
@@ -222,6 +224,11 @@ export class ClaudeLogProcessor {
         }
       }
 
+      // Truncate very large outputs for UI performance
+      if (resultOutput.length > 10000) {
+        resultOutput = resultOutput.slice(0, 10000) + '\n... (truncated)';
+      }
+
       this.toolMap.delete(b.tool_use_id);
       this.setActivity({ state: 'streaming' });
 
@@ -241,45 +248,82 @@ export class ClaudeLogProcessor {
     return entries;
   }
 
-  /** Extract meaningful text from the structured tool_use_result object */
+  /** Extract meaningful text from the structured toolUseResult object */
   private extractStructuredOutput(result: Record<string, unknown>, toolName: string): string {
     // Bash tool: { stdout, stderr, interrupted }
     if (toolName === 'Bash') {
       const parts: string[] = [];
       if (result.stdout) parts.push(String(result.stdout));
       if (result.stderr) parts.push(String(result.stderr));
-      return parts.join('\n').slice(0, 5000);
+      return parts.join('\n');
     }
 
-    // Read tool: { type, file: { filePath, content, numLines } }
+    // Read tool: { type: "text", file: { filePath, content, numLines } }
     if (toolName === 'Read') {
       const file = result.file as Record<string, unknown> | undefined;
-      if (file?.content) return String(file.content).slice(0, 5000);
+      if (file?.content) return String(file.content);
     }
 
-    // Edit/Write tool: { filePath, structuredPatch, gitDiff }
+    // Edit/Write tool: { filePath, oldString, newString, originalFile, structuredPatch }
     if (toolName === 'Edit' || toolName === 'Write' || toolName === 'MultiEdit') {
-      if (result.gitDiff) return String(result.gitDiff).slice(0, 5000);
-      if (result.structuredPatch) return JSON.stringify(result.structuredPatch).slice(0, 5000);
+      // For edits, show the old→new diff summary
+      if (result.oldString && result.newString) {
+        return `--- old\n${String(result.oldString)}\n+++ new\n${String(result.newString)}`;
+      }
+      if (result.structuredPatch) {
+        try {
+          const patches = result.structuredPatch as Array<{ oldStart: number; newStart: number; lines: string[] }>;
+          return patches.map(p => p.lines?.join('\n') || '').join('\n');
+        } catch { /* fall through */ }
+      }
+      // Write tool — show content being written
+      if (result.content) return String(result.content);
     }
 
     // Glob: { filenames, numFiles }
     if (toolName === 'Glob') {
       const files = result.filenames as string[] | undefined;
-      if (files) return files.join('\n').slice(0, 5000);
+      if (files) return `${files.length} files found:\n${files.join('\n')}`;
     }
 
-    // Grep: { filenames, content, numMatches }
+    // Grep: { mode, numFiles, filenames, content, numLines, numMatches }
     if (toolName === 'Grep') {
-      if (result.content) return String(result.content).slice(0, 5000);
+      if (result.content) return String(result.content);
       const files = result.filenames as string[] | undefined;
-      if (files) return files.join('\n').slice(0, 5000);
+      if (files) return `${files.length} files matched:\n${files.join('\n')}`;
+    }
+
+    // TodoWrite: { newTodos, oldTodos }
+    if (toolName === 'TodoWrite') {
+      const newTodos = result.newTodos as Array<{ content: string; status: string }> | undefined;
+      if (newTodos) return newTodos.map(t => `[${t.status}] ${t.content}`).join('\n');
+    }
+
+    // Agent/Task: { status, content, agentId, totalTokens }
+    if (toolName === 'Agent' || toolName === 'Task') {
+      const parts: string[] = [];
+      if (result.status) parts.push(`Status: ${result.status}`);
+      if (result.content) {
+        const c = result.content;
+        if (Array.isArray(c)) {
+          parts.push(c.map((b: { text?: string }) => b.text || '').filter(Boolean).join('\n'));
+        } else {
+          parts.push(String(c));
+        }
+      }
+      return parts.join('\n');
+    }
+
+    // ToolSearch: { matches, query }
+    if (toolName === 'ToolSearch') {
+      const matches = result.matches as string[] | undefined;
+      if (matches) return `Found: ${matches.join(', ')}`;
     }
 
     // Generic fallback: stringify the result
     try {
-      const str = JSON.stringify(result);
-      if (str && str !== '{}') return str.slice(0, 5000);
+      const str = JSON.stringify(result, null, 2);
+      if (str && str !== '{}') return str;
     } catch { /* ignore */ }
     return '';
   }
