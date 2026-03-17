@@ -440,7 +440,7 @@ function ToolImages({ images, inline }: { images: string[]; inline?: boolean }) 
   return (
     <div className={inline ? 'space-y-1' : 'mt-1 space-y-1'}>
       {images.map((src, i) => (
-        <div key={i} className="border-border overflow-hidden rounded-md border border-purple-500/20 bg-black/10">
+        <div key={i} className="overflow-hidden rounded-lg bg-secondary/60 p-1.5">
           <img
             src={src}
             alt={`Screenshot ${i + 1}`}
