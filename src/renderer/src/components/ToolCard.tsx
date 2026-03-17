@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Copy, ClipboardCheck, ChevronDown, Terminal, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
 import type { NormalizedEntryType, ActionType } from '../../../shared/types';
 
 // ─── Code theme (matches Markdown.tsx) ───
@@ -199,19 +200,33 @@ function GenericToolBody({ output }: { output: string }) {
 }
 
 function ToolImages({ images, inline }: { images: string[]; inline?: boolean }) {
+  const { lightbox, openLightbox, closeLightbox } = useLightbox();
   if (!images.length) return null;
   return (
-    <div className={inline ? 'space-y-1' : 'mt-1 space-y-1'}>
-      {images.map((src, i) => (
-        <div key={i} className="overflow-hidden rounded-lg bg-secondary/60 p-1.5">
-          <img
-            src={src}
-            alt={`Screenshot ${i + 1}`}
-            className="max-h-[180px] w-full rounded object-contain"
-          />
-        </div>
-      ))}
-    </div>
+    <>
+      <div className={inline ? 'space-y-1' : 'mt-1 space-y-1'}>
+        {images.map((src, i) => (
+          <div
+            key={i}
+            className="cursor-pointer overflow-hidden rounded-lg bg-secondary/60 p-1.5 transition-opacity hover:opacity-80"
+            onClick={() => openLightbox(images, i)}
+          >
+            <img
+              src={src}
+              alt={`Screenshot ${i + 1}`}
+              className="max-h-[180px] w-full rounded object-contain"
+            />
+          </div>
+        ))}
+      </div>
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={closeLightbox}
+        />
+      )}
+    </>
   );
 }
 

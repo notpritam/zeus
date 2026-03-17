@@ -7,6 +7,7 @@ import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
 import { ToolCard } from '@/components/ToolCard';
+import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type {
   NormalizedEntry,
@@ -65,12 +66,15 @@ function UserBubble({ content, metadata, timestamp }: { content: string; metadat
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const contentRef = useRef<HTMLParagraphElement>(null);
+  const { lightbox, openLightbox, closeLightbox } = useLightbox();
 
   useEffect(() => {
     if (contentRef.current) {
       setOverflows(contentRef.current.scrollHeight > USER_BUBBLE_MAX_H);
     }
   }, [content]);
+
+  const imageUrls = images?.map((img) => img.dataUrl) ?? [];
 
   return (
     <div className="group/msg flex flex-col items-end">
@@ -82,10 +86,18 @@ function UserBubble({ content, metadata, timestamp }: { content: string; metadat
                 key={i}
                 src={img.dataUrl}
                 alt={img.filename}
-                className="max-h-40 rounded-md border border-primary/20 object-cover"
+                className="max-h-40 cursor-pointer rounded-md border border-primary/20 object-cover transition-opacity hover:opacity-80"
+                onClick={() => openLightbox(imageUrls, i)}
               />
             ))}
           </div>
+        )}
+        {lightbox && (
+          <ImageLightbox
+            images={lightbox.images}
+            initialIndex={lightbox.index}
+            onClose={closeLightbox}
+          />
         )}
         <div className="relative">
           <p
