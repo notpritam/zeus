@@ -965,12 +965,15 @@ function QAPanel() {
                       onChange={(e) => selectQaAgent(parentSessionId, e.target.value || null)}
                       className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
                     >
-                      {sessionAgents.map((a) => (
-                        <option key={a.info.qaAgentId} value={a.info.qaAgentId}>
-                          {a.info.status === 'running' ? '\u25CF ' : '\u25CB '}
-                          {a.info.task.slice(0, 50)}{a.info.task.length > 50 ? '...' : ''}
-                        </option>
-                      ))}
+                      {sessionAgents.map((a) => {
+                        const label = a.info.name || a.info.task;
+                        return (
+                          <option key={a.info.qaAgentId} value={a.info.qaAgentId}>
+                            {a.info.status === 'running' ? '\u25CF ' : '\u25CB '}
+                            {label.slice(0, 50)}{label.length > 50 ? '...' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                     <Button
                       variant="ghost"
@@ -991,7 +994,7 @@ function QAPanel() {
                           selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
                         }`} />
                         <span className="text-foreground flex-1 truncate text-[10px] font-medium">
-                          {selectedAgent.info.status === 'running' ? 'Agent running' : 'Agent stopped'}
+                          {selectedAgent.info.name || (selectedAgent.info.status === 'running' ? 'Agent running' : 'Agent stopped')}
                         </span>
                         <Button
                           variant="ghost"
@@ -1097,6 +1100,13 @@ function QAPanel() {
                   )}
                   <Bot className="text-muted-foreground/40 size-8" />
                   <p className="text-muted-foreground text-[10px]">Describe a task for the QA agent</p>
+                  <input
+                    type="text"
+                    value={agentName}
+                    onChange={(e) => setAgentName(e.target.value)}
+                    className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
+                    placeholder="Agent name (optional)"
+                  />
                   <input
                     type="text"
                     value={agentTargetUrl}

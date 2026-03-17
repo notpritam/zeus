@@ -121,6 +121,12 @@ Goal: Make the UI aware of what Claude is doing to files.
 * All WebSocket messages must conform to the envelope schema above.
 * Never store secrets in code — use environment variables or Electron's `safeStorage`.
 
+## QA Testing
+
+After implementing any UI feature or fix, dispatch the **`qa-tester`** subagent (`.claude/agents/qa-tester.md`) to verify the change works in the browser. The subagent has access to all PinchTab MCP tools (`qa_*`) and will return a structured test report.
+
+Usage: Launch the `qa-tester` agent with a prompt describing what feature to test and the target URL (default `http://localhost:5173`).
+
 ## Development Log
 
 **`DEVLOG.md`** — Running log of every step taken during development. Append to this file after completing each step so the developer can review progress at any time. Most recent entries go at the bottom.
