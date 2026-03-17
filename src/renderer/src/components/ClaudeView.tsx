@@ -435,7 +435,24 @@ function GenericToolBody({ output }: { output: string }) {
   return <CodeOutput code={output} language={lang} />;
 }
 
-function McpToolBody({ input, output }: { input: string; output: string }) {
+function ToolImages({ images, inline }: { images: string[]; inline?: boolean }) {
+  if (!images.length) return null;
+  return (
+    <div className={inline ? 'space-y-1' : 'mt-1 space-y-1'}>
+      {images.map((src, i) => (
+        <div key={i} className="border-border overflow-hidden rounded-md border border-purple-500/20 bg-black/10">
+          <img
+            src={src}
+            alt={`Screenshot ${i + 1}`}
+            className="max-h-[180px] w-full rounded object-contain"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function McpToolBody({ input, output, images = [] }: { input: string; output: string; images?: string[] }) {
   return (
     <div className="mt-2 space-y-1.5">
       {input && (
@@ -488,6 +505,7 @@ function McpToolBody({ input, output }: { input: string; output: string }) {
           </div>
         </div>
       )}
+      {images.length > 0 && <ToolImages images={images} />}
     </div>
   );
 }
@@ -545,59 +563,66 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
   };
 
   return (
-    <div className={`bg-secondary border-border rounded-lg border ${borderColor} transition-colors`}>
-      {/* Trigger row */}
-      <button
-        onClick={handleToggle}
-        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left ${hasExpandable && !isRunning ? 'cursor-pointer' : 'cursor-default'}`}
-      >
-        {/* Icon */}
-        <span className={`shrink-0 ${isRunning ? 'text-primary animate-pulse' : isSuccess ? 'text-green-400' : isFailed || isDenied ? 'text-red-400' : isPending ? 'text-orange-400' : 'text-muted-foreground'}`}>
-          {icon}
-        </span>
-
-        {/* Title + subtitle */}
-        <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={`shrink-0 text-xs font-semibold ${isRunning ? 'zeus-shimmer-accent' : 'text-foreground/90'}`}>
-            {title}
+    <div className="space-y-1">
+      <div className={`bg-secondary border-border rounded-lg border ${borderColor} transition-colors`}>
+        {/* Trigger row */}
+        <button
+          onClick={handleToggle}
+          className={`flex w-full items-center gap-2.5 px-3 py-2 text-left ${hasExpandable && !isRunning ? 'cursor-pointer' : 'cursor-default'}`}
+        >
+          {/* Icon */}
+          <span className={`shrink-0 ${isRunning ? 'text-primary animate-pulse' : isSuccess ? 'text-green-400' : isFailed || isDenied ? 'text-red-400' : isPending ? 'text-orange-400' : 'text-muted-foreground'}`}>
+            {icon}
           </span>
-          {!isRunning && subtitle && (
-            <span className="text-muted-foreground min-w-0 truncate text-xs">
-              {subtitle}
+
+          {/* Title + subtitle */}
+          <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+            <span className={`shrink-0 text-xs font-semibold ${isRunning ? 'zeus-shimmer-accent' : 'text-foreground/90'}`}>
+              {title}
+            </span>
+            {!isRunning && subtitle && (
+              <span className="text-muted-foreground min-w-0 truncate text-xs">
+                {subtitle}
+              </span>
+            )}
+            {isRunning && (
+              <span className="zeus-shimmer text-xs">working...</span>
+            )}
+          </div>
+
+          {/* Directory path (for file tools) */}
+          {!isRunning && directory && (
+            <span className="text-muted-foreground/50 hidden shrink-0 text-[10px] sm:block">
+              {directory}
             </span>
           )}
-          {isRunning && (
-            <span className="zeus-shimmer text-xs">working...</span>
-          )}
-        </div>
 
-        {/* Directory path (for file tools) */}
-        {!isRunning && directory && (
-          <span className="text-muted-foreground/50 hidden shrink-0 text-[10px] sm:block">
-            {directory}
-          </span>
+          {/* Status dot + chevron */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className={`inline-block size-1.5 rounded-full ${statusDotColor} ${(isRunning || isPending) ? 'animate-pulse' : ''}`} />
+            {hasExpandable && !isRunning && (
+              <ChevronDown className={`text-muted-foreground size-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            )}
+          </div>
+        </button>
+
+        {/* Expanded body — per-tool rendering */}
+        {expanded && !isRunning && (
+          <div className="border-border border-t px-3 pb-2">
+            {isBash && <BashToolBody command={actionType.action === 'command_run' ? actionType.command : ''} output={output} />}
+            {isEdit && <EditToolBody output={output} actionType={actionType} />}
+            {isSearch && <SearchToolBody output={output} />}
+            {isRead && output && <ReadToolBody output={output} path={actionType.action === 'file_read' ? actionType.path : ''} />}
+            {isMcp && <McpToolBody input={mcpInput} output={output} images={images} />}
+            {!isBash && !isEdit && !isSearch && !isRead && !isMcp && output && <GenericToolBody output={output} />}
+            {/* Images for non-MCP tools inside expanded area */}
+            {!isMcp && hasImages && <ToolImages images={images} />}
+          </div>
         )}
+      </div>
 
-        {/* Status dot + chevron */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span className={`inline-block size-1.5 rounded-full ${statusDotColor} ${(isRunning || isPending) ? 'animate-pulse' : ''}`} />
-          {hasExpandable && !isRunning && (
-            <ChevronDown className={`text-muted-foreground size-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-          )}
-        </div>
-      </button>
-
-      {/* Expanded body — per-tool rendering */}
-      {expanded && !isRunning && (
-        <div className="border-border border-t px-3 pb-2">
-          {isBash && <BashToolBody command={actionType.action === 'command_run' ? actionType.command : ''} output={output} />}
-          {isEdit && <EditToolBody output={output} actionType={actionType} />}
-          {isSearch && <SearchToolBody output={output} />}
-          {isRead && output && <ReadToolBody output={output} path={actionType.action === 'file_read' ? actionType.path : ''} />}
-          {isMcp && <McpToolBody input={mcpInput} output={output} />}
-          {!isBash && !isEdit && !isSearch && !isRead && !isMcp && output && <GenericToolBody output={output} />}
-        </div>
-      )}
+      {/* Images rendered outside the card, like a follow-up attachment */}
+      {hasImages && !isRunning && <ToolImages images={images} inline />}
     </div>
   );
 }

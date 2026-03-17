@@ -171,6 +171,7 @@ export class CdpClient extends EventEmitter {
   private async enableDomains(): Promise<void> {
     await this.send('Runtime.enable');
     await this.send('Network.enable');
+    await this.send('Page.enable');
   }
 
   private send(method: string, params?: Record<string, unknown>): Promise<void> {
@@ -206,6 +207,12 @@ export class CdpClient extends EventEmitter {
         break;
       case 'Network.loadingFailed':
         this.handleLoadingFailed(msg.params!);
+        break;
+      case 'Page.frameNavigated':
+        this.handleFrameNavigated(msg.params!);
+        break;
+      case 'Page.navigatedWithinDocument':
+        this.handleNavigatedWithinDocument(msg.params!);
         break;
     }
   }
@@ -245,6 +252,28 @@ export class CdpClient extends EventEmitter {
     this.errorBuf.push(entry);
     this.emit('js_error', entry);
     this.scheduleWrite();
+  }
+
+  private handleFrameNavigated(params: Record<string, unknown>): void {
+    const frame = params.frame as Record<string, unknown> | undefined;
+    if (!frame) return;
+    // Only emit for top-level frame (no parentId)
+    if (frame.parentId) return;
+    const url = frame.url as string;
+    const title = (frame.name as string) ?? '';
+    this.emit('navigated', { url, title });
+  }
+
+  /** Catches SPA navigation (pushState / replaceState / hash changes) */
+  private handleNavigatedWithinDocument(params: Record<string, unknown>): void {
+    const frameId = params.frameId as string | undefined;
+    // Only top-level frame — frameId matches the first page target
+    // For navigatedWithinDocument there's no parentId check, but we emit for all since
+    // this event only fires for the frame that actually navigated
+    const url = params.url as string;
+    if (url) {
+      this.emit('navigated', { url, title: '' });
+    }
   }
 
   private handleRequestStart(params: Record<string, unknown>): void {

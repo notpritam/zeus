@@ -214,39 +214,30 @@ export class ClaudeLogProcessor {
       }
 
       // Fall back to the tool_result content block text
-      // Also extract images from content blocks
+      // Also extract images from content blocks (handles both array and JSON-string formats)
       const images: string[] = [];
-      if (!resultOutput) {
+
+      // First, check if the structured output itself was a content-block array (common for MCP tools)
+      if (resultOutput) {
+        const parsed = this.parseContentBlocks(resultOutput);
+        if (parsed) {
+          images.push(...parsed.images);
+          resultOutput = parsed.text;
+        }
+      }
+
+      // Check b.content for text fallback and additional images
+      const contentParsed = this.parseContentBlocks(b.content);
+      if (contentParsed) {
+        if (!resultOutput) resultOutput = contentParsed.text;
+        images.push(...contentParsed.images);
+      } else if (!resultOutput) {
+        // Plain string or unknown format
         const raw = b.content;
         if (typeof raw === 'string') {
           resultOutput = raw;
-        } else if (Array.isArray(raw)) {
-          const textParts: string[] = [];
-          for (const item of raw) {
-            const ci = item as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } };
-            if (ci.type === 'text' && ci.text) {
-              textParts.push(ci.text);
-            } else if (ci.type === 'image' && ci.source?.data) {
-              // Store as data URL for direct rendering
-              const mediaType = ci.source.media_type || 'image/png';
-              images.push(`data:${mediaType};base64,${ci.source.data}`);
-            }
-          }
-          resultOutput = textParts.join('\n');
         } else if (raw) {
           resultOutput = JSON.stringify(raw).slice(0, 5000);
-        }
-      } else {
-        // Even with structured output, check content for images
-        const raw = b.content;
-        if (Array.isArray(raw)) {
-          for (const item of raw) {
-            const ci = item as { type?: string; source?: { type?: string; media_type?: string; data?: string } };
-            if (ci.type === 'image' && ci.source?.data) {
-              const mediaType = ci.source.media_type || 'image/png';
-              images.push(`data:${mediaType};base64,${ci.source.data}`);
-            }
-          }
         }
       }
 
@@ -272,6 +263,45 @@ export class ClaudeLogProcessor {
     }
 
     return entries;
+  }
+
+  /**
+   * Parse content that may be a content-block array (or JSON string of one).
+   * Extracts text parts and base64 image data URLs.
+   */
+  private parseContentBlocks(raw: unknown): { text: string; images: string[] } | null {
+    let arr: unknown[];
+    if (Array.isArray(raw)) {
+      arr = raw;
+    } else if (typeof raw === 'string') {
+      // Try JSON-parsing strings that look like content-block arrays
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('[')) {
+        try { arr = JSON.parse(trimmed); } catch { return null; }
+        if (!Array.isArray(arr)) return null;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+
+    // Validate it looks like a content-block array (objects with a 'type' field)
+    if (arr.length === 0 || typeof arr[0] !== 'object' || arr[0] === null) return null;
+    if (!('type' in (arr[0] as Record<string, unknown>))) return null;
+
+    const textParts: string[] = [];
+    const images: string[] = [];
+    for (const item of arr) {
+      const ci = item as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } };
+      if (ci.type === 'text' && ci.text) {
+        textParts.push(ci.text);
+      } else if (ci.type === 'image' && ci.source?.data) {
+        const mediaType = ci.source.media_type || 'image/png';
+        images.push(`data:${mediaType};base64,${ci.source.data}`);
+      }
+    }
+    return { text: textParts.join('\n'), images };
   }
 
   /** Extract meaningful text from the structured toolUseResult object */
@@ -408,21 +438,13 @@ export class ClaudeLogProcessor {
     let resultOutput: string;
     const images: string[] = [];
 
-    if (typeof raw === 'string') {
+    // Use parseContentBlocks to handle both array and JSON-string content block formats
+    const parsed = this.parseContentBlocks(raw);
+    if (parsed) {
+      resultOutput = parsed.text;
+      images.push(...parsed.images);
+    } else if (typeof raw === 'string') {
       resultOutput = raw;
-    } else if (Array.isArray(raw)) {
-      // Content block array — extract text and images
-      const textParts: string[] = [];
-      for (const item of raw) {
-        const ci = item as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } };
-        if (ci.type === 'text' && ci.text) {
-          textParts.push(ci.text);
-        } else if (ci.type === 'image' && ci.source?.data) {
-          const mediaType = ci.source.media_type || 'image/png';
-          images.push(`data:${mediaType};base64,${ci.source.data}`);
-        }
-      }
-      resultOutput = textParts.join('\n') || JSON.stringify(raw).slice(0, 2000);
     } else {
       resultOutput = JSON.stringify(raw).slice(0, 2000);
     }

@@ -389,18 +389,31 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       auth: '',
     });
 
-    // Sync QA Preview when Claude calls qa_* tools
-    if (entry.entryType.type === 'tool_use' && /^qa_/i.test(entry.entryType.toolName)) {
-      const { toolName, status } = entry.entryType;
+    // Sync QA Preview when Claude calls qa_* or pinchtab_* tools
+    // toolName may be MCP-prefixed (e.g. mcp__zeus-qa__qa_navigate), so extract method name
+    const qaMethodName = entry.entryType.type === 'tool_use'
+      ? (entry.entryType.actionType?.action === 'mcp_tool' ? entry.entryType.actionType.method : entry.entryType.toolName)
+      : '';
+    if (entry.entryType.type === 'tool_use' && /^(qa_|pinchtab_)/i.test(qaMethodName)) {
+      const { status } = entry.entryType;
+      const toolName = qaMethodName;
 
       if (status === 'success' && qaService?.isRunning()) {
         try {
           if (/navigate/i.test(toolName)) {
-            // Parse URL from tool input and broadcast navigate result
+            // Parse URL from tool input (try actionType.input first, then entry.content)
             let navUrl: string | undefined;
             try {
-              const parsed = JSON.parse(entry.content);
-              navUrl = parsed.url;
+              if (entry.entryType.type === 'tool_use' && entry.entryType.actionType?.action === 'mcp_tool') {
+                const input = typeof entry.entryType.actionType.input === 'string'
+                  ? JSON.parse(entry.entryType.actionType.input)
+                  : entry.entryType.actionType.input;
+                navUrl = input?.url;
+              }
+              if (!navUrl) {
+                const parsed = JSON.parse(entry.content);
+                navUrl = parsed.url;
+              }
             } catch { /* ignore parse errors */ }
             broadcastEnvelope({
               channel: 'qa', sessionId: '', auth: '',
@@ -684,10 +697,7 @@ function wireQAAgent(record: QaAgentRecord): void {
             entry: toolResultEntry,
           },
         });
-        // Don't persist base64 image data to SQLite — only broadcast it
-        const dbEntry = { ...toolResultEntry };
-        delete (dbEntry as Record<string, unknown>).imageData;
-        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(dbEntry), now);
+        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(toolResultEntry), now);
         toolEntries.delete(entry.id);
       }
     }
@@ -894,6 +904,11 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
             cdp.on('js_error', (entry) => {
               broadcastEnvelope({
                 channel: 'qa', sessionId: '', payload: { type: 'cdp_error', errors: [entry] }, auth: '',
+              });
+            });
+            cdp.on('navigated', ({ url, title }: { url: string; title: string }) => {
+              broadcastEnvelope({
+                channel: 'qa', sessionId: '', payload: { type: 'navigate_result', url, title }, auth: '',
               });
             });
           }
@@ -1719,6 +1734,11 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
             channel: 'qa', sessionId: '', payload: { type: 'cdp_error', errors: [entry] }, auth: '',
           });
         });
+        cdp.on('navigated', ({ url, title }: { url: string; title: string }) => {
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', payload: { type: 'navigate_result', url, title }, auth: '',
+          });
+        });
       }
     } catch (err) {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
@@ -1807,6 +1827,9 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           });
           cdp.on('js_error', (entry) => {
             broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_error', errors: [entry] } });
+          });
+          cdp.on('navigated', ({ url, title }: { url: string; title: string }) => {
+            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'navigate_result', url, title } });
           });
         }
       }
@@ -2019,10 +2042,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     const { qaAgentId, entry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
     if (!qaAgentId || !entry) return;
 
-    // Don't persist base64 image data to SQLite — only broadcast it
-    const dbEntry = { ...entry };
-    delete dbEntry.imageData;
-    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(dbEntry), entry.timestamp);
+    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: {
