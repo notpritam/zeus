@@ -1818,6 +1818,77 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_entries', qaAgentId: payload.qaAgentId, entries },
     });
+  } else if (payload.type === 'register_external_qa') {
+    // External QA agent registration (from zeus-bridge MCP)
+    const qaAgentId = `qa-ext-${++qaAgentIdCounter}-${Date.now()}`;
+    const parentSessionId = payload.parentSessionId || 'external';
+    const parentSessionType = payload.parentSessionType || 'claude';
+    const task = payload.task || 'External QA test';
+    const targetUrl = payload.targetUrl || 'http://localhost:5173';
+    const agentName = payload.name || undefined;
+
+    insertQaAgentSession({
+      id: qaAgentId,
+      parentSessionId,
+      parentSessionType,
+      name: agentName ?? null,
+      task,
+      targetUrl,
+      status: 'running',
+      startedAt: Date.now(),
+      endedAt: null,
+    });
+
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: {
+        type: 'qa_agent_started',
+        qaAgentId,
+        parentSessionId,
+        parentSessionType,
+        name: agentName,
+        task,
+        targetUrl,
+      },
+    });
+
+    // Send response back with the qaAgentId
+    sendEnvelope(ws, {
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'register_external_qa_response', responseId: payload.responseId, qaAgentId },
+    });
+
+    console.log(`[QA Agent] External agent registered: ${qaAgentId}`);
+
+  } else if (payload.type === 'external_qa_entry') {
+    // External QA agent log entry (from zeus-bridge MCP)
+    const { qaAgentId, entry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
+    if (!qaAgentId || !entry) return;
+
+    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: {
+        type: 'qa_agent_entry',
+        qaAgentId,
+        parentSessionId: 'external',
+        entry,
+      },
+    });
+
+  } else if (payload.type === 'external_qa_done') {
+    // External QA agent completion (from zeus-bridge MCP)
+    const { qaAgentId, status } = payload as { qaAgentId: string; status: string };
+    if (!qaAgentId) return;
+
+    updateQaAgentSessionStatus(qaAgentId, status || 'stopped', Date.now());
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId: 'external' },
+    });
+
+    console.log(`[QA Agent] External agent stopped: ${qaAgentId} (${status})`);
+
   } else {
     sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
   }

@@ -16,6 +16,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           'mcp-qa-server': resolve(__dirname, 'src/main/mcp/qa-server.ts'),
+          'mcp-zeus-bridge': resolve(__dirname, 'src/main/mcp/zeus-bridge.ts'),
         },
         external: (id) => externalPattern.test(id),
       },

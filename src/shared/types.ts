@@ -335,9 +335,12 @@ export interface ClaudeSessionInfo {
   color?: string; // hex color for sidebar card accent
   notificationSound?: boolean;
   enableGitWatcher?: boolean;
+  enableQA?: boolean;
   workingDir?: string;
   startedAt: number;
   qaAgentCount?: number;
+  permissionMode?: PermissionMode;
+  model?: string;
 }
 
 export interface ClaudeApprovalInfo {

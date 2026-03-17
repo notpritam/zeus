@@ -55,6 +55,15 @@ export class ClaudeLogProcessor {
 
   /** Process a raw ClaudeJson message → 0 or more NormalizedEntry items */
   process(msg: ClaudeJson): NormalizedEntry[] {
+    const entries = this._process(msg);
+    const now = new Date().toISOString();
+    for (const entry of entries) {
+      if (!entry.timestamp) entry.timestamp = now;
+    }
+    return entries;
+  }
+
+  private _process(msg: ClaudeJson): NormalizedEntry[] {
     switch (msg.type) {
       case 'assistant':
         // Skip — content is already handled by stream_event

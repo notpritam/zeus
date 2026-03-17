@@ -116,7 +116,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'qa' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'qa' | 'info' | null;
 
   // Actions
   connect: () => () => void;
@@ -265,6 +265,7 @@ function drainQueue(
     id: `user-${Date.now()}`,
     entryType: { type: 'user_message' },
     content: next.content,
+    timestamp: new Date().toISOString(),
   };
 
   if (reason === 'idle') {
@@ -1189,8 +1190,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       name: sessionName,
       notificationSound,
       enableGitWatcher,
+      enableQA,
       workingDir,
       startedAt: Date.now(),
+      permissionMode,
+      model,
     };
 
     // Add optimistic user message entry for the initial prompt
@@ -1198,6 +1202,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       id: `user-${Date.now()}`,
       entryType: { type: 'user_message' },
       content: prompt,
+      timestamp: new Date().toISOString(),
     };
 
     set((state) => ({
@@ -1259,6 +1264,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       entryType: { type: 'user_message' },
       content,
       metadata: Object.keys(meta).length > 0 ? meta : undefined,
+      timestamp: new Date().toISOString(),
     };
     set((state) => ({
       claudeEntries: {

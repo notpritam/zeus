@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles } from 'lucide-react';
+import { Send, Loader2, Brain, ShieldAlert, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -16,6 +16,24 @@ import type {
   SessionActivity,
 } from '../../../shared/types';
 
+// ─── Helpers ───
+
+function formatTimestampIST(timestamp?: string): string | null {
+  if (!timestamp) return null;
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ─── Entry Renderers ───
 
 function CopyAction({ text, align = 'left' }: { text: string; align?: 'left' | 'right' }) {
@@ -28,21 +46,19 @@ function CopyAction({ text, align = 'left' }: { text: string; align?: 'left' | '
   };
 
   return (
-    <div className={`flex ${align === 'right' ? 'justify-end' : 'justify-start'} ${copied ? '' : 'opacity-0 group-hover/msg:opacity-100'} transition-opacity`}>
-      <button
-        onClick={handleCopy}
-        className="text-muted-foreground hover:text-foreground mt-1 flex items-center gap-1 px-1 text-[10px] transition-colors"
-      >
-        {copied ? <ClipboardCheck className="size-3" /> : <Copy className="size-3" />}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
+    <button
+      onClick={handleCopy}
+      className="text-muted-foreground hover:text-foreground mt-1 flex items-center gap-1 px-1 text-[10px] transition-colors"
+    >
+      {copied ? <ClipboardCheck className="size-3" /> : <Copy className="size-3" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 
 const USER_BUBBLE_MAX_H = 150; // px – collapsed height limit
 
-function UserBubble({ content, metadata }: { content: string; metadata?: unknown }) {
+function UserBubble({ content, metadata, timestamp }: { content: string; metadata?: unknown; timestamp?: string }) {
   const meta = metadata as { files?: string[]; images?: Array<{ filename: string; dataUrl: string }> } | undefined;
   const files = meta?.files;
   const images = meta?.images;
@@ -103,12 +119,17 @@ function UserBubble({ content, metadata }: { content: string; metadata?: unknown
           </div>
         )}
       </div>
-      <CopyAction text={content} align="right" />
+      <div className={`flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100`}>
+        {formatTimestampIST(timestamp) && (
+          <span className="text-muted-foreground mt-1 flex items-center px-1 text-[10px]">{formatTimestampIST(timestamp)}</span>
+        )}
+        <CopyAction text={content} align="right" />
+      </div>
     </div>
   );
 }
 
-function AssistantBubble({ content }: { content: string }) {
+function AssistantBubble({ content, timestamp }: { content: string; timestamp?: string }) {
   return (
     <div className="group/msg flex flex-col items-start">
       <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
@@ -116,7 +137,12 @@ function AssistantBubble({ content }: { content: string }) {
           <Markdown content={content} />
         </div>
       </div>
-      <CopyAction text={content} align="left" />
+      <div className={`flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100`}>
+        {formatTimestampIST(timestamp) && (
+          <span className="text-muted-foreground mt-1 flex items-center px-1 text-[10px]">{formatTimestampIST(timestamp)}</span>
+        )}
+        <CopyAction text={content} align="left" />
+      </div>
     </div>
   );
 }
@@ -169,14 +195,14 @@ function toolActionLabel(actionType: ActionType): string {
   }
 }
 
-function ToolCard({ entryType, content, sessionDone }: { entryType: NormalizedEntryType; content: string; sessionDone?: boolean }) {
+function ToolCard({ entryType, content, sessionDone, isLastEntry }: { entryType: NormalizedEntryType; content: string; sessionDone?: boolean; isLastEntry?: boolean }) {
   if (entryType.type !== 'tool_use') return null;
   const { toolName, actionType, status } = entryType;
   const [expanded, setExpanded] = useState(false);
 
   const statusLabel = typeof status === 'string' ? status : status.status;
-  // If the session is done/error, stale "created" entries are actually completed
-  const isRunning = statusLabel === 'created' && !sessionDone;
+  // Only show as running if it's the last entry and session is still active
+  const isRunning = statusLabel === 'created' && !sessionDone && isLastEntry === true;
   const isPending = statusLabel === 'pending_approval';
   const isDenied = statusLabel === 'denied';
   const isFailed = statusLabel === 'failed';
@@ -254,16 +280,123 @@ function TokenUsageBar({ entryType }: { entryType: NormalizedEntryType }) {
   );
 }
 
-function EntryItem({ entry, sessionDone }: { entry: NormalizedEntry; sessionDone?: boolean }) {
+// ─── Compressed View ───
+
+interface EntryGroup {
+  userEntry: NormalizedEntry | null;
+  responses: NormalizedEntry[];
+}
+
+function groupEntriesByUser(entries: NormalizedEntry[]): EntryGroup[] {
+  const groups: EntryGroup[] = [];
+  let current: EntryGroup = { userEntry: null, responses: [] };
+
+  for (const entry of entries) {
+    if (entry.entryType.type === 'user_message') {
+      if (current.userEntry || current.responses.length > 0) {
+        groups.push(current);
+      }
+      current = { userEntry: entry, responses: [] };
+    } else {
+      current.responses.push(entry);
+    }
+  }
+  if (current.userEntry || current.responses.length > 0) {
+    groups.push(current);
+  }
+  return groups;
+}
+
+function summarizeGroup(responses: NormalizedEntry[]): { tools: number; edits: number; reads: number; commands: number; text: string } {
+  let tools = 0, edits = 0, reads = 0, commands = 0;
+  let text = '';
+
+  for (const r of responses) {
+    if (r.entryType.type === 'tool_use') {
+      tools++;
+      const action = r.entryType.actionType.action;
+      if (action === 'file_edit') edits++;
+      else if (action === 'file_read') reads++;
+      else if (action === 'command_run') commands++;
+    } else if (r.entryType.type === 'assistant_message' && !text) {
+      text = r.content.slice(0, 150);
+    }
+  }
+  return { tools, edits, reads, commands, text };
+}
+
+function CompressedGroup({ group, isLast, sessionDone }: { group: EntryGroup; isLast: boolean; sessionDone: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = summarizeGroup(group.responses);
+  const hasResponses = group.responses.length > 0;
+
+  const chips: string[] = [];
+  if (summary.edits > 0) chips.push(`${summary.edits} edit${summary.edits > 1 ? 's' : ''}`);
+  if (summary.reads > 0) chips.push(`${summary.reads} read${summary.reads > 1 ? 's' : ''}`);
+  if (summary.commands > 0) chips.push(`${summary.commands} cmd${summary.commands > 1 ? 's' : ''}`);
+  const otherTools = summary.tools - summary.edits - summary.reads - summary.commands;
+  if (otherTools > 0) chips.push(`${otherTools} other`);
+
+  return (
+    <div className="space-y-3">
+      {group.userEntry && (
+        <UserBubble content={group.userEntry.content} metadata={group.userEntry.metadata} timestamp={group.userEntry.timestamp} />
+      )}
+
+      {hasResponses && !expanded && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="bg-secondary/50 border-border hover:bg-secondary group/cg flex w-full items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition-colors"
+        >
+          <Maximize2 className="text-muted-foreground size-3 shrink-0" />
+          {summary.text ? (
+            <span className="text-foreground min-w-0 flex-1 truncate text-xs">{summary.text}</span>
+          ) : (
+            <span className="text-muted-foreground min-w-0 flex-1 text-xs italic">No text response</span>
+          )}
+          {chips.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1">
+              {chips.map((c) => (
+                <Badge key={c} variant="secondary" className="text-[9px] font-normal">{c}</Badge>
+              ))}
+            </div>
+          )}
+        </button>
+      )}
+
+      {hasResponses && expanded && (
+        <div className="border-border/50 space-y-3 border-l-2 pl-3">
+          <button
+            onClick={() => setExpanded(false)}
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[10px] transition-colors"
+          >
+            <Minimize2 className="size-3" />
+            Collapse
+          </button>
+          {group.responses.map((entry, i) => (
+            <EntryItem
+              key={entry.id}
+              entry={entry}
+              sessionDone={sessionDone}
+              isLastEntry={isLast && i === group.responses.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EntryItem({ entry, sessionDone, isLastEntry }: { entry: NormalizedEntry; sessionDone?: boolean; isLastEntry?: boolean }) {
   switch (entry.entryType.type) {
     case 'user_message':
-      return <UserBubble content={entry.content} metadata={entry.metadata} />;
+      return <UserBubble content={entry.content} metadata={entry.metadata} timestamp={entry.timestamp} />;
     case 'assistant_message':
-      return <AssistantBubble content={entry.content} />;
+      return <AssistantBubble content={entry.content} timestamp={entry.timestamp} />;
     case 'thinking':
       return <ThinkingBlock content={entry.content} />;
     case 'tool_use':
-      return <ToolCard entryType={entry.entryType} content={entry.content} sessionDone={sessionDone} />;
+      return <ToolCard entryType={entry.entryType} content={entry.content} sessionDone={sessionDone} isLastEntry={isLastEntry} />;
     case 'token_usage':
       return <TokenUsageBar entryType={entry.entryType} />;
     case 'system_message':
@@ -423,6 +556,7 @@ function ClaudeView({
   onRemoveQueued,
 }: ClaudeViewProps) {
   const [input, setInput] = useState('');
+  const [compressed, setCompressed] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ path: string; type: 'file' | 'directory' }>>([]);
   const [attachedImages, setAttachedImages] = useState<ImageAttachmentLocal[]>([]);
   const [showMentionPopover, setShowMentionPopover] = useState(false);
@@ -554,9 +688,18 @@ function ClaudeView({
       {/* Header bar */}
       <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-primary text-sm font-bold">Claude</span>
+          <span className="text-primary text-sm font-bold truncate max-w-[200px]">{session.name || 'Claude'}</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className={`size-6 ${compressed ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={() => setCompressed(!compressed)}
+            title={compressed ? 'Expand all' : 'Compress view'}
+          >
+            {compressed ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
+          </Button>
           {(session.status === 'error' || session.status === 'done') && (
             <Button
               variant="ghost"
@@ -573,9 +716,20 @@ function ClaudeView({
 
       {/* Entry list */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
-        {entries.map((entry) => (
-          <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} />
-        ))}
+        {compressed ? (
+          groupEntriesByUser(entries).map((group, i, arr) => (
+            <CompressedGroup
+              key={group.userEntry?.id ?? `group-${i}`}
+              group={group}
+              isLast={i === arr.length - 1}
+              sessionDone={session.status !== 'running'}
+            />
+          ))
+        ) : (
+          entries.map((entry, i) => (
+            <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
+          ))
+        )}
 
         {/* Activity indicator */}
         {session.status === 'running' && entries.length > 0 && (
