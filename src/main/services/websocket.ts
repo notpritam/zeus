@@ -23,7 +23,8 @@ import type {
 import { createSession, writeToSession, resizeSession, destroySession, getSessionPids } from './terminal';
 import { registerSession, markExited, markKilled, getSession, getAllSessions } from './sessions';
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
-import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel } from './tunnel';
+import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel, stopRemoteTunnel } from './tunnel';
+import { zeusEnv } from './env';
 import { validateToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
@@ -395,13 +396,57 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
       },
       auth: '',
     });
+  } else if (payload.type === 'stop_tunnel') {
+    // Used by dev instance to remotely stop prod's tunnel + ngrok session
+    (async () => {
+      try {
+        // Always stop — kills listener + ngrok agent session to free the slot
+        await stopTunnel();
+        console.log('[Zeus] Tunnel + ngrok session killed via remote request');
+        // Broadcast to all local clients so prod UI updates
+        broadcastEnvelope({
+          channel: 'status',
+          sessionId: '',
+          payload: {
+            type: 'status_update',
+            powerBlock: isPowerBlocked(),
+            websocket: true,
+            tunnel: getTunnelUrl(),
+          },
+          auth: '',
+        });
+      } catch (err) {
+        console.error('[Zeus] Remote tunnel stop error:', (err as Error).message);
+      }
+    })();
   } else if (payload.type === 'toggle_tunnel') {
     (async () => {
       try {
         if (isTunnelActive()) {
           await stopTunnel();
         } else {
-          await startTunnel(serverPort);
+          // In dev mode, stop prod's tunnel first to reclaim the ngrok domain
+          if (zeusEnv.isDev) {
+            const prodPort = 8888;
+            console.log('[Zeus DEV] Checking for prod tunnel on port', prodPort);
+            await stopRemoteTunnel(prodPort);
+            // Wait for ngrok's backend to fully release the session slot
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+          // Retry up to 3 times — ngrok backend can be slow to free the slot
+          let tunnelStarted = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            const url = await startTunnel(serverPort);
+            if (url) { tunnelStarted = true; break; }
+            if (attempt < 3) {
+              console.log(`[Zeus DEV] Tunnel start attempt ${attempt} failed, retrying in 3s...`);
+              await new Promise((r) => setTimeout(r, 3000));
+            }
+          }
+          if (!tunnelStarted) {
+            sendError(ws, '', 'Failed to start tunnel after 3 attempts — prod ngrok session may still be active');
+            return;
+          }
         }
         broadcastEnvelope({
           channel: 'status',

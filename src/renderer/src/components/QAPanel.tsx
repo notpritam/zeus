@@ -160,9 +160,14 @@ function QAPanel() {
 
   // Auto-scroll to bottom on new entries (unless user scrolled up)
   useEffect(() => {
-    if (!agentUserScrolledUp.current && agentLogRef.current) {
-      agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
+    const el = agentLogRef.current;
+    if (!el) return;
+    if (!agentUserScrolledUp.current) {
+      el.scrollTop = el.scrollHeight;
     }
+    // Re-check if scroll-to-bottom button should show (content may have grown)
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setShowAgentScrollToBottom(!atBottom && el.scrollHeight > el.clientHeight);
   }, [selectedAgent?.entries.length]);
 
   const scrollAgentLogToBottom = useCallback(() => {
@@ -805,8 +810,11 @@ function QAPanel() {
                         </div>
                         {showAgentScrollToBottom && (
                           <button
-                            onClick={scrollAgentLogToBottom}
-                            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
+                            onClick={() => {
+                              agentUserScrolledUp.current = false;
+                              scrollAgentLogToBottom();
+                            }}
+                            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-20 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
                           >
                             <ArrowDown className="size-4" />
                           </button>
