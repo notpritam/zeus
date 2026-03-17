@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -103,6 +103,12 @@ function runMigrations(database: Database.Database): void {
 
   if (currentVersion < 6) {
     database.exec(`ALTER TABLE claude_sessions ADD COLUMN icon TEXT`);
+  }
+
+  if (currentVersion < 7) {
+    database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN claude_session_id TEXT`);
+    database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN last_message_id TEXT`);
+    database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN working_dir TEXT`);
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -605,6 +611,9 @@ export interface QaAgentSessionRow {
   status: string;
   startedAt: number;
   endedAt: number | null;
+  claudeSessionId?: string | null;
+  lastMessageId?: string | null;
+  workingDir?: string | null;
 }
 
 interface QaAgentSessionDbRow {
@@ -617,13 +626,16 @@ interface QaAgentSessionDbRow {
   status: string;
   started_at: number;
   ended_at: number | null;
+  claude_session_id: string | null;
+  last_message_id: string | null;
+  working_dir: string | null;
 }
 
 export function insertQaAgentSession(info: QaAgentSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, name, task, target_url, status, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, name, task, target_url, status, started_at, ended_at, claude_session_id, last_message_id, working_dir)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.parentSessionId,
@@ -634,6 +646,9 @@ export function insertQaAgentSession(info: QaAgentSessionRow): void {
     info.status,
     info.startedAt,
     info.endedAt,
+    info.claudeSessionId ?? null,
+    info.lastMessageId ?? null,
+    info.workingDir ?? null,
   );
 }
 
@@ -654,6 +669,39 @@ export function updateQaAgentSessionStatus(
   }
 }
 
+export function updateQaAgentResumeData(
+  id: string,
+  claudeSessionId: string | null,
+  lastMessageId: string | null,
+): void {
+  if (!db) return;
+  db.prepare(`UPDATE qa_agent_sessions SET claude_session_id = ?, last_message_id = ? WHERE id = ?`).run(
+    claudeSessionId,
+    lastMessageId,
+    id,
+  );
+}
+
+export function getQaAgentSession(id: string): QaAgentSessionRow | null {
+  if (!db) return null;
+  const r = db.prepare(`SELECT * FROM qa_agent_sessions WHERE id = ?`).get(id) as QaAgentSessionDbRow | undefined;
+  if (!r) return null;
+  return {
+    id: r.id,
+    parentSessionId: r.parent_session_id,
+    parentSessionType: r.parent_session_type as 'terminal' | 'claude',
+    name: r.name,
+    task: r.task,
+    targetUrl: r.target_url,
+    status: r.status,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    claudeSessionId: r.claude_session_id,
+    lastMessageId: r.last_message_id,
+    workingDir: r.working_dir,
+  };
+}
+
 export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSessionRow[] {
   if (!db) return [];
   const rows = db
@@ -669,6 +717,9 @@ export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSess
     status: r.status,
     startedAt: r.started_at,
     endedAt: r.ended_at,
+    claudeSessionId: r.claude_session_id,
+    lastMessageId: r.last_message_id,
+    workingDir: r.working_dir,
   }));
 }
 
@@ -687,6 +738,9 @@ export function getAllQaAgentSessions(): QaAgentSessionRow[] {
     status: r.status,
     startedAt: r.started_at,
     endedAt: r.ended_at,
+    claudeSessionId: r.claude_session_id,
+    lastMessageId: r.last_message_id,
+    workingDir: r.working_dir,
   }));
 }
 
@@ -694,6 +748,11 @@ export function deleteQaAgentSession(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM qa_agent_entries WHERE qa_agent_id = ?`).run(id);
   db.prepare(`DELETE FROM qa_agent_sessions WHERE id = ?`).run(id);
+}
+
+export function clearQaAgentEntries(qaAgentId: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM qa_agent_entries WHERE qa_agent_id = ?`).run(qaAgentId);
 }
 
 export function deleteQaAgentsByParent(parentSessionId: string): void {

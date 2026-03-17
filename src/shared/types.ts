@@ -500,6 +500,7 @@ export interface QaSnapshotNode {
 
 // ─── QA Agent ───
 
+/** @deprecated — QA agents now use NormalizedEntry directly. Kept for migration reference. */
 export type QaAgentLogEntry =
   | { kind: 'tool_call'; tool: string; args: string; timestamp: number }
   | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number; imageData?: string }
@@ -558,11 +559,12 @@ export type QaPayload =
   | { type: 'list_qa_agents'; parentSessionId: string }
   | { type: 'get_qa_agent_entries'; qaAgentId: string }
   | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
+  | { type: 'clear_qa_agent_entries'; qaAgentId: string }
   // Server → Client (QA Agent)
   | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
   | { type: 'qa_agent_deleted'; qaAgentId: string; parentSessionId: string }
-  | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: QaAgentLogEntry }
+  | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: NormalizedEntry }
   | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
-  | { type: 'qa_agent_entries'; qaAgentId: string; entries: QaAgentLogEntry[] }
+  | { type: 'qa_agent_entries'; qaAgentId: string; entries: NormalizedEntry[] }
   | { type: 'qa_error'; message: string };

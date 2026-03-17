@@ -24,7 +24,6 @@ import type {
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
-  QaAgentLogEntry,
   QaAgentSessionInfo,
   SystemMetrics,
   PerfPayload,
@@ -36,7 +35,7 @@ type ViewMode = 'terminal' | 'claude' | 'diff';
 
 interface QaAgentClient {
   info: QaAgentSessionInfo;
-  entries: QaAgentLogEntry[];
+  entries: NormalizedEntry[];
 }
 
 interface DiffTab {
@@ -1133,9 +1132,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             updated[parentId] = updated[parentId].map((a) => {
               if (a.info.qaAgentId !== qaAgentId) return a;
               // Merge: DB entries are the base, append any streamed entries
-              // that arrived after the last DB entry (by timestamp)
-              const lastDbTs = dbEntries.length > 0 ? dbEntries[dbEntries.length - 1].timestamp : 0;
-              const newer = a.entries.filter((e) => e.timestamp > lastDbTs);
+              // that arrived after the last DB entry (by ID dedup)
+              const dbIds = new Set(dbEntries.map((e) => e.id));
+              const newer = a.entries.filter((e) => !dbIds.has(e.id));
               return { ...a, entries: [...dbEntries, ...newer] };
             });
           }
@@ -2037,8 +2036,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   clearQAAgentEntries: (qaAgentId: string) => {
+    // Clear locally
     set((state) => {
-      // Find the agent across all parent sessions
       const updated = { ...state.qaAgents };
       for (const [psid, agents] of Object.entries(updated)) {
         const idx = agents.findIndex((a) => a.info.qaAgentId === qaAgentId);
@@ -2050,6 +2049,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }
       }
       return { qaAgents: updated };
+    });
+    // Clear from server DB so entries don't reappear on refresh
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'clear_qa_agent_entries', qaAgentId },
     });
   },
 

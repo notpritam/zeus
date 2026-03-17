@@ -59,6 +59,9 @@ import {
   countQaAgentsByParent,
   insertQaAgentEntry,
   getQaAgentEntries,
+  clearQaAgentEntries,
+  updateQaAgentResumeData,
+  getQaAgentSession,
   markStaleQaAgentsErrored,
   finalizeCreatedToolEntries,
   copyClaudeEntriesForResume,
@@ -608,191 +611,79 @@ Never use AskUserQuestion — make your best judgment and proceed.`;
 function wireQAAgent(record: QaAgentRecord): void {
   const { qaAgentId, parentSessionId } = record;
   const session = record.session!; // guaranteed non-null when wiring
-  const toolEntries = new Map<string, string>();
-  // Track streaming text blocks: accumulate content, emit only when block is finalized
+
+  // Accumulate streaming text/thinking — only emit once finalized
   let pendingTextId: string | null = null;
-  let pendingTextContent = '';
-  // Track streaming thinking blocks: same accumulate-and-flush pattern
+  let pendingTextEntry: NormalizedEntry | null = null;
   let pendingThinkingId: string | null = null;
-  let pendingThinkingContent = '';
+  let pendingThinkingEntry: NormalizedEntry | null = null;
+
+  const emit = (entry: NormalizedEntry): void => {
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry },
+    });
+    insertQaAgentEntry(qaAgentId, entry.entryType.type, JSON.stringify(entry), Date.now());
+  };
 
   const flushPendingText = (): void => {
-    if (pendingTextId && pendingTextContent.trim()) {
-      const trimmed = pendingTextContent.trim();
-      const entry = { kind: 'text' as const, content: trimmed, timestamp: Date.now() };
-      broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: {
-          type: 'qa_agent_entry',
-          qaAgentId,
-          parentSessionId,
-          entry,
-        },
-      });
-      insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
-      // Collect for final summary returned to zeus_qa_run caller
-      record.collectedTextEntries.push(trimmed);
+    if (pendingTextEntry && pendingTextEntry.content.trim()) {
+      emit(pendingTextEntry);
+      record.collectedTextEntries.push(pendingTextEntry.content.trim());
     }
     pendingTextId = null;
-    pendingTextContent = '';
+    pendingTextEntry = null;
   };
 
   const flushPendingThinking = (): void => {
-    if (pendingThinkingId && pendingThinkingContent.trim()) {
-      const entry = { kind: 'thinking' as const, content: pendingThinkingContent.trim().slice(0, 300), timestamp: Date.now() };
-      broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: {
-          type: 'qa_agent_entry',
-          qaAgentId,
-          parentSessionId,
-          entry,
-        },
-      });
-      insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
+    if (pendingThinkingEntry && pendingThinkingEntry.content.trim()) {
+      emit(pendingThinkingEntry);
     }
     pendingThinkingId = null;
-    pendingThinkingContent = '';
+    pendingThinkingEntry = null;
   };
 
   session.on('entry', async (entry: NormalizedEntry) => {
-    const now = Date.now();
-
+    // Accumulate assistant_message streaming — flush only when a new block starts or a non-text entry arrives
     if (entry.entryType.type === 'assistant_message') {
       if (entry.id !== pendingTextId) {
-        // New text block — flush previous one
         flushPendingText();
         pendingTextId = entry.id;
       }
-      // Always update to latest accumulated content
-      pendingTextContent = entry.content;
+      pendingTextEntry = entry; // keep latest accumulated version
       return;
     }
-
-    // Any non-text entry means the text block is done — flush it
     flushPendingText();
 
-    // Accumulate thinking entries — flush only when block transitions
+    // Accumulate thinking streaming
     if (entry.entryType.type === 'thinking') {
       if (entry.id !== pendingThinkingId) {
         flushPendingThinking();
         pendingThinkingId = entry.id;
       }
-      pendingThinkingContent = entry.content;
+      pendingThinkingEntry = entry;
       return;
     }
-
-    // Any non-thinking entry means the thinking block is done — flush it
     flushPendingThinking();
 
+    // For screenshot tool results, attach captured image as metadata
     if (entry.entryType.type === 'tool_use') {
       const { toolName, status } = entry.entryType;
-
-      if (status === 'created') {
-        toolEntries.set(entry.id, toolName);
-        let args = '';
+      const isScreenshot = /screenshot/i.test(toolName);
+      if (isScreenshot && status === 'success' && qaService?.isRunning()) {
         try {
-          const parsed = JSON.parse(entry.content);
-          if (parsed.url) args = parsed.url;
-          else if (parsed.ref) args = `ref=${parsed.ref}`;
-          else if (parsed.command) args = parsed.command.slice(0, 80);
-          else if (parsed.file_path) args = parsed.file_path;
-          else args = entry.content.slice(0, 100);
-        } catch {
-          args = entry.content.slice(0, 100);
-        }
-
-        const toolCallEntry = { kind: 'tool_call' as const, tool: toolName, args, timestamp: now };
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: {
-            type: 'qa_agent_entry',
-            qaAgentId,
-            parentSessionId,
-            entry: toolCallEntry,
-          },
-        });
-        insertQaAgentEntry(qaAgentId, toolCallEntry.kind, JSON.stringify(toolCallEntry), now);
-      } else if (status === 'success' || status === 'failed' || status === 'timed_out') {
-        const summary = entry.content.slice(0, 200);
-        const isScreenshotTool = /screenshot/i.test(toolName);
-        let imageData: string | undefined;
-
-        // For screenshot tools, capture the image so it can be rendered in the UI
-        if (isScreenshotTool && status === 'success' && qaService?.isRunning()) {
-          try {
-            imageData = await qaService.screenshot();
-          } catch {
-            // Non-critical — log entry still works without the image
+          const imageData = await qaService.screenshot();
+          if (imageData) {
+            const meta = (entry.metadata ?? {}) as Record<string, unknown>;
+            meta.images = [imageData];
+            entry = { ...entry, metadata: meta };
           }
-        }
-
-        const toolResultEntry = {
-          kind: 'tool_result' as const,
-          tool: toolName,
-          summary,
-          success: status === 'success',
-          timestamp: now,
-          ...(imageData ? { imageData } : {}),
-        };
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: {
-            type: 'qa_agent_entry',
-            qaAgentId,
-            parentSessionId,
-            entry: toolResultEntry,
-          },
-        });
-        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(toolResultEntry), now);
-        toolEntries.delete(entry.id);
+        } catch { /* non-critical */ }
       }
     }
 
-    if (entry.entryType.type === 'error_message') {
-      const errorEntry = { kind: 'error' as const, message: entry.content, timestamp: now };
-      broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: {
-          type: 'qa_agent_entry',
-          qaAgentId,
-          parentSessionId,
-          entry: errorEntry,
-        },
-      });
-      insertQaAgentEntry(qaAgentId, errorEntry.kind, JSON.stringify(errorEntry), now);
-    }
-
-    if (entry.entryType.type === 'system_message' && entry.content.trim()) {
-      broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: {
-          type: 'qa_agent_entry',
-          qaAgentId,
-          parentSessionId,
-          entry: { kind: 'status', message: entry.content.slice(0, 200), timestamp: now },
-        },
-      });
-    }
-
-    if (entry.entryType.type === 'token_usage') {
-      const { totalTokens } = entry.entryType;
-      const statusEntry = {
-        kind: 'status' as const,
-        message: `Turn complete — ${totalTokens.toLocaleString()} tokens used`,
-        timestamp: now,
-      };
-      broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: {
-          type: 'qa_agent_entry',
-          qaAgentId,
-          parentSessionId,
-          entry: statusEntry,
-        },
-      });
-      insertQaAgentEntry(qaAgentId, statusEntry.kind, JSON.stringify(statusEntry), now);
-    }
+    // Pass through all other entry types as-is (tool_use, error_message, system_message, token_usage, etc.)
+    emit(entry);
   });
 
   session.on('approval_needed', (approval) => {
@@ -806,10 +697,11 @@ function wireQAAgent(record: QaAgentRecord): void {
     flushPendingThinking();
     updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
 
-    // Save Claude session data for --resume support
+    // Save Claude session data for --resume support (in-memory + DB)
     record.claudeSessionId = session.sessionId ?? undefined;
     record.lastMessageId = session.lastMessageId ?? undefined;
     record.session = null; // process is dead but record stays for resume
+    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
 
     // Send deferred response to zeus_qa_run caller with the final summary
     if (record.pendingResponseId && record.pendingResponseWs) {
@@ -847,10 +739,11 @@ function wireQAAgent(record: QaAgentRecord): void {
     insertQaAgentEntry(qaAgentId, crashEntry.kind, JSON.stringify(crashEntry), crashEntry.timestamp);
     updateQaAgentSessionStatus(qaAgentId, 'error', Date.now());
 
-    // Save Claude session data for --resume support
+    // Save Claude session data for --resume support (in-memory + DB)
     record.claudeSessionId = session.sessionId ?? undefined;
     record.lastMessageId = session.lastMessageId ?? undefined;
     record.session = null;
+    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
 
     // Send deferred error response to zeus_qa_run caller
     if (record.pendingResponseId && record.pendingResponseWs) {
@@ -1988,11 +1881,10 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         status: 'running',
         startedAt: record.startedAt,
         endedAt: null,
+        workingDir: payload.workingDir,
       });
 
-      const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
-      await session.start(prompt);
-
+      // Broadcast qa_agent_started FIRST so the store creates the agent entry
       console.log('[QA Agent] Agent started successfully:', qaAgentId);
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
@@ -2006,6 +1898,21 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           targetUrl,
         },
       });
+
+      // Then broadcast initial user message so it shows in the panel
+      const initialMsgEntry: import('../../shared/types').QaAgentLogEntry = {
+        kind: 'user_message',
+        content: payload.task,
+        timestamp: Date.now(),
+      };
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
+      });
+      insertQaAgentEntry(qaAgentId, initialMsgEntry.kind, JSON.stringify(initialMsgEntry), initialMsgEntry.timestamp);
+
+      const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
+      await session.start(prompt);
 
       // Response is deferred — sent when the QA agent finishes (see wireQAAgent 'done' handler)
     } catch (err) {
@@ -2022,10 +1929,11 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       try {
         await record.session.interrupt();
         // Broadcast a status entry so the user sees the interrupt happened
-        const interruptEntry: import('../../shared/types').QaAgentLogEntry = {
-          kind: 'status',
-          message: 'Agent interrupted — you can send a new message.',
-          timestamp: Date.now(),
+        const interruptEntry: NormalizedEntry = {
+          id: `qa-interrupt-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          entryType: { type: 'system_message' },
+          content: 'Agent interrupted — you can send a new message.',
         };
         broadcastEnvelope({
           channel: 'qa', sessionId: '', auth: '',
@@ -2036,7 +1944,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
             entry: interruptEntry,
           },
         });
-        insertQaAgentEntry(payload.qaAgentId, interruptEntry.kind, JSON.stringify(interruptEntry), interruptEntry.timestamp);
+        insertQaAgentEntry(payload.qaAgentId, 'system_message', JSON.stringify(interruptEntry), Date.now());
       } catch {
         // If interrupt fails (process already dead), fall back to broadcasting stopped
         broadcastEnvelope({
@@ -2106,7 +2014,30 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       payload: { type: 'qa_agent_list', parentSessionId: payload.parentSessionId, agents },
     });
   } else if (payload.type === 'qa_agent_message') {
-    const record = qaAgentSessions.get(payload.qaAgentId);
+    let record = qaAgentSessions.get(payload.qaAgentId);
+
+    // If not in memory, try to restore from DB (e.g. after app restart)
+    if (!record) {
+      const dbRow = getQaAgentSession(payload.qaAgentId);
+      if (dbRow) {
+        record = {
+          qaAgentId: dbRow.id,
+          parentSessionId: dbRow.parentSessionId,
+          parentSessionType: dbRow.parentSessionType,
+          name: dbRow.name ?? undefined,
+          task: dbRow.task,
+          targetUrl: dbRow.targetUrl ?? undefined,
+          workingDir: dbRow.workingDir || process.cwd(),
+          session: null,
+          claudeSessionId: dbRow.claudeSessionId ?? undefined,
+          lastMessageId: dbRow.lastMessageId ?? undefined,
+          startedAt: dbRow.startedAt,
+          collectedTextEntries: [],
+        };
+        qaAgentSessions.set(dbRow.id, record);
+      }
+    }
+
     if (!record) {
       sendEnvelope(ws, {
         channel: 'qa', sessionId: '', auth: '',
@@ -2115,7 +2046,12 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       return;
     }
 
-    const userMsgEntry = { kind: 'user_message' as const, content: payload.text, timestamp: Date.now() };
+    const userMsgEntry: NormalizedEntry = {
+      id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      entryType: { type: 'user_message' },
+      content: payload.text,
+    };
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: {
@@ -2125,24 +2061,28 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         entry: userMsgEntry,
       },
     });
-    insertQaAgentEntry(payload.qaAgentId, userMsgEntry.kind, JSON.stringify(userMsgEntry), userMsgEntry.timestamp);
+    insertQaAgentEntry(payload.qaAgentId, 'user_message', JSON.stringify(userMsgEntry), Date.now());
 
     try {
       if (record.session && record.session.isRunning) {
         // Session is alive — send message directly
         await record.session.sendMessage(payload.text);
-      } else if (record.claudeSessionId) {
-        // Session is dead — resume with --resume
-        const resumedSession = new ClaudeSession({
+      } else {
+        // Session is dead — start a new session (with --resume if we have Claude session ID)
+        const targetUrl = record.targetUrl || 'http://localhost:5173';
+        const sessionOpts: import('./claude-session').SessionOptions = {
           workingDir: record.workingDir,
           permissionMode: 'bypassPermissions',
           enableQA: true,
-          qaTargetUrl: record.targetUrl,
+          qaTargetUrl: targetUrl,
           zeusSessionId: record.parentSessionId,
-          resumeSessionId: record.claudeSessionId,
-          resumeAtMessageId: record.lastMessageId ?? undefined,
-        });
-        record.session = resumedSession;
+        };
+        if (record.claudeSessionId) {
+          sessionOpts.resumeSessionId = record.claudeSessionId;
+          sessionOpts.resumeAtMessageId = record.lastMessageId ?? undefined;
+        }
+        const newSession = new ClaudeSession(sessionOpts);
+        record.session = newSession;
         record.collectedTextEntries = [];
         wireQAAgent(record);
 
@@ -2161,12 +2101,10 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           },
         });
 
-        await resumedSession.start(payload.text);
-      } else {
-        sendEnvelope(ws, {
-          channel: 'qa', sessionId: '', auth: '',
-          payload: { type: 'qa_error', message: 'Agent session ended and cannot be resumed' },
-        });
+        const prompt = record.claudeSessionId
+          ? payload.text  // resuming — just send the follow-up text
+          : `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.text}`;
+        await newSession.start(prompt);
       }
     } catch (err) {
       sendEnvelope(ws, {
@@ -2174,10 +2112,17 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'qa_error', message: `Failed to send message: ${(err as Error).message}` },
       });
     }
+  } else if (payload.type === 'clear_qa_agent_entries') {
+    clearQaAgentEntries(payload.qaAgentId);
+    // Also clear in-memory collected text
+    const record = qaAgentSessions.get(payload.qaAgentId);
+    if (record) {
+      record.collectedTextEntries = [];
+    }
   } else if (payload.type === 'get_qa_agent_entries') {
     // Load persisted entries from DB for a specific agent
     const dbEntries = getQaAgentEntries(payload.qaAgentId);
-    const entries = dbEntries.map((row) => JSON.parse(row.data) as import('../../shared/types').QaAgentLogEntry);
+    const entries = dbEntries.map((row) => JSON.parse(row.data) as NormalizedEntry);
     sendEnvelope(ws, {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_entries', qaAgentId: payload.qaAgentId, entries },
