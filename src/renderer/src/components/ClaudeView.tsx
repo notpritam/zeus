@@ -2,12 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
+import { ToolCard } from '@/components/ToolCard';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type {
   NormalizedEntry,
@@ -17,25 +16,6 @@ import type {
   ClaudeSessionInfo,
   SessionActivity,
 } from '../../../shared/types';
-
-// ─── Code theme (matches Markdown.tsx) ───
-
-const codeTheme = {
-  ...oneDark,
-  '::selection': {},
-  'pre[class*="language-"]': {
-    ...oneDark['pre[class*="language-"]'],
-    background: '#1a1a1a',
-    margin: 0,
-    padding: '0.5rem 0.75rem',
-    fontSize: '0.75rem',
-  },
-  'code[class*="language-"]': {
-    ...oneDark['code[class*="language-"]'],
-    background: '#1a1a1a',
-    fontSize: '0.75rem',
-  },
-};
 
 // ─── Helpers ───
 

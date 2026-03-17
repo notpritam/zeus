@@ -217,21 +217,10 @@ export class ClaudeSession extends EventEmitter {
       }
     }
 
-    // MCP server integration — always include zeus-bridge so the session can
-    // talk back to Zeus (QA panel, session lifecycle, PinchTab) regardless of
-    // which project directory it runs in.
+    // MCP server integration — mutually exclusive:
+    //   Regular sessions get zeus-bridge (orchestration, QA dispatch)
+    //   QA agent sessions get zeus-qa (browser automation tools)
     const mcpServers: Record<string, { command: string; args: string[] }> = {};
-
-    const bridgePath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-bridge.mjs');
-    mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath] };
-
-    // System prompt for zeus-bridge tools (available to all sessions)
-    const bridgePrompt = [
-      'You have access to Zeus orchestration tools via the zeus-bridge MCP server.',
-      'Use zeus_qa_run to spawn a QA testing agent — it blocks until the agent finishes and returns a summary.',
-      'After making UI changes, call zeus_qa_run with a task describing what to test.',
-      'The QA agent has full browser automation. Review its summary before claiming work is complete.',
-    ].join(' ');
 
     if (this.options.enableQA) {
       const qaServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
@@ -244,8 +233,17 @@ export class ClaudeSession extends EventEmitter {
         'Check the summary for errors. If issues found, fix them and re-test.',
         'Do not claim work is complete until qa_run_test_flow returns a clean report.',
       ].join(' ');
-      args.push('--append-system-prompt', `${bridgePrompt}\n\n${qaPrompt}`);
+      args.push('--append-system-prompt', qaPrompt);
     } else {
+      const bridgePath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-bridge.mjs');
+      mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath] };
+
+      const bridgePrompt = [
+        'You have access to Zeus orchestration tools via the zeus-bridge MCP server.',
+        'Use zeus_qa_run to spawn a QA testing agent — it blocks until the agent finishes and returns a summary.',
+        'After making UI changes, call zeus_qa_run with a task describing what to test.',
+        'The QA agent has full browser automation. Review its summary before claiming work is complete.',
+      ].join(' ');
       args.push('--append-system-prompt', bridgePrompt);
     }
 
