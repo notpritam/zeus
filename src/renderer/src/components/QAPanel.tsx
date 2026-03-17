@@ -11,6 +11,8 @@ import {
   MousePointer,
   Loader2,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Monitor,
   RefreshCw,
   AlertCircle,
@@ -22,66 +24,126 @@ import {
   Bot,
   Send,
   Plus,
+  Brain,
 } from 'lucide-react';
+import Markdown from '@/components/Markdown';
 import { useZeusStore } from '@/stores/useZeusStore';
 import type { QaAgentLogEntry } from '../../../shared/types';
 
 type QAViewTab = 'snapshot' | 'screenshot' | 'text' | 'console' | 'network' | 'errors';
 
-function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
-  if (entry.kind === 'tool_call') {
-    return (
-      <div className="flex items-start gap-1.5 rounded bg-blue-500/10 px-1.5 py-0.5 font-mono text-[10px] text-blue-400">
-        <span className="shrink-0 text-[9px] font-bold uppercase">{entry.tool}</span>
-        <span className="min-w-0 flex-1 truncate text-blue-400/70">{entry.args}</span>
+function AgentToolCall({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_call' } }) {
+  return (
+    <div className="bg-secondary border-border border-primary/30 rounded-lg border px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className="bg-primary inline-block size-1.5 shrink-0 animate-pulse rounded-full" />
+        <span className="text-primary text-[10px] font-semibold">{entry.tool}</span>
+        <span className="text-muted-foreground min-w-0 truncate font-mono text-xs">{entry.args}</span>
       </div>
-    );
-  }
-  if (entry.kind === 'tool_result') {
-    return (
-      <div className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-        entry.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-      }`}>
-        <span className="mr-1 text-[9px] font-bold">{entry.success ? 'OK' : 'FAIL'}</span>
-        <span className="text-[9px]">{entry.tool}</span>
+    </div>
+  );
+}
+
+function AgentToolResult({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_result' } }) {
+  const [expanded, setExpanded] = useState(false);
+  const dotColor = entry.success ? 'bg-green-400' : 'bg-red-400';
+  const borderColor = entry.success ? '' : 'border-red-400/30';
+
+  return (
+    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${borderColor}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
+          <span className={`text-[10px] font-semibold ${entry.success ? 'text-primary' : 'text-red-400'}`}>
+            {entry.tool}
+          </span>
+          <span className="text-muted-foreground text-[10px]">{entry.success ? 'success' : 'failed'}</span>
+        </div>
         {entry.summary && (
-          <span className="text-foreground/50 ml-1 text-[9px]">{entry.summary.slice(0, 120)}</span>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
+          >
+            {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          </button>
         )}
       </div>
-    );
+      {expanded && entry.summary && (
+        <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
+          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{entry.summary}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentThinking({ entry }: { entry: QaAgentLogEntry & { kind: 'thinking' } }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = entry.content.slice(0, 120);
+
+  return (
+    <button
+      className="bg-secondary border-border w-full rounded-lg border px-3 py-2 text-left"
+      onClick={() => setExpanded(!expanded)}
+    >
+      <div className="text-muted-foreground flex items-center gap-2 text-xs">
+        <Brain className="text-primary size-3" />
+        <span className="font-medium">Thinking</span>
+        <span className="text-muted-foreground/50 text-[10px]">{expanded ? 'collapse' : 'expand'}</span>
+      </div>
+      {expanded ? (
+        <div className="text-muted-foreground mt-1 select-text text-xs">
+          <Markdown content={entry.content} />
+        </div>
+      ) : (
+        <p className="text-muted-foreground mt-1 select-text text-xs whitespace-pre-wrap">
+          {preview + (entry.content.length > 120 ? '...' : '')}
+        </p>
+      )}
+    </button>
+  );
+}
+
+function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
+  if (entry.kind === 'tool_call') {
+    return <AgentToolCall entry={entry} />;
+  }
+  if (entry.kind === 'tool_result') {
+    return <AgentToolResult entry={entry} />;
   }
   if (entry.kind === 'text') {
     return (
-      <div className="bg-secondary text-foreground rounded px-1.5 py-1 text-[10px] leading-relaxed">
-        {entry.content}
+      <div className="flex flex-col items-start">
+        <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
+          <div className="select-text">
+            <Markdown content={entry.content} />
+          </div>
+        </div>
       </div>
     );
   }
   if (entry.kind === 'error') {
     return (
-      <div className="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] text-red-400">
+      <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-lg border px-3 py-2 text-sm">
         {entry.message}
       </div>
     );
   }
   if (entry.kind === 'user_message') {
     return (
-      <div className="bg-primary/10 text-foreground ml-6 rounded px-1.5 py-0.5 text-[10px]">
-        {entry.content}
+      <div className="flex flex-col items-end">
+        <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
+          <p className="text-foreground select-text text-sm whitespace-pre-wrap">{entry.content}</p>
+        </div>
       </div>
     );
   }
   if (entry.kind === 'thinking') {
-    return (
-      <div className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] italic text-purple-400">
-        <span className="mr-1 text-[9px] font-bold uppercase">Think</span>
-        {entry.content}
-      </div>
-    );
+    return <AgentThinking entry={entry} />;
   }
   if (entry.kind === 'status') {
     return (
-      <div className="text-muted-foreground rounded px-1.5 py-0.5 text-center text-[9px] italic">
+      <div className="text-muted-foreground text-center text-xs italic">
         {entry.message}
       </div>
     );
@@ -802,9 +864,9 @@ function QAPanel() {
                           </Button>
                         )}
                       </div>
-                      <div ref={agentLogRef} className="min-h-0 flex-1 overflow-y-auto p-2 space-y-1">
+                      <div ref={agentLogRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                         {selectedAgent.entries.length === 0 ? (
-                          <p className="text-muted-foreground py-4 text-center text-[10px]">
+                          <p className="text-muted-foreground py-4 text-center text-xs">
                             {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
                           </p>
                         ) : (
