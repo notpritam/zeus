@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Send, Loader2, Brain, Check, X, StopCircle, File, Folder, Copy, ClipboardCheck, RotateCcw, ChevronDown, ChevronUp, ImagePlus, Pencil, Trash2, Terminal, Sparkles, Minimize2, Maximize2, Glasses, Code2, Search, Globe, ListTree, FileCode2 } from 'lucide-react';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Markdown from '@/components/Markdown';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
@@ -15,6 +17,25 @@ import type {
   ClaudeSessionInfo,
   SessionActivity,
 } from '../../../shared/types';
+
+// ─── Code theme (matches Markdown.tsx) ───
+
+const codeTheme = {
+  ...oneDark,
+  '::selection': {},
+  'pre[class*="language-"]': {
+    ...oneDark['pre[class*="language-"]'],
+    background: '#1a1a1a',
+    margin: 0,
+    padding: '0.5rem 0.75rem',
+    fontSize: '0.75rem',
+  },
+  'code[class*="language-"]': {
+    ...oneDark['code[class*="language-"]'],
+    background: '#1a1a1a',
+    fontSize: '0.75rem',
+  },
+};
 
 // ─── Helpers ───
 
@@ -253,85 +274,161 @@ function ToolOutputCopyButton({ text }: { text: string }) {
   );
 }
 
+// ─── Language detection from file path ───
+
+function langFromPath(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+    py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
+    java: 'java', kt: 'kotlin', swift: 'swift',
+    css: 'css', scss: 'scss', html: 'html', vue: 'vue', svelte: 'svelte',
+    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+    md: 'markdown', sh: 'bash', zsh: 'bash', bash: 'bash',
+    sql: 'sql', graphql: 'graphql', dockerfile: 'docker',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+  };
+  return map[ext] || 'text';
+}
+
+// ─── Shared code output wrapper ───
+
+function CodeOutput({ code, language, label, maxHeight = 'max-h-72' }: {
+  code: string; language?: string; label?: string; maxHeight?: string;
+}) {
+  return (
+    <div className={`bg-[#1a1a1a] border-border mt-2 overflow-hidden rounded-md border ${maxHeight}`}>
+      {label && (
+        <div className="border-border flex items-center justify-between border-b px-3 py-1">
+          <span className="text-muted-foreground text-[10px] font-medium uppercase">{label}</span>
+          <ToolOutputCopyButton text={code} />
+        </div>
+      )}
+      <div className={`overflow-auto ${maxHeight} ${!label ? 'relative' : ''}`}>
+        {!label && (
+          <div className="absolute top-1 right-2 z-10">
+            <ToolOutputCopyButton text={code} />
+          </div>
+        )}
+        <SyntaxHighlighter
+          style={codeTheme}
+          language={language || 'text'}
+          PreTag="div"
+          customStyle={{
+            background: 'transparent',
+            margin: 0,
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.75rem',
+            fontFamily: 'var(--font-mono)',
+            lineHeight: '1.5',
+          }}
+          wrapLongLines
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+}
+
 // ─── Per-tool body renderers ───
 
 function BashToolBody({ command, output }: { command: string; output: string }) {
   const cleaned = stripAnsi(output);
   const fullText = `$ ${command}${cleaned ? '\n' + cleaned : ''}`;
-  return (
-    <div className="relative mt-2">
-      <div className="absolute top-1 right-1 z-10">
-        <ToolOutputCopyButton text={fullText} />
-      </div>
-      <div className="border-border max-h-60 overflow-auto rounded border bg-black/30 p-2">
-        <pre className="whitespace-pre-wrap font-mono text-[11px]">
-          <span className="text-primary/70">$ </span>
-          <span className="text-foreground/80">{command}</span>
-          {cleaned && (
-            <>
-              {'\n'}
-              <span className="text-muted-foreground">{cleaned}</span>
-            </>
-          )}
-        </pre>
-      </div>
-    </div>
-  );
+  return <CodeOutput code={fullText} language="bash" label="Shell" />;
+}
+
+function ReadToolBody({ output, path }: { output: string; path: string }) {
+  if (!output) return null;
+  const lang = langFromPath(path);
+  const fileName = path.split('/').pop() || path;
+  return <CodeOutput code={output} language={lang} label={fileName} />;
 }
 
 function SearchToolBody({ output }: { output: string }) {
   if (!output) return null;
-  return (
-    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
-      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
-    </div>
-  );
+  // Search output is typically file paths or grep-like content lines
+  return <CodeOutput code={output} language="text" label="Results" />;
 }
 
 function EditToolBody({ output, actionType }: { output: string; actionType: ActionType }) {
   if (!output) return null;
-  // If we have changes data in the actionType, show old→new
-  const changes = (actionType as { changes?: Array<{ action: string; oldString?: string; newString?: string; content?: string }> }).changes;
-  if (changes && changes.length > 0) {
+  const filePath = actionType.action === 'file_edit' ? actionType.path : '';
+  const lang = filePath ? langFromPath(filePath) : 'text';
+
+  // Check if output contains diff-style content (--- old / +++ new)
+  if (output.startsWith('--- old\n')) {
+    const parts = output.split('\n+++ new\n');
+    const oldStr = parts[0]?.replace('--- old\n', '') || '';
+    const newStr = parts[1] || '';
     return (
-      <div className="mt-2 space-y-1.5">
-        {changes.map((change, i) => (
-          <div key={i} className="border-border overflow-hidden rounded border">
-            {change.action === 'edit' && change.oldString && (
-              <div className="border-border max-h-32 overflow-auto border-b bg-red-500/5 px-2 py-1.5">
-                <pre className="whitespace-pre-wrap font-mono text-[11px] text-red-400/80">{change.oldString}</pre>
-              </div>
-            )}
-            {change.action === 'edit' && change.newString && (
-              <div className="max-h-32 overflow-auto bg-green-500/5 px-2 py-1.5">
-                <pre className="whitespace-pre-wrap font-mono text-[11px] text-green-400/80">{change.newString}</pre>
-              </div>
-            )}
-            {change.action === 'write' && change.content && (
-              <div className="max-h-40 overflow-auto bg-black/20 px-2 py-1.5">
-                <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{change.content}</pre>
-              </div>
-            )}
+      <div className="mt-2 space-y-1">
+        {oldStr && (
+          <div className="border-border overflow-hidden rounded-md border border-red-500/20">
+            <div className="border-border flex items-center border-b bg-red-500/5 px-3 py-1">
+              <span className="text-[10px] font-medium text-red-400/70">Removed</span>
+            </div>
+            <div className="max-h-40 overflow-auto">
+              <SyntaxHighlighter
+                style={codeTheme}
+                language={lang}
+                PreTag="div"
+                customStyle={{
+                  background: 'rgba(239, 68, 68, 0.03)',
+                  margin: 0,
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.75rem',
+                  fontFamily: 'var(--font-mono)',
+                  lineHeight: '1.5',
+                }}
+                wrapLongLines
+              >
+                {oldStr}
+              </SyntaxHighlighter>
+            </div>
           </div>
-        ))}
+        )}
+        {newStr && (
+          <div className="border-border overflow-hidden rounded-md border border-green-500/20">
+            <div className="border-border flex items-center border-b bg-green-500/5 px-3 py-1">
+              <span className="text-[10px] font-medium text-green-400/70">Added</span>
+            </div>
+            <div className="max-h-40 overflow-auto">
+              <SyntaxHighlighter
+                style={codeTheme}
+                language={lang}
+                PreTag="div"
+                customStyle={{
+                  background: 'rgba(34, 197, 94, 0.03)',
+                  margin: 0,
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.75rem',
+                  fontFamily: 'var(--font-mono)',
+                  lineHeight: '1.5',
+                }}
+                wrapLongLines
+              >
+                {newStr}
+              </SyntaxHighlighter>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
-  // Fallback: show raw output
-  return (
-    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
-      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
-    </div>
-  );
+
+  // Fallback: raw output as code
+  const fileName = filePath.split('/').pop() || 'diff';
+  return <CodeOutput code={output} language={lang} label={fileName} />;
 }
 
 function GenericToolBody({ output }: { output: string }) {
   if (!output) return null;
-  return (
-    <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
-      <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{output}</pre>
-    </div>
-  );
+  // Check if output looks like JSON
+  const trimmed = output.trimStart();
+  const lang = trimmed.startsWith('{') || trimmed.startsWith('[') ? 'json' : 'text';
+  return <CodeOutput code={output} language={lang} />;
 }
 
 // ─── ToolCard (opencode-inspired) ───
@@ -431,7 +528,7 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
           {isBash && <BashToolBody command={actionType.action === 'command_run' ? actionType.command : ''} output={output} />}
           {isEdit && <EditToolBody output={output} actionType={actionType} />}
           {isSearch && <SearchToolBody output={output} />}
-          {isRead && output && <GenericToolBody output={output} />}
+          {isRead && output && <ReadToolBody output={output} path={actionType.action === 'file_read' ? actionType.path : ''} />}
           {!isBash && !isEdit && !isSearch && !isRead && output && <GenericToolBody output={output} />}
         </div>
       )}
@@ -601,12 +698,6 @@ function EntryItem({ entry, sessionDone, isLastEntry }: { entry: NormalizedEntry
 }
 
 // ─── Main ClaudeView ───
-
-// ─── Text Shimmer (opencode-style) ───
-
-function TextShimmer({ text, active = true }: { text: string; active?: boolean }) {
-  return <span className={active ? 'zeus-shimmer' : 'text-muted-foreground'}>{text}</span>;
-}
 
 // ─── Queue Item ───
 

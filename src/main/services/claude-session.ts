@@ -287,21 +287,6 @@ export class ClaudeSession extends EventEmitter {
       this._pendingAssistantUuid = msg.uuid as string;
     }
 
-    // Debug: log user messages that contain tool results
-    if (msg.type === 'user') {
-      const u = msg as { message?: { content?: unknown }; toolUseResult?: unknown; tool_use_result?: unknown };
-      const content = u.message?.content;
-      const hasToolResult = Array.isArray(content) && content.some((b: { type?: string }) => b.type === 'tool_result');
-      if (hasToolResult) {
-        const structured = u.toolUseResult ?? u.tool_use_result;
-        console.log(`[ZEUS] tool_result in user msg, toolUseResult=${!!u.toolUseResult}, tool_use_result=${!!u.tool_use_result}`);
-        if (structured) {
-          const s = structured as Record<string, unknown>;
-          console.log(`[ZEUS] structured keys: ${Object.keys(s).join(', ')}`);
-        }
-      }
-    }
-
     // Normalize to UI entries
     const entries = this.logProcessor.process(msg);
     for (const entry of entries) {

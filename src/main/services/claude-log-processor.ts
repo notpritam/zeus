@@ -71,10 +71,11 @@ export class ClaudeLogProcessor {
         // is redundant when using --include-partial-messages.
         return [];
 
-      case 'user':
+      case 'user': {
         // User messages are added optimistically by the renderer store.
         // But user messages also carry tool_result content blocks — extract those.
         return this.processUserMessage(msg);
+      }
 
       case 'tool_use':
         return this.processToolUse(msg);
@@ -199,13 +200,17 @@ export class ClaudeLogProcessor {
 
       const status = b.is_error ? 'failed' : 'success';
 
-      // Extract output: prefer structured toolUseResult, fall back to content block text
+      // Extract output: prefer structured tool_use_result, fall back to content block text
       let resultOutput = '';
 
-      // Check structured result first — Claude CLI sends camelCase `toolUseResult`
-      const structured = (userMsg.toolUseResult ?? userMsg.tool_use_result) as Record<string, unknown> | undefined;
-      if (structured) {
-        resultOutput = this.extractStructuredOutput(structured, tracked.toolName);
+      // Check structured result — stream-json uses snake_case `tool_use_result`
+      const rawStructured = userMsg.tool_use_result ?? userMsg.toolUseResult;
+      if (rawStructured) {
+        if (typeof rawStructured === 'string') {
+          resultOutput = rawStructured;
+        } else if (typeof rawStructured === 'object' && rawStructured !== null) {
+          resultOutput = this.extractStructuredOutput(rawStructured as Record<string, unknown>, tracked.toolName);
+        }
       }
 
       // Fall back to the tool_result content block text
@@ -214,7 +219,6 @@ export class ClaudeLogProcessor {
         if (typeof raw === 'string') {
           resultOutput = raw;
         } else if (Array.isArray(raw)) {
-          // Content can be an array of text/image blocks
           resultOutput = raw
             .map((item: { type?: string; text?: string }) =>
               item.type === 'text' ? item.text || '' : ''
