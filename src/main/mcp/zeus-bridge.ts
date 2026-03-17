@@ -315,7 +315,7 @@ server.tool(
 
 server.tool(
   'zeus_qa_log',
-  'Log a QA entry to Zeus for real-time UI display. Call this after each significant action (tool call, finding, observation).',
+  'Log a QA entry to Zeus for real-time UI display. Call this after each significant action (tool call, finding, observation). For screenshot tool results, pass the base64 data URL in image_data so the Zeus UI renders the actual image.',
   {
     qa_agent_id: z.string().describe('The qaAgentId from zeus_qa_start'),
     kind: z.enum(['text', 'thinking', 'tool_call', 'tool_result', 'error', 'status']).describe('Entry type'),
@@ -324,8 +324,9 @@ server.tool(
     args: z.string().optional().describe('Tool arguments summary (for tool_call entries)'),
     summary: z.string().optional().describe('Tool result summary (for tool_result entries)'),
     success: z.boolean().optional().describe('Whether the tool call succeeded (for tool_result entries)'),
+    image_data: z.string().optional().describe('Base64 data URL for screenshot tool results (e.g. "data:image/jpeg;base64,...")'),
   },
-  async ({ qa_agent_id, kind, content, tool, args, summary, success }) => {
+  async ({ qa_agent_id, kind, content, tool, args, summary, success, image_data }) => {
     try {
       await connectWs();
 
@@ -343,7 +344,14 @@ server.tool(
           entry = { kind: 'tool_call', tool: tool ?? 'unknown', args: args ?? '', timestamp };
           break;
         case 'tool_result':
-          entry = { kind: 'tool_result', tool: tool ?? 'unknown', summary: summary ?? '', success: success ?? true, timestamp };
+          entry = {
+            kind: 'tool_result',
+            tool: tool ?? 'unknown',
+            summary: summary ?? '',
+            success: success ?? true,
+            timestamp,
+            ...(image_data ? { imageData: image_data } : {}),
+          };
           break;
         case 'error':
           entry = { kind: 'error', message: content ?? 'Unknown error', timestamp };

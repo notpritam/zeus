@@ -1,9 +1,10 @@
-import { GitBranch, FolderOpen, Eye, RefreshCw, Info } from 'lucide-react';
+import { GitBranch, FolderOpen, Eye, RefreshCw, Info, Settings } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
 import QAPanel from '@/components/QAPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
+import SessionSettingsPanel from '@/components/SessionSettingsPanel';
 import {
   Tooltip,
   TooltipTrigger,
@@ -77,7 +78,7 @@ function ActivityBarIcon({
   badge,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer' | 'qa' | 'info';
+  tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings';
   tooltip: string;
   badge?: number;
 }) {
@@ -132,7 +133,7 @@ function RightPanel() {
         {activeRightTab && (
           <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
             <div className="min-h-0 flex-1 overflow-hidden">
-              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : <QAPanel />}
+              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <QAPanel />}
             </div>
             <WatcherStatusBar />
           </div>
@@ -144,6 +145,9 @@ function RightPanel() {
           <ActivityBarIcon icon={GitBranch} tab="source-control" tooltip="Source Control" />
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
           <ActivityBarIcon icon={Eye} tab="qa" tooltip="QA Preview" badge={qaJsErrorCount} />
+          <div className="mt-auto pb-2">
+            <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />
+          </div>
         </div>
       </div>
     </TooltipProvider>

@@ -546,7 +546,7 @@ function wireQAAgent(record: QaAgentRecord): void {
     pendingThinkingContent = '';
   };
 
-  session.on('entry', (entry: NormalizedEntry) => {
+  session.on('entry', async (entry: NormalizedEntry) => {
     const now = Date.now();
 
     if (entry.entryType.type === 'assistant_message') {
@@ -606,12 +606,25 @@ function wireQAAgent(record: QaAgentRecord): void {
         insertQaAgentEntry(qaAgentId, toolCallEntry.kind, JSON.stringify(toolCallEntry), now);
       } else if (status === 'success' || status === 'failed' || status === 'timed_out') {
         const summary = entry.content.slice(0, 200);
+        const isScreenshotTool = /screenshot/i.test(toolName);
+        let imageData: string | undefined;
+
+        // For screenshot tools, capture the image so it can be rendered in the UI
+        if (isScreenshotTool && status === 'success' && qaService?.isRunning()) {
+          try {
+            imageData = await qaService.screenshot();
+          } catch {
+            // Non-critical — log entry still works without the image
+          }
+        }
+
         const toolResultEntry = {
           kind: 'tool_result' as const,
           tool: toolName,
           summary,
           success: status === 'success',
           timestamp: now,
+          ...(imageData ? { imageData } : {}),
         };
         broadcastEnvelope({
           channel: 'qa', sessionId: '', auth: '',
@@ -622,7 +635,10 @@ function wireQAAgent(record: QaAgentRecord): void {
             entry: toolResultEntry,
           },
         });
-        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(toolResultEntry), now);
+        // Don't persist base64 image data to SQLite — only broadcast it
+        const dbEntry = { ...toolResultEntry };
+        delete (dbEntry as Record<string, unknown>).imageData;
+        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(dbEntry), now);
         toolEntries.delete(entry.id);
       }
     }
@@ -866,14 +882,14 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         { workingDir },
       );
 
-      // Persist resumed session to DB
+      // Persist resumed session to DB — carry over name & color from original
       insertClaudeSession({
         id: envelope.sessionId,
         claudeSessionId: opts.claudeSessionId,
         status: 'running',
         prompt: opts.prompt,
-        name: null,
-        color: null,
+        name: opts.name ?? null,
+        color: opts.color ?? null,
         notificationSound: true,
         workingDir,
         permissionMode: 'bypassPermissions',
@@ -1954,7 +1970,10 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     const { qaAgentId, entry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
     if (!qaAgentId || !entry) return;
 
-    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
+    // Don't persist base64 image data to SQLite — only broadcast it
+    const dbEntry = { ...entry };
+    delete dbEntry.imageData;
+    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(dbEntry), entry.timestamp);
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: {

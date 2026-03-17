@@ -231,6 +231,8 @@ export interface ClaudeResumePayload {
   claudeSessionId: string;
   prompt: string;
   workingDir?: string;
+  name?: string | null;
+  color?: string | null;
 }
 
 export interface ImageAttachment {
@@ -455,7 +457,7 @@ export interface QaSnapshotNode {
 
 export type QaAgentLogEntry =
   | { kind: 'tool_call'; tool: string; args: string; timestamp: number }
-  | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number }
+  | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number; imageData?: string }
   | { kind: 'text'; content: string; timestamp: number }
   | { kind: 'error'; message: string; timestamp: number }
   | { kind: 'user_message'; content: string; timestamp: number }

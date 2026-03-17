@@ -116,7 +116,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'qa' | 'info' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null;
 
   // Actions
   connect: () => () => void;
@@ -219,7 +219,7 @@ interface ZeusState {
   fetchQaAgentEntries: (qaAgentId: string) => void;
 
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => void;
   toggleRightPanel: () => void;
 
   // Performance actions
@@ -1351,7 +1351,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     if (!session || !session.claudeSessionId) return;
 
     const existingEntries = state.claudeEntries[id] ?? [];
-    const resumePrompt = 'Continue where you left off.';
+
+    // Strip any stacked "(resumed)" suffixes to get the clean original name
+    const originalName = session.name?.replace(/\s*\(resumed\)$/g, '') || session.name;
 
     // Create a new client session ID but resume the real Claude conversation
     const newId = `claude-${Date.now()}-${++claudeIdCounter}`;
@@ -1360,7 +1362,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       claudeSessionId: session.claudeSessionId,
       status: 'running',
       prompt: session.prompt,
-      name: session.name ? `${session.name} (resumed)` : session.name,
+      name: originalName,
+      color: session.color,
       notificationSound: session.notificationSound,
       enableGitWatcher: session.enableGitWatcher,
       workingDir: session.workingDir,
@@ -1381,8 +1384,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: {
         type: 'resume_claude',
         claudeSessionId: session.claudeSessionId,
-        prompt: resumePrompt,
+        prompt: 'Continue working.',
         workingDir: session.workingDir || '/',
+        name: originalName,
+        color: session.color,
       },
       auth: '',
     });
@@ -2012,7 +2017,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => {
     set({ activeRightTab: tab });
     // Fetch QA status when switching to QA tab
     if (tab === 'qa') {

@@ -47,9 +47,10 @@ function AgentToolCall({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_call'
 }
 
 function AgentToolResult({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_result' } }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(!!entry.imageData);
   const dotColor = entry.success ? 'bg-green-400' : 'bg-red-400';
   const borderColor = entry.success ? '' : 'border-red-400/30';
+  const hasContent = !!(entry.summary || entry.imageData);
 
   return (
     <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${borderColor}`}>
@@ -60,8 +61,9 @@ function AgentToolResult({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_res
             {entry.tool}
           </span>
           <span className="text-muted-foreground text-[10px]">{entry.success ? 'success' : 'failed'}</span>
+          {entry.imageData && <Camera className="text-muted-foreground size-3" />}
         </div>
-        {entry.summary && (
+        {hasContent && (
           <button
             onClick={() => setExpanded(!expanded)}
             className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
@@ -70,9 +72,18 @@ function AgentToolResult({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_res
           </button>
         )}
       </div>
-      {expanded && entry.summary && (
-        <div className="border-border mt-2 max-h-60 overflow-auto rounded border bg-black/20 p-2">
-          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{entry.summary}</pre>
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {entry.imageData && (
+            <div className="border-border overflow-hidden rounded border">
+              <img src={entry.imageData} alt="Screenshot" className="w-full" />
+            </div>
+          )}
+          {entry.summary && (
+            <div className="border-border max-h-60 overflow-auto rounded border bg-black/20 p-2">
+              <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{entry.summary}</pre>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -214,31 +225,43 @@ function compressEntries(entries: QaAgentLogEntry[]): CompressedGroup[] {
 }
 
 function CompressedToolPair({ group }: { group: CompressedGroup & { type: 'tool_pair' } }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(!!group.result?.imageData);
   const success = group.result ? group.result.success : undefined;
   const dotColor = success === undefined ? 'bg-primary animate-pulse' : success ? 'bg-green-400' : 'bg-red-400';
+  const hasImage = !!group.result?.imageData;
 
   return (
-    <button
-      className="bg-secondary border-border hover:bg-secondary/80 flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors"
-      onClick={() => setExpanded(!expanded)}
+    <div
+      className="bg-secondary border-border hover:bg-secondary/80 w-full rounded-md border px-2.5 py-1.5 text-left transition-colors"
     >
-      <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
-      <span className="text-primary text-[10px] font-semibold">{group.call.tool}</span>
-      <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-[10px]">{group.call.args}</span>
-      {success !== undefined && (
-        <span className={`text-[9px] ${success ? 'text-green-400' : 'text-red-400'}`}>
-          {success ? 'OK' : 'FAIL'}
-        </span>
-      )}
-      {expanded && group.result?.summary && (
-        <div className="border-border mt-1 w-full rounded border bg-black/20 p-1.5" onClick={(e) => e.stopPropagation()}>
-          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[10px]">
-            {group.result.summary.slice(0, 300)}
-          </pre>
+      <button className="flex w-full items-center gap-2" onClick={() => setExpanded(!expanded)}>
+        <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
+        <span className="text-primary text-[10px] font-semibold">{group.call.tool}</span>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-[10px]">{group.call.args}</span>
+        {hasImage && <Camera className="text-muted-foreground size-3 shrink-0" />}
+        {success !== undefined && (
+          <span className={`text-[9px] ${success ? 'text-green-400' : 'text-red-400'}`}>
+            {success ? 'OK' : 'FAIL'}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          {group.result?.imageData && (
+            <div className="border-border overflow-hidden rounded border">
+              <img src={group.result.imageData} alt="Screenshot" className="w-full" />
+            </div>
+          )}
+          {group.result?.summary && (
+            <div className="border-border w-full rounded border bg-black/20 p-1.5">
+              <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[10px]">
+                {group.result.summary.slice(0, 300)}
+              </pre>
+            </div>
+          )}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
