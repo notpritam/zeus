@@ -380,7 +380,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
 
 function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEnvelope): void {
   // Forward normalized entries to all clients + persist to DB
-  session.on('entry', (entry: NormalizedEntry) => {
+  session.on('entry', async (entry: NormalizedEntry) => {
     upsertClaudeEntry(envelope.sessionId, entry);
     broadcastEnvelope({
       channel: 'claude',
@@ -388,6 +388,55 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
       payload: { type: 'entry', entry },
       auth: '',
     });
+
+    // Sync QA Preview when Claude calls qa_* tools
+    if (entry.entryType.type === 'tool_use' && /^qa_/i.test(entry.entryType.toolName)) {
+      const { toolName, status } = entry.entryType;
+
+      if (status === 'success' && qaService?.isRunning()) {
+        try {
+          if (/navigate/i.test(toolName)) {
+            // Parse URL from tool input and broadcast navigate result
+            let navUrl: string | undefined;
+            try {
+              const parsed = JSON.parse(entry.content);
+              navUrl = parsed.url;
+            } catch { /* ignore parse errors */ }
+            broadcastEnvelope({
+              channel: 'qa', sessionId: '', auth: '',
+              payload: { type: 'navigate_result', url: navUrl ?? '', title: '' },
+            });
+            // Auto-refresh snapshot after navigation
+            const snap = await qaService.snapshot('interactive');
+            broadcastEnvelope({
+              channel: 'qa', sessionId: '', auth: '',
+              payload: { type: 'snapshot_result', nodes: snap.nodes, raw: snap.raw },
+            });
+          } else if (/screenshot/i.test(toolName)) {
+            const dataUrl = await qaService.screenshot();
+            broadcastEnvelope({
+              channel: 'qa', sessionId: '', auth: '',
+              payload: { type: 'screenshot_result', dataUrl },
+            });
+          } else if (/snapshot/i.test(toolName)) {
+            const snap = await qaService.snapshot('interactive');
+            broadcastEnvelope({
+              channel: 'qa', sessionId: '', auth: '',
+              payload: { type: 'snapshot_result', nodes: snap.nodes, raw: snap.raw },
+            });
+          } else if (/click|fill|type|press|scroll|hover|focus|select|batch|run_test_flow/i.test(toolName)) {
+            // After any interaction, auto-refresh snapshot
+            const snap = await qaService.snapshot('interactive');
+            broadcastEnvelope({
+              channel: 'qa', sessionId: '', auth: '',
+              payload: { type: 'snapshot_result', nodes: snap.nodes, raw: snap.raw },
+            });
+          }
+        } catch (err) {
+          console.warn(`[Zeus] QA preview sync failed for ${toolName}:`, (err as Error).message);
+        }
+      }
+    }
   });
 
   // Forward activity state changes

@@ -287,48 +287,15 @@ export interface ModelUsage extends TokenUsage {
 }
 
 // --- Normalized Entry Types (for UI) ---
+// Canonical definitions live in shared/types.ts — re-export here for convenience.
 
-export interface NormalizedEntry {
-  id: string;
-  timestamp?: string;
-  entryType: NormalizedEntryType;
-  content: string;
-  metadata?: unknown;
-}
-
-export type NormalizedEntryType =
-  | { type: 'user_message' }
-  | { type: 'assistant_message' }
-  | { type: 'tool_use'; toolName: string; actionType: ActionType; status: ToolStatus }
-  | { type: 'thinking' }
-  | { type: 'system_message' }
-  | { type: 'error_message'; errorType: 'setup_required' | 'other' }
-  | { type: 'loading' }
-  | { type: 'token_usage'; totalTokens: number; contextWindow: number };
-
-export type ToolStatus =
-  | 'created'
-  | 'success'
-  | 'failed'
-  | 'timed_out'
-  | { status: 'denied'; reason?: string }
-  | { status: 'pending_approval'; approvalId: string };
-
-export type ActionType =
-  | { action: 'file_read'; path: string }
-  | { action: 'file_edit'; path: string; changes: FileChange[] }
-  | { action: 'command_run'; command: string; exitCode?: number; output?: string }
-  | { action: 'search'; query: string }
-  | { action: 'web_fetch'; url: string }
-  | { action: 'task_create'; description: string }
-  | { action: 'plan_presentation'; plan: string }
-  | { action: 'mcp_tool'; server: string; method: string; input: string }
-  | { action: 'other'; description: string };
-
-export type FileChange =
-  | { action: 'write'; content: string }
-  | { action: 'edit'; oldString: string; newString: string }
-  | { action: 'delete' };
+export type {
+  NormalizedEntry,
+  NormalizedEntryType,
+  ActionType,
+  ToolStatus,
+  FileChange,
+} from '../../shared/types';
 
 // --- Helper factories ---
 

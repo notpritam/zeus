@@ -520,8 +520,9 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
     (isDenied || isFailed) ? 'bg-red-400' :
     'bg-muted-foreground';
 
-  const meta = metadata as { output?: string } | undefined;
+  const meta = metadata as { output?: string; images?: string[] } | undefined;
   const output = meta?.output || '';
+  const images = meta?.images || [];
 
   const title = getToolTitle(actionType);
   const subtitle = getToolSubtitle(actionType);
@@ -535,7 +536,8 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
   const isSearch = actionType.action === 'search';
   const isMcp = actionType.action === 'mcp_tool';
   const mcpInput = isMcp ? actionType.input : '';
-  const hasExpandable = isBash ? true : isMcp ? (mcpInput.length > 0 || output.length > 0) : (output.length > 0 || (isEdit && !!(actionType as unknown as { changes?: unknown[] }).changes));
+  const hasImages = images.length > 0;
+  const hasExpandable = isBash ? true : isMcp ? (mcpInput.length > 0 || output.length > 0 || hasImages) : (output.length > 0 || hasImages || (isEdit && !!(actionType as unknown as { changes?: unknown[] }).changes));
 
   const handleToggle = () => {
     if (!hasExpandable || isRunning) return;

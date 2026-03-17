@@ -3,6 +3,7 @@ import { app } from 'electron';
 import path from 'path';
 import type { SessionRecord, SavedProject } from '../../shared/types';
 import type { NormalizedEntry } from '../services/claude-types';
+import { validateNormalizedEntry, safeParseNormalizedEntry } from '../../shared/validators';
 
 let db: Database.Database | null = null;
 
@@ -286,6 +287,16 @@ export function archiveClaudeSession(id: string): void {
 export function upsertClaudeEntry(sessionId: string, entry: NormalizedEntry): void {
   if (!db) return;
 
+  // Runtime validation before persisting
+  const validation = validateNormalizedEntry(entry);
+  if (!validation.valid) {
+    console.warn(
+      `[Zeus DB] Skipping invalid entry for session ${sessionId.slice(-6)}:`,
+      validation.errors.map((e) => `${e.path}: ${e.message}`).join('; '),
+    );
+    return;
+  }
+
   // Get next seq for this session if inserting new
   const maxSeq = db
     .prepare(`SELECT MAX(seq) as max_seq FROM claude_entries WHERE session_id = ?`)
@@ -328,13 +339,20 @@ export function getClaudeEntries(sessionId: string): NormalizedEntry[] {
   const rows = db
     .prepare(`SELECT * FROM claude_entries WHERE session_id = ? ORDER BY seq ASC`)
     .all(sessionId) as ClaudeEntryDbRow[];
-  return rows.map((r) => ({
-    id: r.id,
-    entryType: JSON.parse(r.entry_type),
-    content: r.content,
-    metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
-    timestamp: r.timestamp ?? undefined,
-  }));
+
+  const entries: NormalizedEntry[] = [];
+  for (const r of rows) {
+    const raw = {
+      id: r.id,
+      entryType: JSON.parse(r.entry_type),
+      content: r.content,
+      metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
+      timestamp: r.timestamp ?? undefined,
+    };
+    const parsed = safeParseNormalizedEntry(raw, `db-read:${sessionId.slice(-6)}:${r.id.slice(-6)}`);
+    if (parsed) entries.push(parsed);
+  }
+  return entries;
 }
 
 /**

@@ -381,10 +381,15 @@ export type ToolStatus =
   | { status: 'denied'; reason?: string }
   | { status: 'pending_approval'; approvalId: string };
 
+export type FileChange =
+  | { action: 'write'; content: string }
+  | { action: 'edit'; oldString: string; newString: string }
+  | { action: 'delete' };
+
 export type ActionType =
   | { action: 'file_read'; path: string }
-  | { action: 'file_edit'; path: string }
-  | { action: 'command_run'; command: string }
+  | { action: 'file_edit'; path: string; changes?: FileChange[] }
+  | { action: 'command_run'; command: string; exitCode?: number; output?: string }
   | { action: 'search'; query: string }
   | { action: 'web_fetch'; url: string }
   | { action: 'task_create'; description: string }

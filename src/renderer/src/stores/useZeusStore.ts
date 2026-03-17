@@ -103,6 +103,7 @@ interface ZeusState {
   qaError: string | null;
   qaLoading: boolean;
   qaTabs: QaTabInfo[];
+  qaCurrentUrl: string;
   qaConsoleLogs: Array<{ level: string; message: string; timestamp: number }>;
   qaNetworkRequests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }>;
   qaJsErrors: Array<{ message: string; stack: string; timestamp: number }>;
@@ -360,6 +361,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaError: null,
   qaLoading: false,
   qaTabs: [],
+  qaCurrentUrl: 'http://localhost:5173',
   qaConsoleLogs: [],
   qaNetworkRequests: [],
   qaJsErrors: [],
@@ -958,6 +960,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaRunning: false, qaInstances: [], qaTabs: [],
           qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
           qaText: null, qaLoading: false, qaError: null,
+          qaCurrentUrl: 'http://localhost:5173',
           qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
           qaAgents: {}, activeQaAgentId: {},
         });
@@ -978,7 +981,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
       if (payload.type === 'navigate_result') {
-        set({ qaLoading: false, qaError: null });
+        set({
+          qaLoading: false,
+          qaError: null,
+          ...(payload.url ? { qaCurrentUrl: payload.url } : {}),
+        });
       }
       if (payload.type === 'snapshot_result') {
         set({ qaSnapshot: payload.nodes, qaSnapshotRaw: payload.raw ?? null, qaLoading: false, qaError: null });

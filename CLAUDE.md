@@ -108,6 +108,22 @@ Goal: Make the UI aware of what Claude is doing to files.
 }
 ```
 
+### NormalizedEntry (Claude Session Log)
+
+Every item in the Claude session log is a `NormalizedEntry`. Persisted to SQLite (`claude_entries` table) with `entryType` and `metadata` JSON-stringified.
+
+```typescript
+interface NormalizedEntry {
+  id: string;                    // UUID, stable across streaming updates
+  timestamp?: string;            // ISO 8601
+  entryType: NormalizedEntryType; // discriminated union (see shared/types.ts)
+  content: string;               // display text or tool content description
+  metadata?: unknown;            // tool output, etc. — shape varies by entryType
+}
+```
+
+**MCP Tool Entries:** Tool calls to MCP servers (`mcp__<server>__<method>`) are stored with `actionType: { action: 'mcp_tool', server, method, input }`. The `input` field contains the full JSON parameters sent to the MCP tool. The result is stored in `metadata.output`.
+
 ## Next Immediate Action
 
 > **Focus:** Complete Phase 1 — get `main.js` with a BrowserWindow and `powerSaveBlocker` running. Then move to Phase 2 (Terminal Engine).
@@ -120,6 +136,52 @@ Goal: Make the UI aware of what Claude is doing to files.
 * Keep the Electron main process lean — delegate heavy work to utility modules under `src/main/services/`.
 * All WebSocket messages must conform to the envelope schema above.
 * Never store secrets in code — use environment variables or Electron's `safeStorage`.
+
+## Type System & Runtime Validation
+
+### Canonical Type Location
+
+All entry types live in **`src/shared/types.ts`** — this is the single source of truth:
+
+* `NormalizedEntry` — the universal shape for every item stored in the Claude session log
+* `NormalizedEntryType` — discriminated union: `user_message | assistant_message | tool_use | thinking | system_message | error_message | loading | token_usage`
+* `ActionType` — discriminated union for tool actions: `file_read | file_edit | command_run | search | web_fetch | task_create | plan_presentation | mcp_tool | other`
+* `ToolStatus` — `'created' | 'success' | 'failed' | 'timed_out' | { status: 'denied'; reason?: string } | { status: 'pending_approval'; approvalId: string }`
+* `FileChange` — `write | edit | delete` for file edit tracking
+
+**`src/main/services/claude-types.ts`** re-exports these types (plus Claude protocol types). Never duplicate type definitions — always re-export from `shared/types.ts`.
+
+### Runtime Validators (`src/shared/validators.ts`)
+
+Runtime validation is enforced at DB boundaries to catch malformed data before it persists or reaches the renderer:
+
+* **`validateNormalizedEntry(v)`** — Deep validates an entry and all nested types. Returns `{ valid: boolean, errors: ValidationError[] }`.
+* **`validateActionType(v)`** — Validates action type discriminant and required fields per variant.
+* **`validateToolStatus(v)`** — Validates both string and object status variants.
+* **`validateNormalizedEntryType(v)`** — Validates the entry type discriminant and nested fields.
+* **`assertNormalizedEntry(v)`** — Throws with detailed path info on invalid data (use in development).
+* **`safeParseNormalizedEntry(v)`** — Returns typed entry or `null` with console warning (use at read boundaries).
+
+**Where validation runs:**
+* `upsertClaudeEntry()` — validates before writing to SQLite. Invalid entries are logged and skipped.
+* `getClaudeEntries()` — validates after reading from SQLite. Corrupt rows are filtered out with a warning.
+
+### Adding New Entry Types or Action Types
+
+1. Add the variant to the discriminated union in `src/shared/types.ts`.
+2. Add the matching validation case in `src/shared/validators.ts`.
+3. Add test cases in `src/shared/__tests__/validators.test.ts`.
+4. Run `npm run validate` to confirm all 67+ tests pass.
+5. Update the renderer's `EntryItem`/`ToolCard` switch to handle the new variant.
+
+### Verification Commands
+
+```bash
+npm run validate     # Run validator tests (67 tests)
+npm run typecheck    # Type-check main + renderer (tsc --noEmit)
+npm run test         # Run all tests
+npm run build        # Full production build
+```
 
 ## QA Testing
 

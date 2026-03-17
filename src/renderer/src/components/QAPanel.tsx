@@ -412,8 +412,10 @@ function QAPanel() {
 
   const sessionCtx = useCurrentSessionContext();
 
+  const qaCurrentUrl = useZeusStore((s) => s.qaCurrentUrl);
+
   const [viewTab, setViewTab] = useState<QAViewTab>('snapshot');
-  const [url, setUrl] = useState('http://localhost:5173');
+  const [url, setUrl] = useState(qaCurrentUrl);
   const [actionKind, setActionKind] = useState('click');
   const [actionRef, setActionRef] = useState('');
   const [actionValue, setActionValue] = useState('');
@@ -446,6 +448,11 @@ function QAPanel() {
       }
     });
   }, [selectedAgent?.entries.length]);
+
+  // Sync URL bar when QA navigates (e.g. from Claude tool calls)
+  useEffect(() => {
+    if (qaCurrentUrl) setUrl(qaCurrentUrl);
+  }, [qaCurrentUrl]);
 
   // Fetch agents from DB on mount and when parent session changes
   useEffect(() => {

@@ -214,19 +214,39 @@ export class ClaudeLogProcessor {
       }
 
       // Fall back to the tool_result content block text
+      // Also extract images from content blocks
+      const images: string[] = [];
       if (!resultOutput) {
         const raw = b.content;
         if (typeof raw === 'string') {
           resultOutput = raw;
         } else if (Array.isArray(raw)) {
-          resultOutput = raw
-            .map((item: { type?: string; text?: string }) =>
-              item.type === 'text' ? item.text || '' : ''
-            )
-            .filter(Boolean)
-            .join('\n');
+          const textParts: string[] = [];
+          for (const item of raw) {
+            const ci = item as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } };
+            if (ci.type === 'text' && ci.text) {
+              textParts.push(ci.text);
+            } else if (ci.type === 'image' && ci.source?.data) {
+              // Store as data URL for direct rendering
+              const mediaType = ci.source.media_type || 'image/png';
+              images.push(`data:${mediaType};base64,${ci.source.data}`);
+            }
+          }
+          resultOutput = textParts.join('\n');
         } else if (raw) {
           resultOutput = JSON.stringify(raw).slice(0, 5000);
+        }
+      } else {
+        // Even with structured output, check content for images
+        const raw = b.content;
+        if (Array.isArray(raw)) {
+          for (const item of raw) {
+            const ci = item as { type?: string; source?: { type?: string; media_type?: string; data?: string } };
+            if (ci.type === 'image' && ci.source?.data) {
+              const mediaType = ci.source.media_type || 'image/png';
+              images.push(`data:${mediaType};base64,${ci.source.data}`);
+            }
+          }
         }
       }
 
@@ -247,7 +267,7 @@ export class ClaudeLogProcessor {
           status: status as 'success' | 'failed',
         },
         content: tracked.content,
-        metadata: { output: resultOutput },
+        metadata: { output: resultOutput, ...(images.length > 0 && { images }) },
       });
     }
 
@@ -385,9 +405,27 @@ export class ClaudeLogProcessor {
     const status = resultMsg.is_error ? 'failed' : 'success';
     // Claude SDK may use either 'result' or 'content' for the output
     const raw = resultMsg.result ?? resultMsg.content ?? '';
-    const resultOutput = typeof raw === 'string'
-      ? raw
-      : JSON.stringify(raw).slice(0, 2000);
+    let resultOutput: string;
+    const images: string[] = [];
+
+    if (typeof raw === 'string') {
+      resultOutput = raw;
+    } else if (Array.isArray(raw)) {
+      // Content block array — extract text and images
+      const textParts: string[] = [];
+      for (const item of raw) {
+        const ci = item as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } };
+        if (ci.type === 'text' && ci.text) {
+          textParts.push(ci.text);
+        } else if (ci.type === 'image' && ci.source?.data) {
+          const mediaType = ci.source.media_type || 'image/png';
+          images.push(`data:${mediaType};base64,${ci.source.data}`);
+        }
+      }
+      resultOutput = textParts.join('\n') || JSON.stringify(raw).slice(0, 2000);
+    } else {
+      resultOutput = JSON.stringify(raw).slice(0, 2000);
+    }
 
     this.toolMap.delete(toolUseId);
     this.setActivity({ state: 'streaming' });
@@ -401,7 +439,7 @@ export class ClaudeLogProcessor {
         status: status as 'success' | 'failed',
       },
       content: tracked.content,
-      metadata: { output: resultOutput },
+      metadata: { output: resultOutput, ...(images.length > 0 && { images }) },
     }];
   }
 
@@ -436,7 +474,7 @@ export class ClaudeLogProcessor {
           this.streamingToolName = toolBlock.name;
           this.streamingToolInput = '';
           this.streamingToolEntryId = crypto.randomUUID();
-          this.setActivity({ state: 'tool_running', toolName: toolBlock.name });
+          this.setActivity({ state: 'tool_running', toolName: toolBlock.name, description: toolBlock.name });
         }
         break;
       }
