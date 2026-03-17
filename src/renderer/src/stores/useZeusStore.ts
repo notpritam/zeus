@@ -983,9 +983,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
       if (payload.type === 'qa_agent_started') {
-        const { qaAgentId, parentSessionId, parentSessionType, task, targetUrl } = payload;
+        const { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl } = payload;
         const newAgent: QaAgentClient = {
-          info: { qaAgentId, parentSessionId, parentSessionType, task, targetUrl, status: 'running', startedAt: Date.now() },
+          info: { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl, status: 'running', startedAt: Date.now() },
           entries: [],
         };
         set((state) => ({
