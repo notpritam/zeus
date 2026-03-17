@@ -319,6 +319,7 @@ export interface ClaudeSessionInfo {
   enableGitWatcher?: boolean;
   workingDir?: string;
   startedAt: number;
+  qaAgentCount?: number;
 }
 
 export interface ClaudeApprovalInfo {

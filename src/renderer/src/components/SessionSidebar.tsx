@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Plus, Sparkles, Settings, Trash2, Archive } from 'lucide-react';
+import { Plus, Sparkles, Settings, Trash2, Archive, Eye } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity } from '../../../shared/types';
 
@@ -90,6 +90,12 @@ function ClaudeCard({
         </div>
         <div className="mt-0.5 flex items-center gap-2 pl-5">
           <span className="text-muted-foreground text-[10px]">{session.id.slice(-6)}</span>
+          {(session.qaAgentCount ?? 0) > 0 && (
+            <span className="text-muted-foreground flex items-center gap-0.5 text-[10px]">
+              <Eye className="size-2.5" />
+              {session.qaAgentCount}
+            </span>
+          )}
         </div>
       </div>
       {session.status !== 'running' && (

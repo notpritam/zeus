@@ -52,6 +52,8 @@ import {
   updateQaAgentSessionStatus,
   getQaAgentSessionsByParent,
   deleteQaAgentSession,
+  deleteQaAgentsByParent,
+  countQaAgentsByParent,
   insertQaAgentEntry,
   getQaAgentEntries,
   markStaleQaAgentsErrored,
@@ -95,6 +97,16 @@ interface QaAgentRecord {
 }
 const qaAgentSessions = new Map<string, QaAgentRecord>();
 let qaAgentIdCounter = 0;
+
+/** Kill all running QA agents that belong to a given parent session. */
+function stopQaAgentsByParent(parentSessionId: string): void {
+  for (const [id, record] of qaAgentSessions) {
+    if (record.parentSessionId === parentSessionId) {
+      try { record.session.kill(); } catch { /* already dead */ }
+      qaAgentSessions.delete(id);
+    }
+  }
+}
 
 // System monitor service
 const systemMonitor = new SystemMonitorService();
@@ -274,6 +286,8 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     const sid = envelope.sessionId;
     destroySession(sid);
     markKilled(sid);
+    stopQaAgentsByParent(sid);
+    deleteQaAgentsByParent(sid);
     deleteTerminalSession(sid);
     const owned = clientSessions.get(ws);
     if (owned) owned.delete(sid);
@@ -622,6 +636,18 @@ function wireQAAgent(record: QaAgentRecord): void {
       insertQaAgentEntry(qaAgentId, errorEntry.kind, JSON.stringify(errorEntry), now);
     }
 
+    if (entry.entryType.type === 'system_message' && entry.content.trim()) {
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_entry',
+          qaAgentId,
+          parentSessionId,
+          entry: { kind: 'status', message: entry.content.slice(0, 200), timestamp: now },
+        },
+      });
+    }
+
     if (entry.entryType.type === 'token_usage') {
       const { totalTokens } = entry.entryType;
       const statusEntry = {
@@ -934,6 +960,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
   } else if (payload.type === 'stop_claude') {
     adoptClaudeSession(ws, envelope.sessionId);
     claudeManager.killSession(envelope.sessionId);
+    stopQaAgentsByParent(envelope.sessionId);
     updateClaudeSessionStatus(envelope.sessionId, 'done', Date.now());
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
@@ -952,6 +979,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         notificationSound: s.notificationSound,
         workingDir: s.workingDir ?? undefined,
         startedAt: s.startedAt,
+        qaAgentCount: countQaAgentsByParent(s.id),
       };
     });
     sendEnvelope(ws, {
@@ -969,9 +997,11 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       auth: '',
     });
   } else if (payload.type === 'delete_claude_session') {
-    // Kill if still running, stop git watcher, then delete from DB
+    // Kill if still running, stop git watcher, clean up QA agents, then delete from DB
     claudeManager.killSession(envelope.sessionId);
     gitManager.stopWatching(envelope.sessionId);
+    stopQaAgentsByParent(envelope.sessionId);
+    deleteQaAgentsByParent(envelope.sessionId);
     deleteClaudeSession(envelope.sessionId);
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);

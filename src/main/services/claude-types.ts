@@ -76,6 +76,14 @@ export type ClaudeJson =
   | ClaudeResultMsg
   | ClaudeControlRequestMsg
   | ClaudeRateLimitMsg
+  | ClaudeStatusMsg
+  | ClaudeToolProgressMsg
+  | ClaudeTaskNotificationMsg
+  | ClaudeTaskStartedMsg
+  | ClaudeTaskProgressMsg
+  | ClaudeToolUseSummaryMsg
+  | ClaudeHookProgressMsg
+  | ClaudeFilesPersistedMsg
   | { type: string; [key: string]: unknown }; // catch-all
 
 export interface ClaudeSystemMsg {
@@ -182,6 +190,68 @@ export interface ClaudeRateLimitMsg {
   type: 'rate_limit_event';
   session_id?: string;
   rate_limit_info?: unknown;
+}
+
+// --- Additional SDK message types (discovered from official SDK reference) ---
+
+export interface ClaudeStatusMsg {
+  type: 'status';
+  session_id?: string;
+  status?: string;
+  message?: string;
+}
+
+export interface ClaudeToolProgressMsg {
+  type: 'tool_progress';
+  session_id?: string;
+  tool_use_id?: string;
+  tool_name?: string;
+  progress?: string;
+  content?: string;
+}
+
+export interface ClaudeTaskNotificationMsg {
+  type: 'task_notification';
+  session_id?: string;
+  task_id?: string;
+  status?: string;
+  message?: string;
+}
+
+export interface ClaudeTaskStartedMsg {
+  type: 'task_started';
+  session_id?: string;
+  task_id?: string;
+  description?: string;
+}
+
+export interface ClaudeTaskProgressMsg {
+  type: 'task_progress';
+  session_id?: string;
+  task_id?: string;
+  progress?: string;
+  content?: string;
+}
+
+export interface ClaudeToolUseSummaryMsg {
+  type: 'tool_use_summary';
+  session_id?: string;
+  tool_use_id?: string;
+  tool_name?: string;
+  summary?: string;
+}
+
+export interface ClaudeHookProgressMsg {
+  type: 'hook_progress';
+  session_id?: string;
+  hook_event_name?: string;
+  progress?: string;
+}
+
+export interface ClaudeFilesPersistedMsg {
+  type: 'files_persisted';
+  session_id?: string;
+  files?: string[];
 }
 
 // --- Shared Sub-types ---

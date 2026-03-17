@@ -524,6 +524,22 @@ export function deleteQaAgentSession(id: string): void {
   db.prepare(`DELETE FROM qa_agent_sessions WHERE id = ?`).run(id);
 }
 
+export function deleteQaAgentsByParent(parentSessionId: string): void {
+  if (!db) return;
+  db.prepare(
+    `DELETE FROM qa_agent_entries WHERE qa_agent_id IN (SELECT id FROM qa_agent_sessions WHERE parent_session_id = ?)`,
+  ).run(parentSessionId);
+  db.prepare(`DELETE FROM qa_agent_sessions WHERE parent_session_id = ?`).run(parentSessionId);
+}
+
+export function countQaAgentsByParent(parentSessionId: string): number {
+  if (!db) return 0;
+  const row = db
+    .prepare(`SELECT COUNT(*) as cnt FROM qa_agent_sessions WHERE parent_session_id = ?`)
+    .get(parentSessionId) as { cnt: number } | undefined;
+  return row?.cnt ?? 0;
+}
+
 // ─── QA Agent Entries CRUD ───
 
 export interface QaAgentEntryRow {

@@ -83,6 +83,83 @@ export class ClaudeLogProcessor {
         // System init — could extract model info; skip for now
         return [];
 
+      case 'tool_progress': {
+        // Tool progress updates (e.g., Bash producing incremental output)
+        const progress = msg as { tool_use_id?: string; tool_name?: string; content?: string };
+        const toolUseId = progress.tool_use_id;
+        if (toolUseId) {
+          const tracked = this.toolMap.get(toolUseId);
+          if (tracked) {
+            this.setActivity({ state: 'tool_running', toolName: tracked.toolName, description: progress.content || '' });
+          }
+        }
+        return [];
+      }
+
+      case 'tool_use_summary': {
+        // Summary emitted after tool completes (in non-streaming mode)
+        const summary = msg as { tool_use_id?: string; tool_name?: string; summary?: string };
+        const toolUseId = summary.tool_use_id;
+        if (toolUseId) {
+          const tracked = this.toolMap.get(toolUseId);
+          if (tracked) {
+            const status = 'success' as const;
+            this.toolMap.delete(toolUseId);
+            this.setActivity({ state: 'streaming' });
+            return [{
+              id: tracked.entryId,
+              entryType: {
+                type: 'tool_use',
+                toolName: tracked.toolName,
+                actionType: tracked.actionType,
+                status,
+              },
+              content: summary.summary || tracked.content,
+            }];
+          }
+        }
+        return [];
+      }
+
+      case 'task_started': {
+        // Subagent/background task started
+        const task = msg as { task_id?: string; description?: string };
+        return [{
+          id: crypto.randomUUID(),
+          entryType: { type: 'system_message' },
+          content: `Task started: ${task.description || task.task_id || 'unknown'}`,
+        }];
+      }
+
+      case 'task_notification':
+      case 'task_progress': {
+        // Background task updates — surface as system messages
+        const task = msg as { task_id?: string; message?: string; progress?: string; content?: string };
+        const text = task.message || task.progress || task.content || '';
+        if (!text) return [];
+        return [{
+          id: crypto.randomUUID(),
+          entryType: { type: 'system_message' },
+          content: text,
+        }];
+      }
+
+      case 'status': {
+        // Session-level status updates
+        const status = msg as { message?: string; status?: string };
+        const text = status.message || status.status || '';
+        if (!text) return [];
+        return [{
+          id: crypto.randomUUID(),
+          entryType: { type: 'system_message' },
+          content: text,
+        }];
+      }
+
+      case 'rate_limit_event':
+        // Rate limit info — could show in UI, skip for now
+        return [];
+
       default:
         return [];
     }

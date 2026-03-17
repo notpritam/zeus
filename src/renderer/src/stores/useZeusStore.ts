@@ -441,6 +441,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'session_list') {
         const p = envelope.payload as SessionListPayload;
         set({ sessions: p.sessions });
+
+        // Fetch QA agents for the active terminal session on reconnect
+        const activeTermId = get().activeSessionId;
+        if (activeTermId) {
+          zeusWs.send({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: { type: 'list_qa_agents', parentSessionId: activeTermId },
+          });
+        }
       }
 
       if (payload.type === 'session_updated') {
@@ -507,6 +516,14 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             sessionId: activeSession.id,
             payload: { type: 'start_watching', workingDir: activeSession.workingDir! },
             auth: '',
+          });
+        }
+
+        // Fetch QA agents for the active session on reconnect
+        if (activeId) {
+          zeusWs.send({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: { type: 'list_qa_agents', parentSessionId: activeId },
           });
         }
         return;
