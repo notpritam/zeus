@@ -423,9 +423,9 @@ function QAPanel() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
+      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
         <span className={`size-2 shrink-0 rounded-full ${qaRunning ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
-        <span className="text-foreground flex-1 text-xs font-medium">QA Preview</span>
+        <span className="text-primary flex-1 text-sm font-bold">QA Preview</span>
         {sessionCtx && (
           <span className="text-muted-foreground truncate text-[9px]">
             {parentSessionType === 'claude' ? 'Claude' : 'Term'}: {parentSessionId.slice(0, 8)}
@@ -439,7 +439,7 @@ function QAPanel() {
           disabled={hasRunningAgent}
           title={hasRunningAgent ? 'Stop agents first' : 'Stop PinchTab'}
         >
-          <Square className="size-3" />
+          <Square className="size-3.5" />
         </Button>
       </div>
 

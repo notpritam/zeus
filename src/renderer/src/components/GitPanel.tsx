@@ -291,7 +291,7 @@ function GitPanelInner() {
       {/* Header */}
       <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center justify-between border-b px-3 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-foreground text-xs font-semibold">Source Control</span>
+          <span className="text-primary text-sm font-bold">Source Control</span>
           {/* Connection indicator */}
           <span className="relative flex h-1.5 w-1.5">
             {isConnected && (
@@ -313,7 +313,7 @@ function GitPanelInner() {
           onClick={() => activeClaudeId && refreshGitStatus(activeClaudeId)}
           title="Refresh"
         >
-          <RefreshCw className="size-3" />
+          <RefreshCw className="size-3.5" />
         </Button>
       </div>
 

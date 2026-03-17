@@ -482,7 +482,7 @@ function SessionSidebar({
       <div className="border-border flex items-center justify-between border-b px-3 py-3">
         <div className="flex items-center gap-2">
           <Zap className="text-primary size-4" />
-          <span className="text-foreground text-xs font-semibold tracking-tight">Zeus</span>
+          <span className="text-primary text-sm font-bold tracking-tight">Zeus</span>
         </div>
         {onCloseSidebar && (
           <button

@@ -181,9 +181,8 @@ function SessionSettingsPanel() {
   if (!activeClaudeId || !session) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
-          <Settings className="text-muted-foreground size-3.5" />
-          <span className="text-foreground text-xs font-semibold">Session Settings</span>
+        <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
+          <span className="text-primary text-sm font-bold">Session Settings</span>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
           <Settings className="text-muted-foreground size-6" />
@@ -218,7 +217,7 @@ function SessionSettingsPanel() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
+      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
         <Settings className="text-muted-foreground size-3.5" />
         <span className="text-foreground text-xs font-semibold">Session Settings</span>
       </div>

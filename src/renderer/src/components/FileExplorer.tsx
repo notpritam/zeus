@@ -174,21 +174,21 @@ export default function FileExplorer() {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-1 border-b px-2 py-3">
-        <span className="text-text-secondary truncate text-[11px] font-medium">{dirName}</span>
+        <span className="text-primary truncate text-sm font-bold">{dirName}</span>
         <div className="ml-auto flex gap-0.5">
           <button
             className="text-text-ghost rounded p-0.5 transition-colors hover:bg-white/5 hover:text-text-muted"
             onClick={handleCollapseAll}
             title="Collapse all"
           >
-            <ChevronsDownUp className="size-3" />
+            <ChevronsDownUp className="size-3.5" />
           </button>
           <button
             className="text-text-ghost rounded p-0.5 transition-colors hover:bg-white/5 hover:text-text-muted"
             onClick={handleRefresh}
             title="Refresh"
           >
-            <RefreshCw className="size-3" />
+            <RefreshCw className="size-3.5" />
           </button>
         </div>
       </div>

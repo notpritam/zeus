@@ -257,9 +257,8 @@ function SessionInfoPanel() {
   if (!activeClaudeId || !session) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
-          <Info className="text-muted-foreground size-3.5" />
-          <span className="text-foreground text-xs font-semibold">Session Info</span>
+        <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
+          <span className="text-primary text-sm font-bold">Session Info</span>
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <PinchTabControl />
@@ -292,9 +291,8 @@ function SessionInfoPanel() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <Info className="text-muted-foreground size-3.5" />
-        <span className="text-foreground text-xs font-semibold">Session Info</span>
+      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
+        <span className="text-primary text-sm font-bold">Session Info</span>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
