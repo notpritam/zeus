@@ -211,6 +211,8 @@ function getToolIcon(actionType: ActionType): React.ReactNode {
       return <Globe className="size-3.5" />;
     case 'task_create':
       return <ListTree className="size-3.5" />;
+    case 'mcp_tool':
+      return <Globe className="size-3.5" />;
     default:
       return <Code2 className="size-3.5" />;
   }
@@ -225,7 +227,8 @@ function getToolTitle(actionType: ActionType): string {
     case 'web_fetch': return 'Fetch';
     case 'task_create': return 'Agent';
     case 'plan_presentation': return 'Plan';
-    case 'other': return actionType.description.startsWith('MCP:') ? 'MCP Tool' : actionType.description;
+    case 'mcp_tool': return actionType.server;
+    case 'other': return actionType.description;
   }
 }
 
@@ -238,6 +241,7 @@ function getToolSubtitle(actionType: ActionType): string {
     case 'web_fetch': return actionType.url || '';
     case 'task_create': return actionType.description || '';
     case 'plan_presentation': return '';
+    case 'mcp_tool': return actionType.method || '';
     case 'other': return actionType.description || '';
   }
 }
@@ -431,6 +435,63 @@ function GenericToolBody({ output }: { output: string }) {
   return <CodeOutput code={output} language={lang} />;
 }
 
+function McpToolBody({ input, output }: { input: string; output: string }) {
+  return (
+    <div className="mt-2 space-y-1.5">
+      {input && (
+        <div className="border-border overflow-hidden rounded-md border border-blue-500/20">
+          <div className="border-border flex items-center border-b bg-blue-500/5 px-3 py-1">
+            <span className="text-[10px] font-medium text-blue-400/70">Input</span>
+          </div>
+          <div className="max-h-40 overflow-auto">
+            <SyntaxHighlighter
+              style={codeTheme}
+              language="json"
+              PreTag="div"
+              customStyle={{
+                background: 'rgba(59, 130, 246, 0.03)',
+                margin: 0,
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.75rem',
+                fontFamily: 'var(--font-mono)',
+                lineHeight: '1.5',
+              }}
+              wrapLongLines
+            >
+              {input}
+            </SyntaxHighlighter>
+          </div>
+        </div>
+      )}
+      {output && (
+        <div className="border-border overflow-hidden rounded-md border border-green-500/20">
+          <div className="border-border flex items-center border-b bg-green-500/5 px-3 py-1">
+            <span className="text-[10px] font-medium text-green-400/70">Result</span>
+          </div>
+          <div className="max-h-60 overflow-auto">
+            <SyntaxHighlighter
+              style={codeTheme}
+              language={output.trimStart().startsWith('{') || output.trimStart().startsWith('[') ? 'json' : 'text'}
+              PreTag="div"
+              customStyle={{
+                background: 'rgba(34, 197, 94, 0.03)',
+                margin: 0,
+                padding: '0.5rem 0.75rem',
+                fontSize: '0.75rem',
+                fontFamily: 'var(--font-mono)',
+                lineHeight: '1.5',
+              }}
+              wrapLongLines
+            >
+              {output}
+            </SyntaxHighlighter>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ToolCard (opencode-inspired) ───
 
 function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { entryType: NormalizedEntryType; content: string; metadata?: unknown; sessionDone?: boolean; isLastEntry?: boolean }) {
@@ -472,7 +533,9 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
   const isEdit = actionType.action === 'file_edit';
   const isRead = actionType.action === 'file_read';
   const isSearch = actionType.action === 'search';
-  const hasExpandable = isBash ? true : (output.length > 0 || (isEdit && !!(actionType as unknown as { changes?: unknown[] }).changes));
+  const isMcp = actionType.action === 'mcp_tool';
+  const mcpInput = isMcp ? actionType.input : '';
+  const hasExpandable = isBash ? true : isMcp ? (mcpInput.length > 0 || output.length > 0) : (output.length > 0 || (isEdit && !!(actionType as unknown as { changes?: unknown[] }).changes));
 
   const handleToggle = () => {
     if (!hasExpandable || isRunning) return;
@@ -529,7 +592,8 @@ function ToolCard({ entryType, content, metadata, sessionDone, isLastEntry }: { 
           {isEdit && <EditToolBody output={output} actionType={actionType} />}
           {isSearch && <SearchToolBody output={output} />}
           {isRead && output && <ReadToolBody output={output} path={actionType.action === 'file_read' ? actionType.path : ''} />}
-          {!isBash && !isEdit && !isSearch && !isRead && output && <GenericToolBody output={output} />}
+          {isMcp && <McpToolBody input={mcpInput} output={output} />}
+          {!isBash && !isEdit && !isSearch && !isRead && !isMcp && output && <GenericToolBody output={output} />}
         </div>
       )}
     </div>

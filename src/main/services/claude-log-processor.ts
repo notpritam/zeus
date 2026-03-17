@@ -579,7 +579,24 @@ export class ClaudeLogProcessor {
 
       default:
         if (toolName.startsWith('mcp__')) {
-          return { action: 'other', description: `MCP: ${toolName}` };
+          // Parse mcp__<server>__<method> format
+          const parts = toolName.replace(/^mcp__/, '').split('__');
+          const server = parts[0] || toolName;
+          const method = parts.slice(1).join('__') || '';
+          let inputStr = '';
+          try {
+            // Capture the full input params sent to the MCP tool
+            const { ...params } = msg;
+            // Remove internal fields
+            delete params.type;
+            delete params.id;
+            delete params.name;
+            delete params.tool_name;
+            if (Object.keys(params).length > 0) {
+              inputStr = JSON.stringify(params, null, 2);
+            }
+          } catch { /* ignore */ }
+          return { action: 'mcp_tool', server, method, input: inputStr };
         }
         return { action: 'other', description: toolName };
     }
@@ -604,8 +621,14 @@ export class ClaudeLogProcessor {
       case 'Task':
       case 'Agent':
         return `Spawning agent: ${msg.description || msg.prompt}`;
-      default:
+      default: {
+        if (toolName.startsWith('mcp__')) {
+          const parts = toolName.replace(/^mcp__/, '').split('__');
+          const method = parts.slice(1).join('__') || toolName;
+          return method;
+        }
         return toolName;
+      }
     }
   }
 

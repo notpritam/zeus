@@ -322,6 +322,7 @@ export type ActionType =
   | { action: 'web_fetch'; url: string }
   | { action: 'task_create'; description: string }
   | { action: 'plan_presentation'; plan: string }
+  | { action: 'mcp_tool'; server: string; method: string; input: string }
   | { action: 'other'; description: string };
 
 export type FileChange =
