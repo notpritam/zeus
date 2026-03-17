@@ -13,7 +13,7 @@ import { initAuthToken } from './services/auth';
 import { initSettings } from './services/settings';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
-import { initDatabase, closeDatabase, markStaleSessionsErrored, pruneOldSessions } from './services/db';
+import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleQaAgentsErrored, pruneOldSessions } from './services/db';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -43,6 +43,7 @@ app.whenReady().then(async () => {
   initDatabase();
   initSettings();
   markStaleSessionsErrored();
+  markStaleQaAgentsErrored();
   pruneOldSessions(30);
   await startWebSocketServer();
 

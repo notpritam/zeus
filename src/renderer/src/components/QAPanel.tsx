@@ -71,6 +71,21 @@ function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
       </div>
     );
   }
+  if (entry.kind === 'thinking') {
+    return (
+      <div className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] italic text-purple-400">
+        <span className="mr-1 text-[9px] font-bold uppercase">Think</span>
+        {entry.content}
+      </div>
+    );
+  }
+  if (entry.kind === 'status') {
+    return (
+      <div className="text-muted-foreground rounded px-1.5 py-0.5 text-center text-[9px] italic">
+        {entry.message}
+      </div>
+    );
+  }
   return null;
 }
 
@@ -81,6 +96,7 @@ function useCurrentSessionContext() {
   const claudeSessions = useZeusStore((s) => s.claudeSessions);
   const sessions = useZeusStore((s) => s.sessions);
 
+  // Prefer the session matching the current view mode
   if (viewMode === 'claude' && activeClaudeId) {
     const cs = claudeSessions.find((s) => s.id === activeClaudeId);
     return {
@@ -95,6 +111,23 @@ function useCurrentSessionContext() {
       parentSessionId: activeSessionId,
       parentSessionType: 'terminal' as const,
       workingDir: ts?.cwd || '/',
+    };
+  }
+  // Fallback: pick whatever session exists
+  if (activeClaudeId) {
+    const cs = claudeSessions.find((s) => s.id === activeClaudeId);
+    return {
+      parentSessionId: activeClaudeId,
+      parentSessionType: 'claude' as const,
+      workingDir: cs?.workingDir || '/',
+    };
+  }
+  if (sessions.length > 0) {
+    const ts = sessions[0];
+    return {
+      parentSessionId: ts.id,
+      parentSessionType: 'terminal' as const,
+      workingDir: ts.cwd || '/',
     };
   }
   return null;
@@ -128,9 +161,12 @@ function QAPanel() {
   const activeQaAgentId = useZeusStore((s) => s.activeQaAgentId);
   const startQAAgent = useZeusStore((s) => s.startQAAgent);
   const stopQAAgent = useZeusStore((s) => s.stopQAAgent);
+  const deleteQAAgent = useZeusStore((s) => s.deleteQAAgent);
   const sendQAAgentMessage = useZeusStore((s) => s.sendQAAgentMessage);
   const clearQAAgentEntries = useZeusStore((s) => s.clearQAAgentEntries);
   const selectQaAgent = useZeusStore((s) => s.selectQaAgent);
+  const fetchQaAgents = useZeusStore((s) => s.fetchQaAgents);
+  const fetchQaAgentEntries = useZeusStore((s) => s.fetchQaAgentEntries);
 
   const sessionCtx = useCurrentSessionContext();
 
@@ -160,10 +196,18 @@ function QAPanel() {
   const hasAnyAgent = sessionAgents.length > 0;
 
   useEffect(() => {
-    if (agentLogRef.current) {
-      agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
-    }
-  }, [selectedAgent?.entries]);
+    requestAnimationFrame(() => {
+      if (agentLogRef.current) {
+        agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
+      }
+    });
+  }, [selectedAgent?.entries.length]);
+
+  // Fetch agents from DB on mount and when parent session changes
+  useEffect(() => {
+    if (!parentSessionId) return;
+    fetchQaAgents(parentSessionId);
+  }, [parentSessionId]);
 
   // Auto-select first running agent when switching sessions
   useEffect(() => {
@@ -177,8 +221,20 @@ function QAPanel() {
     }
   }, [parentSessionId, sessionAgents.length]);
 
+  // Auto-fetch entries from DB when selecting a completed agent with no entries loaded
+  useEffect(() => {
+    if (!selectedAgent) return;
+    if (selectedAgent.info.status !== 'running' && selectedAgent.entries.length === 0) {
+      fetchQaAgentEntries(selectedAgent.info.qaAgentId);
+    }
+  }, [selectedAgentId]);
+
   const handleStartAgent = () => {
-    if (!agentTask.trim() || !parentSessionId) return;
+    console.log('[QAPanel] handleStartAgent called', { agentTask, parentSessionId, parentSessionType, sessionCtx });
+    if (!agentTask.trim() || !parentSessionId) {
+      console.warn('[QAPanel] Blocked: agentTask empty or no parentSessionId', { agentTask: agentTask.trim(), parentSessionId });
+      return;
+    }
     startQAAgent(agentTask.trim(), sessionCtx?.workingDir || '/', parentSessionId, parentSessionType, agentTargetUrl);
     setAgentTask('');
     setShowNewAgentForm(false);
@@ -724,7 +780,7 @@ function QAPanel() {
                         >
                           <Trash2 className="size-3" />
                         </Button>
-                        {selectedAgent.info.status === 'running' && (
+                        {selectedAgent.info.status === 'running' ? (
                           <Button
                             variant="ghost"
                             size="icon-xs"
@@ -733,6 +789,16 @@ function QAPanel() {
                             title="Stop agent"
                           >
                             <Square className="size-3" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground hover:text-destructive size-5"
+                            onClick={() => deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId)}
+                            title="Delete agent"
+                          >
+                            <X className="size-3" />
                           </Button>
                         )}
                       </div>

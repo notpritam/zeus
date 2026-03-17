@@ -7,7 +7,6 @@ import type {
   ClaudeJson,
   NormalizedEntry,
   ActionType,
-  ContentItem,
   StreamEvent,
   ContentBlockDelta,
 } from './claude-types';
@@ -15,13 +14,19 @@ import type { SessionActivity } from '../../shared/types';
 
 export class ClaudeLogProcessor {
   // Map tool_use id → entry metadata for result matching
-  private toolMap = new Map<string, { entryId: string; toolName: string; content: string }>();
+  private toolMap = new Map<string, { entryId: string; toolName: string; content: string; actionType: ActionType }>();
 
-  // Streaming state
+  // Streaming state — text & thinking
   private streamingText = '';
   private streamingThinking = '';
   private streamingEntryId: string | null = null;
   private thinkingEntryId: string | null = null;
+
+  // Streaming state — tool_use (input_json_delta accumulation)
+  private streamingToolId: string | null = null;
+  private streamingToolName: string | null = null;
+  private streamingToolInput = '';
+  private streamingToolEntryId: string | null = null;
 
   // Activity tracking
   private _activity: SessionActivity = { state: 'starting' };
@@ -63,7 +68,7 @@ export class ClaudeLogProcessor {
         return [];
 
       case 'tool_use':
-        return [this.processToolUse(msg)];
+        return this.processToolUse(msg);
 
       case 'tool_result':
         return this.processToolResult(msg);
@@ -83,35 +88,71 @@ export class ClaudeLogProcessor {
     }
   }
 
-  private processToolUse(msg: ClaudeJson): NormalizedEntry {
+  private processToolUse(msg: ClaudeJson): NormalizedEntry[] {
     const toolMsg = msg as Record<string, unknown>;
     const toolName = (toolMsg.tool_name || toolMsg.name) as string;
     const toolId = toolMsg.id as string;
+
+    // If this tool was already emitted via stream_event content_block_stop, skip
+    if (toolId && this.toolMap.has(toolId)) {
+      return [];
+    }
+
     const actionType = this.extractActionType(toolName, toolMsg);
     const content = this.generateToolContent(toolName, toolMsg);
     const entryId = crypto.randomUUID();
 
     // Store for later tool_result matching
     if (toolId) {
-      this.toolMap.set(toolId, { entryId, toolName, content });
+      this.toolMap.set(toolId, { entryId, toolName, content, actionType });
     }
 
     this.setActivity({ state: 'tool_running', toolName, description: content });
 
-    return {
+    return [{
       id: entryId,
       entryType: { type: 'tool_use', toolName, actionType, status: 'created' },
       content,
-    };
+    }];
   }
 
-  private processToolResult(): NormalizedEntry[] {
-    // Tool results update status of existing tool_use entries.
-    // The UI should match by tool_use id and patch the status.
-    // For now we don't emit new entries — the session emits 'entry_update' events.
-    // After tool completes, revert to streaming/idle
+  private processToolResult(msg: ClaudeJson): NormalizedEntry[] {
+    const resultMsg = msg as {
+      tool_use_id?: string;
+      result?: unknown;
+      is_error?: boolean;
+    };
+
+    const toolUseId = resultMsg.tool_use_id;
+    if (!toolUseId) {
+      this.setActivity({ state: 'streaming' });
+      return [];
+    }
+
+    const tracked = this.toolMap.get(toolUseId);
+    if (!tracked) {
+      this.setActivity({ state: 'streaming' });
+      return [];
+    }
+
+    const status = resultMsg.is_error ? 'failed' : 'success';
+    const resultContent = typeof resultMsg.result === 'string'
+      ? resultMsg.result
+      : JSON.stringify(resultMsg.result ?? '').slice(0, 500);
+
+    this.toolMap.delete(toolUseId);
     this.setActivity({ state: 'streaming' });
-    return [];
+
+    return [{
+      id: tracked.entryId,
+      entryType: {
+        type: 'tool_use',
+        toolName: tracked.toolName,
+        actionType: tracked.actionType,
+        status: status as 'success' | 'failed',
+      },
+      content: resultContent,
+    }];
   }
 
   private processStreamEvent(msg: ClaudeJson): NormalizedEntry[] {
@@ -139,6 +180,13 @@ export class ClaudeLogProcessor {
             entryType: { type: 'thinking' },
             content: this.streamingThinking,
           });
+        } else if (block.type === 'tool_use') {
+          const toolBlock = block as { id: string; name: string };
+          this.streamingToolId = toolBlock.id;
+          this.streamingToolName = toolBlock.name;
+          this.streamingToolInput = '';
+          this.streamingToolEntryId = crypto.randomUUID();
+          this.setActivity({ state: 'tool_running', toolName: toolBlock.name });
         }
         break;
       }
@@ -159,16 +207,52 @@ export class ClaudeLogProcessor {
             entryType: { type: 'thinking' },
             content: this.streamingThinking,
           });
+        } else if (delta.type === 'input_json_delta' && this.streamingToolEntryId) {
+          this.streamingToolInput += delta.partial_json;
         }
         break;
       }
 
-      case 'content_block_stop':
+      case 'content_block_stop': {
+        // Finalize any streaming text/thinking block
         this.streamingEntryId = null;
         this.thinkingEntryId = null;
         this.streamingText = '';
         this.streamingThinking = '';
+
+        // Finalize any streaming tool_use block — emit the complete tool entry
+        if (this.streamingToolEntryId && this.streamingToolName) {
+          const toolName = this.streamingToolName;
+          let parsedInput: Record<string, unknown> = {};
+          try {
+            parsedInput = JSON.parse(this.streamingToolInput);
+          } catch { /* partial/empty JSON — use raw string */ }
+
+          const actionType = this.extractActionType(toolName, parsedInput);
+          const content = this.generateToolContent(toolName, parsedInput);
+
+          if (this.streamingToolId) {
+            this.toolMap.set(this.streamingToolId, {
+              entryId: this.streamingToolEntryId,
+              toolName,
+              content,
+              actionType,
+            });
+          }
+
+          entries.push({
+            id: this.streamingToolEntryId,
+            entryType: { type: 'tool_use', toolName, actionType, status: 'created' },
+            content,
+          });
+
+          this.streamingToolId = null;
+          this.streamingToolName = null;
+          this.streamingToolInput = '';
+          this.streamingToolEntryId = null;
+        }
         break;
+      }
     }
 
     return entries;
@@ -280,16 +364,4 @@ export class ClaudeLogProcessor {
     return path.relative(this.worktreePath, filePath) || filePath;
   }
 
-  private extractMessageText(msg: ClaudeJson): string {
-    const message = (msg as { message?: { content?: ContentItem[] | string } }).message;
-    if (!message) return '';
-    if (typeof message.content === 'string') return message.content;
-    if (Array.isArray(message.content)) {
-      return message.content
-        .filter((c) => c.type === 'text')
-        .map((c) => (c as { text: string }).text)
-        .join('\n');
-    }
-    return '';
-  }
 }

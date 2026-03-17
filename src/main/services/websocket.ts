@@ -48,6 +48,13 @@ import {
   getAllTerminalSessions,
   deleteTerminalSession,
   archiveTerminalSession,
+  insertQaAgentSession,
+  updateQaAgentSessionStatus,
+  getQaAgentSessionsByParent,
+  deleteQaAgentSession,
+  insertQaAgentEntry,
+  getQaAgentEntries,
+  markStaleQaAgentsErrored,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../../shared/types';
 import { GitWatcherManager } from './git';
@@ -437,17 +444,35 @@ function buildQAAgentSystemPrompt(targetUrl: string): string {
   return `You are a QA agent for a web application running at ${targetUrl}.
 
 You have full access to:
-- Browser control: qa_navigate, qa_click, qa_fill, qa_type, qa_press, qa_scroll
-- Browser inspection: qa_snapshot, qa_screenshot, qa_run_test_flow
-- Browser observability: qa_console_logs, qa_network_requests, qa_js_errors
+- Navigation & page info: qa_navigate, qa_text, qa_pdf, qa_health
+- Element interaction: qa_click, qa_click_selector, qa_hover, qa_focus, qa_select_text, qa_type, qa_fill, qa_press, qa_scroll
+- DOM inspection: qa_snapshot (supports CSS selector scoping and compact format), qa_screenshot (supports full_page)
+- JavaScript execution: qa_evaluate (run JS in page context — read app state, dispatch events, assert DOM)
+- Tab management: qa_list_tabs, qa_lock_tab, qa_unlock_tab
+- Browser state: qa_cookies (get/set), qa_storage (localStorage/sessionStorage)
+- Observability: qa_console_logs (filter by level), qa_network_requests (filter by URL pattern, failed_only), qa_js_errors
+- Smart waiting: qa_wait_for_element (poll until selector matches), qa_wait_for_network_idle
+- Assertions: qa_assert_element (assert exists/not-exists with optional text match)
+- Batch: qa_batch_actions (run multiple actions in one call — much faster)
+- Compound: qa_run_test_flow (navigate + wait + snapshot + screenshot + errors in one call)
+- Instance info: qa_list_instances, qa_list_profiles
 - File editing: Read, Edit, Write tools
 - Shell commands: Bash tool
 
+Tips for speed:
+- Use qa_batch_actions to chain clicks/types/presses instead of calling each tool individually.
+- Use qa_snapshot with a CSS selector param to scope to a section — avoids huge accessibility trees.
+- Use qa_click_selector for table rows, cards, and other non-focusable clickable elements.
+- Use qa_wait_for_element instead of fixed delays — it polls and returns as soon as the element appears.
+- Use qa_assert_element for pass/fail checks — it auto-retries with timeout.
+- For React controlled inputs, use qa_click on the field then qa_type (not qa_fill which may miss onChange).
+- Use qa_evaluate to read Redux/Zustand store state or dispatch synthetic events.
+
 Your workflow:
 1. Navigate to the target URL
-2. Test the requested functionality
-3. Take screenshots to verify visual state
-4. Check console logs, network requests, and JS errors
+2. Test the requested functionality using the fastest tools available
+3. Use qa_assert_element and qa_wait_for_element to verify state changes
+4. Check qa_console_logs, qa_network_requests, and qa_js_errors
 5. If you find bugs: fix the code, then re-test to confirm the fix
 6. Report findings concisely
 
@@ -459,21 +484,78 @@ Never use AskUserQuestion — make your best judgment and proceed.`;
 function wireQAAgent(record: QaAgentRecord): void {
   const { session, qaAgentId, parentSessionId } = record;
   const toolEntries = new Map<string, string>();
+  // Track streaming text blocks: accumulate content, emit only when block is finalized
+  let pendingTextId: string | null = null;
+  let pendingTextContent = '';
+  // Track streaming thinking blocks: same accumulate-and-flush pattern
+  let pendingThinkingId: string | null = null;
+  let pendingThinkingContent = '';
 
-  session.on('entry', (entry: NormalizedEntry) => {
-    const now = Date.now();
-
-    if (entry.entryType.type === 'assistant_message' && entry.content.trim()) {
+  const flushPendingText = (): void => {
+    if (pendingTextId && pendingTextContent.trim()) {
+      const entry = { kind: 'text' as const, content: pendingTextContent.trim(), timestamp: Date.now() };
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
         payload: {
           type: 'qa_agent_entry',
           qaAgentId,
           parentSessionId,
-          entry: { kind: 'text', content: entry.content, timestamp: now },
+          entry,
         },
       });
+      insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
     }
+    pendingTextId = null;
+    pendingTextContent = '';
+  };
+
+  const flushPendingThinking = (): void => {
+    if (pendingThinkingId && pendingThinkingContent.trim()) {
+      const entry = { kind: 'thinking' as const, content: pendingThinkingContent.trim().slice(0, 300), timestamp: Date.now() };
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_entry',
+          qaAgentId,
+          parentSessionId,
+          entry,
+        },
+      });
+      insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
+    }
+    pendingThinkingId = null;
+    pendingThinkingContent = '';
+  };
+
+  session.on('entry', (entry: NormalizedEntry) => {
+    const now = Date.now();
+
+    if (entry.entryType.type === 'assistant_message') {
+      if (entry.id !== pendingTextId) {
+        // New text block — flush previous one
+        flushPendingText();
+        pendingTextId = entry.id;
+      }
+      // Always update to latest accumulated content
+      pendingTextContent = entry.content;
+      return;
+    }
+
+    // Any non-text entry means the text block is done — flush it
+    flushPendingText();
+
+    // Accumulate thinking entries — flush only when block transitions
+    if (entry.entryType.type === 'thinking') {
+      if (entry.id !== pendingThinkingId) {
+        flushPendingThinking();
+        pendingThinkingId = entry.id;
+      }
+      pendingThinkingContent = entry.content;
+      return;
+    }
+
+    // Any non-thinking entry means the thinking block is done — flush it
+    flushPendingThinking();
 
     if (entry.entryType.type === 'tool_use') {
       const { toolName, status } = entry.entryType;
@@ -492,46 +574,71 @@ function wireQAAgent(record: QaAgentRecord): void {
           args = entry.content.slice(0, 100);
         }
 
+        const toolCallEntry = { kind: 'tool_call' as const, tool: toolName, args, timestamp: now };
         broadcastEnvelope({
           channel: 'qa', sessionId: '', auth: '',
           payload: {
             type: 'qa_agent_entry',
             qaAgentId,
             parentSessionId,
-            entry: { kind: 'tool_call', tool: toolName, args, timestamp: now },
+            entry: toolCallEntry,
           },
         });
+        insertQaAgentEntry(qaAgentId, toolCallEntry.kind, JSON.stringify(toolCallEntry), now);
       } else if (status === 'success' || status === 'failed' || status === 'timed_out') {
         const summary = entry.content.slice(0, 200);
+        const toolResultEntry = {
+          kind: 'tool_result' as const,
+          tool: toolName,
+          summary,
+          success: status === 'success',
+          timestamp: now,
+        };
         broadcastEnvelope({
           channel: 'qa', sessionId: '', auth: '',
           payload: {
             type: 'qa_agent_entry',
             qaAgentId,
             parentSessionId,
-            entry: {
-              kind: 'tool_result',
-              tool: toolName,
-              summary,
-              success: status === 'success',
-              timestamp: now,
-            },
+            entry: toolResultEntry,
           },
         });
+        insertQaAgentEntry(qaAgentId, toolResultEntry.kind, JSON.stringify(toolResultEntry), now);
         toolEntries.delete(entry.id);
       }
     }
 
     if (entry.entryType.type === 'error_message') {
+      const errorEntry = { kind: 'error' as const, message: entry.content, timestamp: now };
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
         payload: {
           type: 'qa_agent_entry',
           qaAgentId,
           parentSessionId,
-          entry: { kind: 'error', message: entry.content, timestamp: now },
+          entry: errorEntry,
         },
       });
+      insertQaAgentEntry(qaAgentId, errorEntry.kind, JSON.stringify(errorEntry), now);
+    }
+
+    if (entry.entryType.type === 'token_usage') {
+      const { totalTokens } = entry.entryType;
+      const statusEntry = {
+        kind: 'status' as const,
+        message: `Turn complete — ${totalTokens.toLocaleString()} tokens used`,
+        timestamp: now,
+      };
+      broadcastEnvelope({
+        channel: 'qa', sessionId: '', auth: '',
+        payload: {
+          type: 'qa_agent_entry',
+          qaAgentId,
+          parentSessionId,
+          entry: statusEntry,
+        },
+      });
+      insertQaAgentEntry(qaAgentId, statusEntry.kind, JSON.stringify(statusEntry), now);
     }
   });
 
@@ -542,6 +649,9 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('done', () => {
+    flushPendingText();
+    flushPendingThinking();
+    updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
@@ -550,13 +660,18 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('error', (err) => {
+    flushPendingText();
+    flushPendingThinking();
+    const crashEntry = { kind: 'error' as const, message: `Agent crashed: ${err.message}`, timestamp: Date.now() };
+    insertQaAgentEntry(qaAgentId, crashEntry.kind, JSON.stringify(crashEntry), crashEntry.timestamp);
+    updateQaAgentSessionStatus(qaAgentId, 'error', Date.now());
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: {
         type: 'qa_agent_entry',
         qaAgentId,
         parentSessionId,
-        entry: { kind: 'error', message: `Agent crashed: ${err.message}`, timestamp: Date.now() },
+        entry: crashEntry,
       },
     });
     broadcastEnvelope({
@@ -1373,6 +1488,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
     }
   } else if (payload.type === 'start_qa_agent') {
+    console.log('[QA Agent] start_qa_agent received:', { task: payload.task, parentSessionId: payload.parentSessionId, parentSessionType: payload.parentSessionType, workingDir: payload.workingDir, targetUrl: payload.targetUrl });
     try {
       if (!qaService?.isRunning()) {
         qaService = new QAService();
@@ -1428,9 +1544,22 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       qaAgentSessions.set(qaAgentId, record);
       wireQAAgent(record);
 
+      // Persist QA agent session to DB
+      insertQaAgentSession({
+        id: qaAgentId,
+        parentSessionId,
+        parentSessionType,
+        task: payload.task,
+        targetUrl,
+        status: 'running',
+        startedAt: record.startedAt,
+        endedAt: null,
+      });
+
       const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
       await session.start(prompt);
 
+      console.log('[QA Agent] Agent started successfully:', qaAgentId);
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
         payload: {
@@ -1443,6 +1572,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         },
       });
     } catch (err) {
+      console.error('[QA Agent] Failed to start:', (err as Error).message);
       sendEnvelope(ws, {
         channel: 'qa', sessionId: '', auth: '',
         payload: { type: 'qa_error', message: `Failed to start QA agent: ${(err as Error).message}` },
@@ -1458,18 +1588,50 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: '' },
       });
     }
+  } else if (payload.type === 'delete_qa_agent') {
+    // Stop if running, then delete from DB and notify clients
+    const record = qaAgentSessions.get(payload.qaAgentId);
+    if (record) {
+      record.session.kill();
+      qaAgentSessions.delete(payload.qaAgentId);
+    }
+    deleteQaAgentSession(payload.qaAgentId);
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_deleted', qaAgentId: payload.qaAgentId, parentSessionId: payload.parentSessionId },
+    });
   } else if (payload.type === 'list_qa_agents') {
-    const agents = Array.from(qaAgentSessions.values())
+    // Merge in-memory running agents with completed agents from DB
+    const runningIds = new Set<string>();
+    const runningAgents = Array.from(qaAgentSessions.values())
       .filter((r) => r.parentSessionId === payload.parentSessionId)
+      .map((r) => {
+        runningIds.add(r.qaAgentId);
+        return {
+          qaAgentId: r.qaAgentId,
+          parentSessionId: r.parentSessionId,
+          parentSessionType: r.parentSessionType,
+          task: r.task,
+          targetUrl: r.targetUrl,
+          status: 'running' as const,
+          startedAt: r.startedAt,
+        };
+      });
+
+    // Get completed/errored agents from DB (skip ones currently running in memory)
+    const dbAgents = getQaAgentSessionsByParent(payload.parentSessionId)
+      .filter((r) => !runningIds.has(r.id))
       .map((r) => ({
-        qaAgentId: r.qaAgentId,
+        qaAgentId: r.id,
         parentSessionId: r.parentSessionId,
         parentSessionType: r.parentSessionType,
         task: r.task,
-        targetUrl: r.targetUrl,
-        status: 'running' as const,
+        targetUrl: r.targetUrl ?? undefined,
+        status: r.status as 'stopped' | 'error',
         startedAt: r.startedAt,
       }));
+
+    const agents = [...runningAgents, ...dbAgents];
     sendEnvelope(ws, {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_list', parentSessionId: payload.parentSessionId, agents },
@@ -1484,15 +1646,17 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       return;
     }
 
+    const userMsgEntry = { kind: 'user_message' as const, content: payload.text, timestamp: Date.now() };
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
       payload: {
         type: 'qa_agent_entry',
         qaAgentId: payload.qaAgentId,
         parentSessionId: record.parentSessionId,
-        entry: { kind: 'user_message', content: payload.text, timestamp: Date.now() },
+        entry: userMsgEntry,
       },
     });
+    insertQaAgentEntry(payload.qaAgentId, userMsgEntry.kind, JSON.stringify(userMsgEntry), userMsgEntry.timestamp);
 
     try {
       await record.session.sendMessage(payload.text);
@@ -1502,6 +1666,14 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'qa_error', message: `Failed to send message: ${(err as Error).message}` },
       });
     }
+  } else if (payload.type === 'get_qa_agent_entries') {
+    // Load persisted entries from DB for a specific agent
+    const dbEntries = getQaAgentEntries(payload.qaAgentId);
+    const entries = dbEntries.map((row) => JSON.parse(row.data) as import('../../shared/types').QaAgentLogEntry);
+    sendEnvelope(ws, {
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_entries', qaAgentId: payload.qaAgentId, entries },
+    });
   } else {
     sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
   }

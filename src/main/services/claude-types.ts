@@ -117,6 +117,7 @@ export interface ClaudeToolUseMsg {
 export interface ClaudeToolResultMsg {
   type: 'tool_result';
   session_id?: string;
+  tool_use_id?: string;
   result: unknown;
   is_error?: boolean;
 }
@@ -140,7 +141,8 @@ export type StreamEvent =
 export type ContentBlockDelta =
   | { type: 'text_delta'; text: string }
   | { type: 'thinking_delta'; thinking: string }
-  | { type: 'signature_delta'; signature: string };
+  | { type: 'signature_delta'; signature: string }
+  | { type: 'input_json_delta'; partial_json: string };
 
 export interface ClaudeResultMsg {
   type: 'result';

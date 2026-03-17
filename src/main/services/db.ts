@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -66,6 +66,33 @@ function runMigrations(database: Database.Database): void {
     `);
   }
 
+  if (currentVersion < 3) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS qa_agent_sessions (
+        id                  TEXT PRIMARY KEY,
+        parent_session_id   TEXT NOT NULL,
+        parent_session_type TEXT NOT NULL,
+        task                TEXT NOT NULL,
+        target_url          TEXT,
+        status              TEXT NOT NULL DEFAULT 'running',
+        started_at          INTEGER NOT NULL,
+        ended_at            INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_qa_parent ON qa_agent_sessions(parent_session_id);
+      CREATE INDEX IF NOT EXISTS idx_qa_started ON qa_agent_sessions(started_at);
+
+      CREATE TABLE IF NOT EXISTS qa_agent_entries (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        qa_agent_id   TEXT NOT NULL,
+        kind          TEXT NOT NULL,
+        data          TEXT NOT NULL,
+        timestamp     INTEGER NOT NULL,
+        seq           INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_qae_agent ON qa_agent_entries(qa_agent_id, seq);
+    `);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -110,6 +137,10 @@ export function pruneOldSessions(maxAgeDays = 30): void {
   ).run(cutoff);
   db.prepare(`DELETE FROM claude_sessions WHERE started_at < ?`).run(cutoff);
   db.prepare(`DELETE FROM terminal_sessions WHERE started_at < ?`).run(cutoff);
+  db.prepare(
+    `DELETE FROM qa_agent_entries WHERE qa_agent_id IN (SELECT id FROM qa_agent_sessions WHERE started_at < ?)`,
+  ).run(cutoff);
+  db.prepare(`DELETE FROM qa_agent_sessions WHERE started_at < ?`).run(cutoff);
 }
 
 // ─── Claude Sessions CRUD ───
@@ -393,4 +424,159 @@ export function getAllProjects(): SavedProject[] {
 export function deleteProject(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM saved_projects WHERE id = ?`).run(id);
+}
+
+// ─── QA Agent Sessions CRUD ───
+
+export interface QaAgentSessionRow {
+  id: string;
+  parentSessionId: string;
+  parentSessionType: 'terminal' | 'claude';
+  task: string;
+  targetUrl: string | null;
+  status: string;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+interface QaAgentSessionDbRow {
+  id: string;
+  parent_session_id: string;
+  parent_session_type: string;
+  task: string;
+  target_url: string | null;
+  status: string;
+  started_at: number;
+  ended_at: number | null;
+}
+
+export function insertQaAgentSession(info: QaAgentSessionRow): void {
+  if (!db) return;
+  db.prepare(
+    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, task, target_url, status, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    info.id,
+    info.parentSessionId,
+    info.parentSessionType,
+    info.task,
+    info.targetUrl,
+    info.status,
+    info.startedAt,
+    info.endedAt,
+  );
+}
+
+export function updateQaAgentSessionStatus(
+  id: string,
+  status: string,
+  endedAt?: number,
+): void {
+  if (!db) return;
+  if (endedAt != null) {
+    db.prepare(`UPDATE qa_agent_sessions SET status = ?, ended_at = ? WHERE id = ?`).run(
+      status,
+      endedAt,
+      id,
+    );
+  } else {
+    db.prepare(`UPDATE qa_agent_sessions SET status = ? WHERE id = ?`).run(status, id);
+  }
+}
+
+export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSessionRow[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM qa_agent_sessions WHERE parent_session_id = ? ORDER BY started_at DESC`)
+    .all(parentSessionId) as QaAgentSessionDbRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    parentSessionId: r.parent_session_id,
+    parentSessionType: r.parent_session_type as 'terminal' | 'claude',
+    task: r.task,
+    targetUrl: r.target_url,
+    status: r.status,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+  }));
+}
+
+export function getAllQaAgentSessions(): QaAgentSessionRow[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM qa_agent_sessions ORDER BY started_at DESC`)
+    .all() as QaAgentSessionDbRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    parentSessionId: r.parent_session_id,
+    parentSessionType: r.parent_session_type as 'terminal' | 'claude',
+    task: r.task,
+    targetUrl: r.target_url,
+    status: r.status,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+  }));
+}
+
+export function deleteQaAgentSession(id: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM qa_agent_entries WHERE qa_agent_id = ?`).run(id);
+  db.prepare(`DELETE FROM qa_agent_sessions WHERE id = ?`).run(id);
+}
+
+// ─── QA Agent Entries CRUD ───
+
+export interface QaAgentEntryRow {
+  id?: number;
+  qaAgentId: string;
+  kind: string;
+  data: string; // JSON stringified entry
+  timestamp: number;
+  seq: number;
+}
+
+interface QaAgentEntryDbRow {
+  id: number;
+  qa_agent_id: string;
+  kind: string;
+  data: string;
+  timestamp: number;
+  seq: number;
+}
+
+export function insertQaAgentEntry(qaAgentId: string, kind: string, data: string, timestamp: number): void {
+  if (!db) return;
+  const maxSeq = db
+    .prepare(`SELECT MAX(seq) as max_seq FROM qa_agent_entries WHERE qa_agent_id = ?`)
+    .get(qaAgentId) as { max_seq: number | null } | undefined;
+  const nextSeq = (maxSeq?.max_seq ?? -1) + 1;
+
+  db.prepare(
+    `INSERT INTO qa_agent_entries (qa_agent_id, kind, data, timestamp, seq) VALUES (?, ?, ?, ?, ?)`,
+  ).run(qaAgentId, kind, data, timestamp, nextSeq);
+}
+
+export function getQaAgentEntries(qaAgentId: string): QaAgentEntryRow[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM qa_agent_entries WHERE qa_agent_id = ? ORDER BY seq ASC`)
+    .all(qaAgentId) as QaAgentEntryDbRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    qaAgentId: r.qa_agent_id,
+    kind: r.kind,
+    data: r.data,
+    timestamp: r.timestamp,
+    seq: r.seq,
+  }));
+}
+
+export function markStaleQaAgentsErrored(): void {
+  if (!db) return;
+  const result = db
+    .prepare(`UPDATE qa_agent_sessions SET status = 'error', ended_at = ? WHERE status = 'running'`)
+    .run(Date.now());
+  if (result.changes > 0) {
+    console.log(`[Zeus DB] Marked ${result.changes} stale QA agent session(s) as error`);
+  }
 }

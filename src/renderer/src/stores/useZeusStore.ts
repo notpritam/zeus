@@ -208,10 +208,12 @@ interface ZeusState {
   // QA Agent actions
   startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string) => void;
   stopQAAgent: (qaAgentId: string) => void;
+  deleteQAAgent: (qaAgentId: string, parentSessionId: string) => void;
   sendQAAgentMessage: (qaAgentId: string, text: string) => void;
   clearQAAgentEntries: (qaAgentId: string) => void;
   selectQaAgent: (parentSessionId: string, qaAgentId: string | null) => void;
   fetchQaAgents: (parentSessionId: string) => void;
+  fetchQaAgentEntries: (qaAgentId: string) => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | null) => void;
@@ -972,6 +974,20 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           return { qaAgents: { ...state.qaAgents, [parentSessionId]: agents } };
         });
       }
+      if (payload.type === 'qa_agent_deleted') {
+        const { qaAgentId, parentSessionId } = payload;
+        set((state) => {
+          const agents = (state.qaAgents[parentSessionId] ?? []).filter((a) => a.info.qaAgentId !== qaAgentId);
+          const activeId = state.activeQaAgentId[parentSessionId];
+          const newActiveId = activeId === qaAgentId
+            ? (agents.length > 0 ? agents[agents.length - 1].info.qaAgentId : null)
+            : activeId;
+          return {
+            qaAgents: { ...state.qaAgents, [parentSessionId]: agents },
+            activeQaAgentId: { ...state.activeQaAgentId, [parentSessionId]: newActiveId },
+          };
+        });
+      }
       if (payload.type === 'qa_agent_entry') {
         const { qaAgentId, parentSessionId, entry } = payload;
         set((state) => {
@@ -993,6 +1009,19 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             return found ? { ...found, info } : { info, entries: [] };
           });
           return { qaAgents: { ...state.qaAgents, [parentSessionId]: merged } };
+        });
+      }
+      if (payload.type === 'qa_agent_entries') {
+        const { qaAgentId, entries } = payload;
+        set((state) => {
+          // Find the agent across all parent sessions and load its entries
+          const updated = { ...state.qaAgents };
+          for (const parentId of Object.keys(updated)) {
+            updated[parentId] = updated[parentId].map((a) =>
+              a.info.qaAgentId === qaAgentId ? { ...a, entries } : a,
+            );
+          }
+          return { qaAgents: updated };
         });
       }
     });
@@ -1838,6 +1867,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  deleteQAAgent: (qaAgentId: string, parentSessionId: string) => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'delete_qa_agent', qaAgentId, parentSessionId },
+    });
+  },
+
   sendQAAgentMessage: (qaAgentId: string, text: string) => {
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
@@ -1872,6 +1908,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'list_qa_agents', parentSessionId },
+    });
+  },
+
+  fetchQaAgentEntries: (qaAgentId: string) => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'get_qa_agent_entries', qaAgentId },
     });
   },
 

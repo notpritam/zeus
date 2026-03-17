@@ -436,7 +436,9 @@ export type QaAgentLogEntry =
   | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number }
   | { kind: 'text'; content: string; timestamp: number }
   | { kind: 'error'; message: string; timestamp: number }
-  | { kind: 'user_message'; content: string; timestamp: number };
+  | { kind: 'user_message'; content: string; timestamp: number }
+  | { kind: 'thinking'; content: string; timestamp: number }
+  | { kind: 'status'; message: string; timestamp: number };
 
 export type QaAgentStatus = 'running' | 'stopped' | 'error';
 
@@ -484,9 +486,13 @@ export type QaPayload =
   | { type: 'stop_qa_agent'; qaAgentId: string }
   | { type: 'qa_agent_message'; qaAgentId: string; text: string }
   | { type: 'list_qa_agents'; parentSessionId: string }
+  | { type: 'get_qa_agent_entries'; qaAgentId: string }
+  | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
   // Server → Client (QA Agent)
   | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
+  | { type: 'qa_agent_deleted'; qaAgentId: string; parentSessionId: string }
   | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: QaAgentLogEntry }
   | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
+  | { type: 'qa_agent_entries'; qaAgentId: string; entries: QaAgentLogEntry[] }
   | { type: 'qa_error'; message: string };
