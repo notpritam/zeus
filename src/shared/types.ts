@@ -28,7 +28,7 @@ export interface ZeusSettings {
 export type SettingsPayload =
   | { type: 'get_settings' }
   | { type: 'settings_update'; settings: ZeusSettings }
-  | { type: 'add_project'; name: string; path: string }
+  | { type: 'add_project'; name: string; path: string; createDir?: boolean }
   | { type: 'remove_project'; id: string }
   | { type: 'update_defaults'; defaults: Partial<ClaudeDefaults> }
   | { type: 'set_last_used_project'; id: string | null }
@@ -447,6 +447,7 @@ export interface QaAgentSessionInfo {
   qaAgentId: string;
   parentSessionId: string;        // terminal or claude session id
   parentSessionType: 'terminal' | 'claude';
+  name?: string;
   task: string;
   targetUrl?: string;
   status: QaAgentStatus;
@@ -483,14 +484,14 @@ export type QaPayload =
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude' }
+  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude' }
   | { type: 'stop_qa_agent'; qaAgentId: string }
   | { type: 'qa_agent_message'; qaAgentId: string; text: string }
   | { type: 'list_qa_agents'; parentSessionId: string }
   | { type: 'get_qa_agent_entries'; qaAgentId: string }
   | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
   // Server → Client (QA Agent)
-  | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; task: string; targetUrl?: string }
+  | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
   | { type: 'qa_agent_deleted'; qaAgentId: string; parentSessionId: string }
   | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: QaAgentLogEntry }

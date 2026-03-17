@@ -25,6 +25,8 @@ import {
   Send,
   Plus,
   Brain,
+  Layers,
+  List,
 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -151,6 +153,161 @@ function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
   return null;
 }
 
+// --- Compressed mode ---
+
+type CompressedGroup =
+  | { type: 'tool_pair'; call: QaAgentLogEntry & { kind: 'tool_call' }; result?: QaAgentLogEntry & { kind: 'tool_result' } }
+  | { type: 'text'; entry: QaAgentLogEntry & { kind: 'text' } }
+  | { type: 'user_message'; entry: QaAgentLogEntry & { kind: 'user_message' } }
+  | { type: 'error'; entry: QaAgentLogEntry & { kind: 'error' } }
+  | { type: 'thinking'; entries: (QaAgentLogEntry & { kind: 'thinking' })[] }
+  | { type: 'status_group'; entries: (QaAgentLogEntry & { kind: 'status' })[] };
+
+function compressEntries(entries: QaAgentLogEntry[]): CompressedGroup[] {
+  const groups: CompressedGroup[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const e = entries[i];
+
+    if (e.kind === 'tool_call') {
+      // Look ahead for matching tool_result
+      const next = entries[i + 1];
+      if (next && next.kind === 'tool_result' && next.tool === e.tool) {
+        groups.push({ type: 'tool_pair', call: e, result: next as QaAgentLogEntry & { kind: 'tool_result' } });
+        i += 2;
+      } else {
+        groups.push({ type: 'tool_pair', call: e });
+        i++;
+      }
+    } else if (e.kind === 'thinking') {
+      // Merge consecutive thinking entries
+      const batch: (QaAgentLogEntry & { kind: 'thinking' })[] = [e];
+      while (i + 1 < entries.length && entries[i + 1].kind === 'thinking') {
+        i++;
+        batch.push(entries[i] as QaAgentLogEntry & { kind: 'thinking' });
+      }
+      groups.push({ type: 'thinking', entries: batch });
+      i++;
+    } else if (e.kind === 'status') {
+      // Merge consecutive status entries
+      const batch: (QaAgentLogEntry & { kind: 'status' })[] = [e];
+      while (i + 1 < entries.length && entries[i + 1].kind === 'status') {
+        i++;
+        batch.push(entries[i] as QaAgentLogEntry & { kind: 'status' });
+      }
+      groups.push({ type: 'status_group', entries: batch });
+      i++;
+    } else if (e.kind === 'text') {
+      groups.push({ type: 'text', entry: e });
+      i++;
+    } else if (e.kind === 'user_message') {
+      groups.push({ type: 'user_message', entry: e as QaAgentLogEntry & { kind: 'user_message' } });
+      i++;
+    } else if (e.kind === 'error') {
+      groups.push({ type: 'error', entry: e as QaAgentLogEntry & { kind: 'error' } });
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return groups;
+}
+
+function CompressedToolPair({ group }: { group: CompressedGroup & { type: 'tool_pair' } }) {
+  const [expanded, setExpanded] = useState(false);
+  const success = group.result ? group.result.success : undefined;
+  const dotColor = success === undefined ? 'bg-primary animate-pulse' : success ? 'bg-green-400' : 'bg-red-400';
+
+  return (
+    <button
+      className="bg-secondary border-border hover:bg-secondary/80 flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors"
+      onClick={() => setExpanded(!expanded)}
+    >
+      <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
+      <span className="text-primary text-[10px] font-semibold">{group.call.tool}</span>
+      <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-[10px]">{group.call.args}</span>
+      {success !== undefined && (
+        <span className={`text-[9px] ${success ? 'text-green-400' : 'text-red-400'}`}>
+          {success ? 'OK' : 'FAIL'}
+        </span>
+      )}
+      {expanded && group.result?.summary && (
+        <div className="border-border mt-1 w-full rounded border bg-black/20 p-1.5" onClick={(e) => e.stopPropagation()}>
+          <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[10px]">
+            {group.result.summary.slice(0, 300)}
+          </pre>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function CompressedThinkingGroup({ group }: { group: CompressedGroup & { type: 'thinking' } }) {
+  const [expanded, setExpanded] = useState(false);
+  const last = group.entries[group.entries.length - 1];
+
+  return (
+    <button
+      className="bg-secondary border-border hover:bg-secondary/80 flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors"
+      onClick={() => setExpanded(!expanded)}
+    >
+      <Brain className="text-primary size-3 shrink-0" />
+      <span className="text-muted-foreground text-[10px]">
+        Thinking ({group.entries.length} block{group.entries.length > 1 ? 's' : ''})
+      </span>
+      {expanded && (
+        <div className="text-muted-foreground mt-1 w-full text-[10px]" onClick={(e) => e.stopPropagation()}>
+          <Markdown content={last.content} />
+        </div>
+      )}
+    </button>
+  );
+}
+
+function CompressedStatusGroup({ group }: { group: CompressedGroup & { type: 'status_group' } }) {
+  const last = group.entries[group.entries.length - 1];
+  return (
+    <div className="text-muted-foreground text-center text-[9px] italic">
+      {last.message}
+    </div>
+  );
+}
+
+function CompressedLogEntry({ group }: { group: CompressedGroup }) {
+  switch (group.type) {
+    case 'tool_pair':
+      return <CompressedToolPair group={group} />;
+    case 'thinking':
+      return <CompressedThinkingGroup group={group} />;
+    case 'status_group':
+      return <CompressedStatusGroup group={group} />;
+    case 'text':
+      return (
+        <div className="bg-card border-border max-w-[85%] rounded-lg border px-2.5 py-1.5">
+          <div className="select-text text-[11px]">
+            <Markdown content={group.entry.content} />
+          </div>
+        </div>
+      );
+    case 'user_message':
+      return (
+        <div className="flex justify-end">
+          <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-lg border px-2.5 py-1.5">
+            <p className="text-foreground select-text text-[11px] whitespace-pre-wrap">{group.entry.content}</p>
+          </div>
+        </div>
+      );
+    case 'error':
+      return (
+        <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-md border px-2.5 py-1.5 text-[11px]">
+          {group.entry.message}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
 function useCurrentSessionContext() {
   const viewMode = useZeusStore((s) => s.viewMode);
   const activeSessionId = useZeusStore((s) => s.activeSessionId);
@@ -241,6 +398,7 @@ function QAPanel() {
   const [qaMode, setQaMode] = useState<'browser' | 'agent'>('browser');
   const [agentTask, setAgentTask] = useState('');
   const [agentFollowUp, setAgentFollowUp] = useState('');
+  const [compressedLog, setCompressedLog] = useState(true);
   const [agentTargetUrl, setAgentTargetUrl] = useState('http://localhost:5173');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
@@ -836,6 +994,15 @@ function QAPanel() {
                         <Button
                           variant="ghost"
                           size="icon-xs"
+                          className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
+                          onClick={() => setCompressedLog(!compressedLog)}
+                          title={compressedLog ? 'Verbose log' : 'Compressed log'}
+                        >
+                          {compressedLog ? <Layers className="size-3" /> : <List className="size-3" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           className="size-5"
                           onClick={() => clearQAAgentEntries(selectedAgent.info.qaAgentId)}
                           title="Clear log"
@@ -864,11 +1031,15 @@ function QAPanel() {
                           </Button>
                         )}
                       </div>
-                      <div ref={agentLogRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                      <div ref={agentLogRef} className={`min-h-0 flex-1 overflow-y-auto p-4 ${compressedLog ? 'space-y-1.5' : 'space-y-3'}`}>
                         {selectedAgent.entries.length === 0 ? (
                           <p className="text-muted-foreground py-4 text-center text-xs">
                             {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
                           </p>
+                        ) : compressedLog ? (
+                          compressEntries(selectedAgent.entries).map((group, i) => (
+                            <CompressedLogEntry key={i} group={group} />
+                          ))
                         ) : (
                           selectedAgent.entries.map((entry, i) => (
                             <AgentLogEntry key={i} entry={entry} />

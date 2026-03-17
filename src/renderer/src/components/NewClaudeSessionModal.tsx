@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, FolderPlus } from 'lucide-react';
 import type { SavedProject, ClaudeDefaults, PermissionMode } from '../../../shared/types';
 
 interface NewClaudeSessionModalProps {
@@ -32,7 +32,7 @@ interface NewClaudeSessionModalProps {
     enableQA?: boolean;
     qaTargetUrl?: string;
   }) => void;
-  onAddProject: (name: string, path: string) => void;
+  onAddProject: (name: string, path: string, createDir?: boolean) => void;
   onRemoveProject: (id: string) => void;
   settingsError: string | null;
 }
@@ -61,6 +61,7 @@ function NewClaudeSessionModal({
   const [showAddProject, setShowAddProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectPath, setNewProjectPath] = useState('');
+  const [createNewDir, setCreateNewDir] = useState(false);
 
   const [prompt, setPrompt] = useState('');
   const [sessionName, setSessionName] = useState('');
@@ -90,6 +91,7 @@ function NewClaudeSessionModal({
       setShowAddProject(false);
       setNewProjectName('');
       setNewProjectPath('');
+      setCreateNewDir(false);
     }
   }, [open, claudeDefaults, lastUsedProjectId, savedProjects.length]);
 
@@ -126,6 +128,7 @@ function NewClaudeSessionModal({
         setShowAddProject(false);
         setNewProjectName('');
         setNewProjectPath('');
+        setCreateNewDir(false);
       }
     }
     prevProjectCountRef.current = savedProjects.length;
@@ -135,7 +138,7 @@ function NewClaudeSessionModal({
     const name = newProjectName.trim();
     const projectPath = newProjectPath.trim();
     if (!name || !projectPath) return;
-    onAddProject(name, projectPath);
+    onAddProject(name, projectPath, createNewDir || undefined);
   };
 
   return (
@@ -241,6 +244,25 @@ function NewClaudeSessionModal({
                   placeholder="/absolute/path/to/project"
                   className="text-xs"
                 />
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 text-[10px]"
+                  onClick={() => setCreateNewDir(!createNewDir)}
+                >
+                  <div className={`flex size-3.5 items-center justify-center rounded border ${
+                    createNewDir ? 'border-primary bg-primary' : 'border-border'
+                  }`}>
+                    {createNewDir && (
+                      <svg viewBox="0 0 12 12" className="size-2.5 text-primary-foreground">
+                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
+                  <FolderPlus className="text-muted-foreground size-3" />
+                  <span className={createNewDir ? 'text-foreground font-medium' : 'text-muted-foreground'}>
+                    Create directory if it doesn't exist
+                  </span>
+                </button>
                 {settingsError && (
                   <p className="text-destructive text-[11px]">{settingsError}</p>
                 )}

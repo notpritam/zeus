@@ -206,7 +206,7 @@ interface ZeusState {
   clearQAError: () => void;
 
   // QA Agent actions
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string) => void;
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => void;
   stopQAAgent: (qaAgentId: string) => void;
   deleteQAAgent: (qaAgentId: string, parentSessionId: string) => void;
   sendQAAgentMessage: (qaAgentId: string, text: string) => void;
@@ -225,7 +225,7 @@ interface ZeusState {
   setPerfPollInterval: (intervalMs: number) => void;
 
   // Settings actions
-  addProject: (name: string, path: string) => void;
+  addProject: (name: string, path: string, createDir?: boolean) => void;
   removeProject: (id: string) => void;
   updateDefaults: (defaults: Partial<ClaudeDefaults>) => void;
 }
@@ -501,8 +501,25 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           return { claudeSessions: merged };
         });
 
+        let activeId = get().activeClaudeId;
+
+        // Auto-select the most recent session if none is active
+        if (!activeId && sessions.length > 0) {
+          // Prefer a running session, then most recent by startedAt
+          const running = sessions.find((s) => s.status === 'running');
+          const mostRecent = running ?? sessions.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
+          activeId = mostRecent.id;
+          set({ activeClaudeId: activeId, viewMode: 'claude' });
+          // Lazy-load entries from DB for the auto-selected session
+          zeusWs.send({
+            channel: 'claude',
+            sessionId: activeId,
+            payload: { type: 'get_claude_history' },
+            auth: '',
+          });
+        }
+
         // Only request state for the active session (watchers are already alive on backend)
-        const activeId = get().activeClaudeId;
         const activeSession = sessions.find((s) => s.id === activeId && s.workingDir);
         if (activeSession) {
           zeusWs.send({
@@ -1869,11 +1886,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- QA Agent actions ---
 
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string) => {
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => {
     set({ qaError: null });
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'start_qa_agent', task, workingDir, targetUrl, parentSessionId, parentSessionType },
+      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType },
     });
   },
 
@@ -1983,11 +2000,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Settings actions ---
 
-  addProject: (name: string, path: string) => {
+  addProject: (name: string, path: string, createDir?: boolean) => {
     zeusWs.send({
       channel: 'settings',
       sessionId: '',
-      payload: { type: 'add_project', name, path },
+      payload: { type: 'add_project', name, path, createDir },
       auth: '',
     });
   },

@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -91,6 +91,10 @@ function runMigrations(database: Database.Database): void {
       );
       CREATE INDEX IF NOT EXISTS idx_qae_agent ON qa_agent_entries(qa_agent_id, seq);
     `);
+  }
+
+  if (currentVersion < 4) {
+    database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN name TEXT`);
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -305,6 +309,34 @@ export function getClaudeEntries(sessionId: string): NormalizedEntry[] {
   }));
 }
 
+/**
+ * Finalize all tool_use entries stuck at "created" → "success" for a completed session.
+ * This is a safety net for cases where tool_result messages weren't persisted during streaming.
+ */
+export function finalizeCreatedToolEntries(sessionId: string): void {
+  if (!db) return;
+  const rows = db
+    .prepare(
+      `SELECT id, entry_type FROM claude_entries WHERE session_id = ? AND entry_type LIKE '%"status":"created"%'`,
+    )
+    .all(sessionId) as Array<{ id: string; entry_type: string }>;
+
+  if (rows.length === 0) return;
+
+  const stmt = db.prepare(`UPDATE claude_entries SET entry_type = ? WHERE id = ?`);
+  const update = db.transaction(() => {
+    for (const row of rows) {
+      const entryType = JSON.parse(row.entry_type);
+      if (entryType.type === 'tool_use' && entryType.status === 'created') {
+        entryType.status = 'success';
+        stmt.run(JSON.stringify(entryType), row.id);
+      }
+    }
+  });
+  update();
+  console.log(`[Zeus DB] Finalized ${rows.length} stale tool entries for session ${sessionId.slice(-6)}`);
+}
+
 // ─── Terminal Sessions CRUD ───
 
 export function insertTerminalSession(record: SessionRecord): void {
@@ -432,6 +464,7 @@ export interface QaAgentSessionRow {
   id: string;
   parentSessionId: string;
   parentSessionType: 'terminal' | 'claude';
+  name: string | null;
   task: string;
   targetUrl: string | null;
   status: string;
@@ -443,6 +476,7 @@ interface QaAgentSessionDbRow {
   id: string;
   parent_session_id: string;
   parent_session_type: string;
+  name: string | null;
   task: string;
   target_url: string | null;
   status: string;
@@ -453,12 +487,13 @@ interface QaAgentSessionDbRow {
 export function insertQaAgentSession(info: QaAgentSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, task, target_url, status, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, name, task, target_url, status, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.parentSessionId,
     info.parentSessionType,
+    info.name,
     info.task,
     info.targetUrl,
     info.status,
@@ -493,6 +528,7 @@ export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSess
     id: r.id,
     parentSessionId: r.parent_session_id,
     parentSessionType: r.parent_session_type as 'terminal' | 'claude',
+    name: r.name,
     task: r.task,
     targetUrl: r.target_url,
     status: r.status,
@@ -510,6 +546,7 @@ export function getAllQaAgentSessions(): QaAgentSessionRow[] {
     id: r.id,
     parentSessionId: r.parent_session_id,
     parentSessionType: r.parent_session_type as 'terminal' | 'claude',
+    name: r.name,
     task: r.task,
     targetUrl: r.target_url,
     status: r.status,
@@ -585,6 +622,43 @@ export function getQaAgentEntries(qaAgentId: string): QaAgentEntryRow[] {
     timestamp: r.timestamp,
     seq: r.seq,
   }));
+}
+
+/**
+ * On startup, finalize tool entries for all completed sessions that still have "created" status.
+ * This fixes sessions where tool_result messages weren't persisted during streaming.
+ */
+export function finalizeAllCompletedSessions(): void {
+  if (!db) return;
+  // Get all non-running sessions
+  const sessions = db
+    .prepare(`SELECT id FROM claude_sessions WHERE status != 'running'`)
+    .all() as Array<{ id: string }>;
+
+  let total = 0;
+  for (const s of sessions) {
+    const rows = db!
+      .prepare(
+        `SELECT id, entry_type FROM claude_entries WHERE session_id = ? AND entry_type LIKE '%"status":"created"%'`,
+      )
+      .all(s.id) as Array<{ id: string; entry_type: string }>;
+
+    if (rows.length === 0) continue;
+
+    const stmt = db!.prepare(`UPDATE claude_entries SET entry_type = ? WHERE id = ?`);
+    for (const row of rows) {
+      const entryType = JSON.parse(row.entry_type);
+      if (entryType.type === 'tool_use' && entryType.status === 'created') {
+        entryType.status = 'success';
+        stmt.run(JSON.stringify(entryType), row.id);
+        total++;
+      }
+    }
+  }
+
+  if (total > 0) {
+    console.log(`[Zeus DB] Finalized ${total} stale tool entries across ${sessions.length} completed sessions`);
+  }
 }
 
 export function markStaleQaAgentsErrored(): void {

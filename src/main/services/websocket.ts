@@ -57,6 +57,7 @@ import {
   insertQaAgentEntry,
   getQaAgentEntries,
   markStaleQaAgentsErrored,
+  finalizeCreatedToolEntries,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload } from '../../shared/types';
 import { GitWatcherManager } from './git';
@@ -90,6 +91,7 @@ interface QaAgentRecord {
   qaAgentId: string;
   parentSessionId: string;
   parentSessionType: 'terminal' | 'claude';
+  name?: string;
   task: string;
   targetUrl?: string;
   session: ClaudeSession;
@@ -431,6 +433,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
 
   // Forward session end (process exited) + persist status + request attention
   session.on('done', () => {
+    finalizeCreatedToolEntries(envelope.sessionId);
     updateClaudeSessionStatus(envelope.sessionId, 'done', Date.now());
     broadcastEnvelope({
       channel: 'claude',
@@ -443,6 +446,7 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
 
   // Forward errors + persist status + request attention
   session.on('error', (err) => {
+    finalizeCreatedToolEntries(envelope.sessionId);
     updateClaudeSessionStatus(envelope.sessionId, 'error', Date.now());
     broadcastEnvelope({
       channel: 'claude',
@@ -1561,10 +1565,12 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         qaTargetUrl: targetUrl,
       });
 
+      const agentName = payload.name || undefined;
       const record: QaAgentRecord = {
         qaAgentId,
         parentSessionId,
         parentSessionType,
+        name: agentName,
         task: payload.task,
         targetUrl,
         session,
@@ -1579,6 +1585,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         id: qaAgentId,
         parentSessionId,
         parentSessionType,
+        name: agentName ?? null,
         task: payload.task,
         targetUrl,
         status: 'running',
@@ -1597,6 +1604,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           qaAgentId,
           parentSessionId,
           parentSessionType,
+          name: agentName,
           task: payload.task,
           targetUrl,
         },
@@ -1641,6 +1649,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           qaAgentId: r.qaAgentId,
           parentSessionId: r.parentSessionId,
           parentSessionType: r.parentSessionType,
+          name: r.name,
           task: r.task,
           targetUrl: r.targetUrl,
           status: 'running' as const,
@@ -1655,6 +1664,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         qaAgentId: r.id,
         parentSessionId: r.parentSessionId,
         parentSessionType: r.parentSessionType,
+        name: r.name ?? undefined,
         task: r.task,
         targetUrl: r.targetUrl ?? undefined,
         status: r.status as 'stopped' | 'error',
@@ -1720,6 +1730,20 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
       auth: '',
     });
   } else if (payload.type === 'add_project') {
+    if (payload.createDir && !fs.existsSync(payload.path)) {
+      try {
+        fs.mkdirSync(payload.path, { recursive: true });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        sendEnvelope(ws, {
+          channel: 'settings',
+          sessionId: '',
+          payload: { type: 'settings_error', message: `Failed to create directory: ${msg}` },
+          auth: '',
+        });
+        return;
+      }
+    }
     if (!fs.existsSync(payload.path)) {
       sendEnvelope(ws, {
         channel: 'settings',

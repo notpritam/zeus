@@ -169,13 +169,14 @@ function toolActionLabel(actionType: ActionType): string {
   }
 }
 
-function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; content: string }) {
+function ToolCard({ entryType, content, sessionDone }: { entryType: NormalizedEntryType; content: string; sessionDone?: boolean }) {
   if (entryType.type !== 'tool_use') return null;
   const { toolName, actionType, status } = entryType;
   const [expanded, setExpanded] = useState(false);
 
   const statusLabel = typeof status === 'string' ? status : status.status;
-  const isRunning = statusLabel === 'created';
+  // If the session is done/error, stale "created" entries are actually completed
+  const isRunning = statusLabel === 'created' && !sessionDone;
   const isPending = statusLabel === 'pending_approval';
   const isDenied = statusLabel === 'denied';
   const isFailed = statusLabel === 'failed';
@@ -190,7 +191,7 @@ function ToolCard({ entryType, content }: { entryType: NormalizedEntryType; cont
   const statusDotColor =
     isRunning ? 'bg-primary' :
     isPending ? 'bg-orange-400' :
-    statusLabel === 'success' ? 'bg-green-400' :
+    (statusLabel === 'success' || (statusLabel === 'created' && sessionDone)) ? 'bg-green-400' :
     (isDenied || isFailed) ? 'bg-red-400' :
     'bg-muted-foreground';
 
@@ -253,7 +254,7 @@ function TokenUsageBar({ entryType }: { entryType: NormalizedEntryType }) {
   );
 }
 
-function EntryItem({ entry }: { entry: NormalizedEntry }) {
+function EntryItem({ entry, sessionDone }: { entry: NormalizedEntry; sessionDone?: boolean }) {
   switch (entry.entryType.type) {
     case 'user_message':
       return <UserBubble content={entry.content} metadata={entry.metadata} />;
@@ -262,7 +263,7 @@ function EntryItem({ entry }: { entry: NormalizedEntry }) {
     case 'thinking':
       return <ThinkingBlock content={entry.content} />;
     case 'tool_use':
-      return <ToolCard entryType={entry.entryType} content={entry.content} />;
+      return <ToolCard entryType={entry.entryType} content={entry.content} sessionDone={sessionDone} />;
     case 'token_usage':
       return <TokenUsageBar entryType={entry.entryType} />;
     case 'system_message':
@@ -573,7 +574,7 @@ function ClaudeView({
       {/* Entry list */}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {entries.map((entry) => (
-          <EntryItem key={entry.id} entry={entry} />
+          <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} />
         ))}
 
         {/* Activity indicator */}
