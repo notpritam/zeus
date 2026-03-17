@@ -39,7 +39,7 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-function SessionIcon({ id, size = 'size-3.5' }: { id: string; size?: string }) {
+function SessionIcon({ id, size = 'size-4' }: { id: string; size?: string }) {
   const hash = useMemo(() => hashString(id), [id]);
   const Icon = ICON_POOL[hash % ICON_POOL.length];
   const color = COLOR_POOL[hash % COLOR_POOL.length];
@@ -208,7 +208,7 @@ function ClaudeCard({
       )}
 
       {/* Auto icon */}
-      <SessionIcon id={session.id} size="size-3.5" />
+      <SessionIcon id={session.id} size="size-4" />
 
       {/* Content */}
       <div className="min-w-0 flex-1 overflow-hidden">
