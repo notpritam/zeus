@@ -69,8 +69,8 @@ class ZeusWebSocket {
   private getUrl(): string {
     // If served from a different port on localhost, we're in Vite dev mode
     const isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    if (isLocalDev && location.port !== '3000') {
-      return 'ws://127.0.0.1:3000';
+    if (isLocalDev && location.port !== '8888') {
+      return 'ws://127.0.0.1:8888';
     }
     // Production or ngrok: use correct protocol and pass through auth token
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

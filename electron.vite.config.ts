@@ -26,6 +26,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
+    server: {
+      port: 5199,
+    },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

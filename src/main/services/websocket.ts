@@ -392,7 +392,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         if (isTunnelActive()) {
           await stopTunnel();
         } else {
-          await startTunnel(3000);
+          await startTunnel(8888);
         }
         broadcastEnvelope({
           channel: 'status',
@@ -2382,7 +2382,7 @@ function handleClose(ws: WebSocket): void {
   clientClaudeSessions.delete(ws);
 }
 
-export async function startWebSocketServer(port = 3000): Promise<void> {
+export async function startWebSocketServer(port = 8888): Promise<void> {
   if (server) return;
 
   return new Promise((resolve, reject) => {

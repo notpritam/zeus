@@ -8,7 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import WebSocket from 'ws';
 
-const ZEUS_WS_URL = process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:3000';
+const ZEUS_WS_URL = process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888';
 
 // ─── WebSocket Client ───
 

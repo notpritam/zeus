@@ -30,7 +30,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    mainWindow.loadURL('http://127.0.0.1:3000');
+    mainWindow.loadURL('http://127.0.0.1:8888');
   }
 
   mainWindow.on('closed', () => {
@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
   pruneOldSessions(30);
   await startWebSocketServer();
 
-  const tunnelUrl = await startTunnel(3000);
+  const tunnelUrl = await startTunnel(8888);
   if (tunnelUrl) notifyTunnelStatus();
 
   createWindow();
