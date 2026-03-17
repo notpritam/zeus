@@ -63,11 +63,25 @@ function ToolOutputCopyButton({ text }: { text: string }) {
   );
 }
 
+// ─── Plain text block (no syntax highlighting) ───
+
+function PlainText({ text, className }: { text: string; className?: string }) {
+  return (
+    <pre
+      className={`whitespace-pre-wrap break-words font-mono text-xs leading-relaxed ${className ?? 'text-foreground'}`}
+      style={{ padding: '0.5rem 0.75rem', margin: 0 }}
+    >
+      {text}
+    </pre>
+  );
+}
+
 // ─── Shared code output wrapper ───
 
 function CodeOutput({ code, language, label, maxHeight = 'max-h-72' }: {
   code: string; language?: string; label?: string; maxHeight?: string;
 }) {
+  const isPlainText = !language || language === 'text';
   return (
     <div className={`bg-bg-surface border-border mt-2 overflow-hidden rounded-md border ${maxHeight}`}>
       {label && (
@@ -82,22 +96,26 @@ function CodeOutput({ code, language, label, maxHeight = 'max-h-72' }: {
             <ToolOutputCopyButton text={code} />
           </div>
         )}
-        <SyntaxHighlighter
-          style={codeTheme}
-          language={language || 'text'}
-          PreTag="div"
-          customStyle={{
-            background: 'transparent',
-            margin: 0,
-            padding: '0.5rem 0.75rem',
-            fontSize: '0.75rem',
-            fontFamily: 'var(--font-mono)',
-            lineHeight: '1.5',
-          }}
-          wrapLongLines
-        >
-          {code}
-        </SyntaxHighlighter>
+        {isPlainText ? (
+          <PlainText text={code} />
+        ) : (
+          <SyntaxHighlighter
+            style={codeTheme}
+            language={language}
+            PreTag="div"
+            customStyle={{
+              background: 'transparent',
+              margin: 0,
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.75rem',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: '1.5',
+            }}
+            wrapLongLines
+          >
+            {code}
+          </SyntaxHighlighter>
+        )}
       </div>
     </div>
   );
@@ -258,31 +276,39 @@ function McpToolBody({ input, output, images = [] }: { input: string; output: st
           </div>
         </div>
       )}
-      {output && (
-        <div className="border-border overflow-hidden rounded-md border border-green-500/20">
-          <div className="border-border flex items-center border-b bg-green-500/5 px-3 py-1">
-            <span className="text-[10px] font-medium text-green-400/70">Result</span>
+      {output && (() => {
+        const trimmed = output.trimStart();
+        const isJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+        return (
+          <div className="border-border overflow-hidden rounded-md border border-green-500/20">
+            <div className="border-border flex items-center border-b bg-green-500/5 px-3 py-1">
+              <span className="text-[10px] font-medium text-green-400/70">Result</span>
+            </div>
+            <div className="max-h-60 overflow-auto" style={{ background: 'rgba(34, 197, 94, 0.03)' }}>
+              {isJson ? (
+                <SyntaxHighlighter
+                  style={codeTheme}
+                  language="json"
+                  PreTag="div"
+                  customStyle={{
+                    background: 'transparent',
+                    margin: 0,
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.75rem',
+                    fontFamily: 'var(--font-mono)',
+                    lineHeight: '1.5',
+                  }}
+                  wrapLongLines
+                >
+                  {output}
+                </SyntaxHighlighter>
+              ) : (
+                <PlainText text={output} className="text-foreground/90" />
+              )}
+            </div>
           </div>
-          <div className="max-h-60 overflow-auto">
-            <SyntaxHighlighter
-              style={codeTheme}
-              language={output.trimStart().startsWith('{') || output.trimStart().startsWith('[') ? 'json' : 'text'}
-              PreTag="div"
-              customStyle={{
-                background: 'rgba(34, 197, 94, 0.03)',
-                margin: 0,
-                padding: '0.5rem 0.75rem',
-                fontSize: '0.75rem',
-                fontFamily: 'var(--font-mono)',
-                lineHeight: '1.5',
-              }}
-              wrapLongLines
-            >
-              {output}
-            </SyntaxHighlighter>
-          </div>
-        </div>
-      )}
+        );
+      })()}
       {images.length > 0 && <ToolImages images={images} />}
     </div>
   );

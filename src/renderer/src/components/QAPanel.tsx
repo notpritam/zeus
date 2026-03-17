@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -24,6 +24,7 @@ import {
   Plus,
   Minimize2,
   Maximize2,
+  ArrowDown,
 } from 'lucide-react';
 import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -129,6 +130,8 @@ function QAPanel() {
   const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
+  const agentUserScrolledUp = useRef(false);
+  const [showAgentScrollToBottom, setShowAgentScrollToBottom] = useState(false);
 
   // Session-scoped agents
   const parentSessionId = sessionCtx?.parentSessionId ?? '';
@@ -142,13 +145,31 @@ function QAPanel() {
   const hasRunningAgent = sessionAgents.some((a) => a.info.status === 'running');
   const hasAnyAgent = sessionAgents.length > 0;
 
+  // Track if user has scrolled away from bottom in agent log
   useEffect(() => {
-    requestAnimationFrame(() => {
-      if (agentLogRef.current) {
-        agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
-      }
-    });
+    const el = agentLogRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      agentUserScrolledUp.current = !atBottom;
+      setShowAgentScrollToBottom(!atBottom);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [selectedAgentId]);
+
+  // Auto-scroll to bottom on new entries (unless user scrolled up)
+  useEffect(() => {
+    if (!agentUserScrolledUp.current && agentLogRef.current) {
+      agentLogRef.current.scrollTop = agentLogRef.current.scrollHeight;
+    }
   }, [selectedAgent?.entries.length]);
+
+  const scrollAgentLogToBottom = useCallback(() => {
+    if (agentLogRef.current) {
+      agentLogRef.current.scrollTo({ top: agentLogRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, []);
 
   // Sync URL bar when QA navigates (e.g. from Claude tool calls)
   useEffect(() => {
@@ -742,9 +763,9 @@ function QAPanel() {
                           size="icon-xs"
                           className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
                           onClick={() => setCompressedLog(!compressedLog)}
-                          title={compressedLog ? 'Verbose log' : 'Compressed log'}
+                          title={compressedLog ? 'Expand all' : 'Compress view'}
                         >
-                          {compressedLog ? <Layers className="size-3" /> : <List className="size-3" />}
+                          {compressedLog ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
                         </Button>
                         <Button
                           variant="ghost"
@@ -756,15 +777,39 @@ function QAPanel() {
                           <Trash2 className="size-3" />
                         </Button>
                       </div>
-                      <div ref={agentLogRef} className={`min-h-0 flex-1 overflow-y-auto p-4 ${compressedLog ? 'space-y-1.5' : 'space-y-3'}`}>
-                        {selectedAgent.entries.length === 0 ? (
-                          <p className="text-muted-foreground py-4 text-center text-xs">
-                            {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
-                          </p>
-                        ) : (
-                          compressEntries(selectedAgent.entries).map((group, i) => (
-                            <GroupedLogEntry key={i} group={group} compressed={compressedLog} />
-                          ))
+                      <div className="relative min-h-0 flex-1">
+                        <div ref={agentLogRef} className="absolute inset-0 overflow-y-auto p-4 space-y-3">
+                          {selectedAgent.entries.length === 0 ? (
+                            <p className="text-muted-foreground py-4 text-center text-xs">
+                              {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
+                            </p>
+                          ) : compressedLog ? (
+                            groupEntriesByUser(selectedAgent.entries).map((group, i, arr) => (
+                              <CompressedGroup
+                                key={group.userEntry?.id ?? `group-${i}`}
+                                group={group}
+                                isLast={i === arr.length - 1}
+                                sessionDone={selectedAgent.info.status !== 'running'}
+                              />
+                            ))
+                          ) : (
+                            selectedAgent.entries.map((entry, i) => (
+                              <EntryItem
+                                key={entry.id}
+                                entry={entry}
+                                sessionDone={selectedAgent.info.status !== 'running'}
+                                isLastEntry={i === selectedAgent.entries.length - 1}
+                              />
+                            ))
+                          )}
+                        </div>
+                        {showAgentScrollToBottom && (
+                          <button
+                            onClick={scrollAgentLogToBottom}
+                            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
+                          >
+                            <ArrowDown className="size-4" />
+                          </button>
                         )}
                       </div>
 

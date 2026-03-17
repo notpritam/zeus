@@ -291,7 +291,11 @@ server.tool(
     if (!(await checkPinchtab())) return NOT_RUNNING;
     try {
       const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'type', value: text } });
-      return textResult({ success: res.ok });
+      if (!res.ok) {
+        const errText = await res.text();
+        return textResult({ success: false, error: errText });
+      }
+      return textResult({ success: true });
     } catch (err) {
       return errorResult(`Error: ${(err as Error).message}`);
     }
@@ -309,7 +313,11 @@ server.tool(
     if (!(await checkPinchtab())) return NOT_RUNNING;
     try {
       const res = await pinchtabFetch('/action', { method: 'POST', body: { kind: 'fill', ref, value } });
-      return textResult({ success: res.ok });
+      if (!res.ok) {
+        const errText = await res.text();
+        return textResult({ success: false, error: errText });
+      }
+      return textResult({ success: true });
     } catch (err) {
       return errorResult(`Error: ${(err as Error).message}`);
     }

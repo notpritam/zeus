@@ -500,15 +500,7 @@ export interface QaSnapshotNode {
 
 // ─── QA Agent ───
 
-/** @deprecated — QA agents now use NormalizedEntry directly. Kept for migration reference. */
-export type QaAgentLogEntry =
-  | { kind: 'tool_call'; tool: string; args: string; timestamp: number }
-  | { kind: 'tool_result'; tool: string; summary: string; success: boolean; timestamp: number; imageData?: string }
-  | { kind: 'text'; content: string; timestamp: number }
-  | { kind: 'error'; message: string; timestamp: number }
-  | { kind: 'user_message'; content: string; timestamp: number }
-  | { kind: 'thinking'; content: string; timestamp: number }
-  | { kind: 'status'; message: string; timestamp: number };
+// QA agents use NormalizedEntry directly — no separate entry type needed.
 
 export type QaAgentStatus = 'running' | 'stopped' | 'error';
 

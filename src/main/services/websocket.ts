@@ -692,6 +692,23 @@ function wireQAAgent(record: QaAgentRecord): void {
     }
   });
 
+  // Turn ended (process still alive) — broadcast stopped so UI updates
+  session.on('result', () => {
+    flushPendingText();
+    flushPendingThinking();
+
+    // Save Claude session data for resume support
+    record.claudeSessionId = session.sessionId ?? undefined;
+    record.lastMessageId = session.lastMessageId ?? undefined;
+    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
+
+    updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
+    broadcastEnvelope({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
+    });
+  });
+
   session.on('done', () => {
     flushPendingText();
     flushPendingThinking();
@@ -1900,16 +1917,17 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       });
 
       // Then broadcast initial user message so it shows in the panel
-      const initialMsgEntry: import('../../shared/types').QaAgentLogEntry = {
-        kind: 'user_message',
+      const initialMsgEntry: NormalizedEntry = {
+        id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: new Date().toISOString(),
+        entryType: { type: 'user_message' },
         content: payload.task,
-        timestamp: Date.now(),
       };
       broadcastEnvelope({
         channel: 'qa', sessionId: '', auth: '',
         payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
       });
-      insertQaAgentEntry(qaAgentId, initialMsgEntry.kind, JSON.stringify(initialMsgEntry), initialMsgEntry.timestamp);
+      insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
 
       const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
       await session.start(prompt);
@@ -2065,7 +2083,20 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
     try {
       if (record.session && record.session.isRunning) {
-        // Session is alive — send message directly
+        // Session is alive (e.g. interrupted but process still running) — send message directly
+        updateQaAgentSessionStatus(record.qaAgentId, 'running');
+        broadcastEnvelope({
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'qa_agent_started',
+            qaAgentId: record.qaAgentId,
+            parentSessionId: record.parentSessionId,
+            parentSessionType: record.parentSessionType,
+            name: record.name,
+            task: record.task,
+            targetUrl: record.targetUrl,
+          },
+        });
         await record.session.sendMessage(payload.text);
       } else {
         // Session is dead — start a new session (with --resume if we have Claude session ID)
@@ -2122,7 +2153,9 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   } else if (payload.type === 'get_qa_agent_entries') {
     // Load persisted entries from DB for a specific agent
     const dbEntries = getQaAgentEntries(payload.qaAgentId);
-    const entries = dbEntries.map((row) => JSON.parse(row.data) as NormalizedEntry);
+    const entries = dbEntries
+      .map((row) => JSON.parse(row.data) as NormalizedEntry)
+      .filter((e) => e.entryType);
     sendEnvelope(ws, {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_entries', qaAgentId: payload.qaAgentId, entries },
@@ -2173,10 +2206,12 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
   } else if (payload.type === 'external_qa_entry') {
     // External QA agent log entry (from zeus-bridge MCP)
-    const { qaAgentId, entry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
-    if (!qaAgentId || !entry) return;
+    const { qaAgentId, entry: rawEntry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
+    if (!qaAgentId || !rawEntry) return;
 
-    insertQaAgentEntry(qaAgentId, entry.kind, JSON.stringify(entry), entry.timestamp);
+    const normalizedEntry = rawEntry as unknown as NormalizedEntry;
+
+    insertQaAgentEntry(qaAgentId, normalizedEntry.entryType.type, JSON.stringify(normalizedEntry), Date.now());
     const parentSessionId = externalQaParentMap.get(qaAgentId) ?? 'external';
     broadcastEnvelope({
       channel: 'qa', sessionId: '', auth: '',
@@ -2184,7 +2219,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         type: 'qa_agent_entry',
         qaAgentId,
         parentSessionId,
-        entry,
+        entry: normalizedEntry,
       },
     });
 

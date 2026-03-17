@@ -126,6 +126,7 @@ export class ClaudeSession extends EventEmitter {
       }
       // result = end of one turn, NOT end of session.
       // The process stays alive for follow-ups via stdin.
+      this.emit('result');
     });
 
     this.protocol.on('error', (err) => this.emit('error', err));
