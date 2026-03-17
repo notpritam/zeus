@@ -728,6 +728,30 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     const opts = envelope.payload as ClaudeStartPayload;
     const workingDir = opts.workingDir || process.env.HOME || '/';
 
+    // Ensure working directory exists — auto-create if missing
+    if (!fs.existsSync(workingDir)) {
+      try {
+        fs.mkdirSync(workingDir, { recursive: true });
+        console.log(`[Zeus] Created working directory: ${workingDir}`);
+      } catch (mkdirErr: unknown) {
+        const msg = mkdirErr instanceof Error ? mkdirErr.message : String(mkdirErr);
+        sendError(ws, envelope.sessionId, `Working directory does not exist and could not be created: ${workingDir} — ${msg}`);
+        return;
+      }
+    }
+
+    // Validate it's actually a directory, not a file
+    try {
+      const stat = fs.statSync(workingDir);
+      if (!stat.isDirectory()) {
+        sendError(ws, envelope.sessionId, `Path exists but is not a directory: ${workingDir}`);
+        return;
+      }
+    } catch {
+      sendError(ws, envelope.sessionId, `Cannot access working directory: ${workingDir}`);
+      return;
+    }
+
     try {
       const session = await claudeManager.createSession(envelope.sessionId, opts.prompt, {
         workingDir,
@@ -819,6 +843,18 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
   } else if (payload.type === 'resume_claude') {
     const opts = envelope.payload as ClaudeResumePayload;
     const workingDir = opts.workingDir || process.env.HOME || '/';
+
+    // Ensure working directory exists for resumed sessions too
+    if (!fs.existsSync(workingDir)) {
+      try {
+        fs.mkdirSync(workingDir, { recursive: true });
+        console.log(`[Zeus] Created working directory for resume: ${workingDir}`);
+      } catch (mkdirErr: unknown) {
+        const msg = mkdirErr instanceof Error ? mkdirErr.message : String(mkdirErr);
+        sendError(ws, envelope.sessionId, `Working directory does not exist and could not be created: ${workingDir} — ${msg}`);
+        return;
+      }
+    }
 
     try {
       const session = await claudeManager.resumeSession(

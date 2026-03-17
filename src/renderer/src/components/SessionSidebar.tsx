@@ -98,28 +98,26 @@ function ClaudeCard({
           )}
         </div>
       </div>
-      {session.status !== 'running' && (
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
-            title="Archive session"
-          >
-            <Archive className="size-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            title="Delete session"
-          >
-            <Trash2 className="size-3" />
-          </Button>
-        </div>
-      )}
+      <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={(e) => { e.stopPropagation(); onArchive(); }}
+          title="Archive session"
+        >
+          <Archive className="size-3" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          title="Delete session"
+        >
+          <Trash2 className="size-3" />
+        </Button>
+      </div>
     </button>
   );
 }
