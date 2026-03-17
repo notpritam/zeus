@@ -1470,10 +1470,25 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       startedAt: Date.now(),
     };
 
+    // Add optimistic user message for the resume prompt
+    const resumePrompt = prompt || 'Continue working.';
+    const userEntry: NormalizedEntry = {
+      id: `user-${Date.now()}`,
+      entryType: { type: 'user_message' },
+      content: resumePrompt,
+      timestamp: new Date().toISOString(),
+    };
+
     set((state) => ({
       claudeSessions: [...state.claudeSessions, newSession],
       activeClaudeId: newId,
-      claudeEntries: { ...state.claudeEntries, [newId]: [...existingEntries] },
+      claudeEntries: { ...state.claudeEntries, [newId]: [...existingEntries, userEntry] },
+      claudeEntriesMeta: {
+        ...state.claudeEntriesMeta,
+        [newId]: state.claudeEntriesMeta[id]
+          ? { ...state.claudeEntriesMeta[id] }
+          : { oldestSeq: null, totalCount: existingEntries.length + 1, hasMore: false, loading: false },
+      },
       sessionActivity: { ...state.sessionActivity, [newId]: { state: 'starting' } },
       viewMode: 'claude',
     }));
