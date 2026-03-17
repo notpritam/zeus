@@ -19,10 +19,26 @@ export interface ClaudeDefaults {
   notificationSound: boolean;
 }
 
+// ─── Theme Types ───
+
+export interface ThemeMeta {
+  id: string;
+  name: string;
+  author?: string;
+  type: 'dark' | 'light';
+  builtIn: boolean;
+}
+
+export interface ThemeFile extends ThemeMeta {
+  colors: Record<string, string>;
+}
+
 export interface ZeusSettings {
   savedProjects: SavedProject[];
   claudeDefaults: ClaudeDefaults;
   lastUsedProjectId: string | null;
+  activeThemeId: string;
+  themes: ThemeMeta[];
 }
 
 export type SettingsPayload =
@@ -32,7 +48,12 @@ export type SettingsPayload =
   | { type: 'remove_project'; id: string }
   | { type: 'update_defaults'; defaults: Partial<ClaudeDefaults> }
   | { type: 'set_last_used_project'; id: string | null }
-  | { type: 'settings_error'; message: string };
+  | { type: 'settings_error'; message: string }
+  | { type: 'set_theme'; themeId: string }
+  | { type: 'get_theme_colors'; themeId: string }
+  | { type: 'theme_colors'; theme: ThemeFile }
+  | { type: 'refresh_themes' }
+  | { type: 'open_themes_folder' };
 
 // ─── File Tree Types ───
 

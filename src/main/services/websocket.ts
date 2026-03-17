@@ -4,7 +4,7 @@ import { stat as fsStat } from 'fs/promises';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
-import { app, Notification as ElectronNotification } from 'electron';
+import { app, Notification as ElectronNotification, shell } from 'electron';
 import { getMainWindow } from '../index';
 import type {
   WsEnvelope,
@@ -33,7 +33,9 @@ import {
   removeProject,
   updateDefaults,
   setLastUsedProject,
+  setActiveTheme,
 } from './settings';
+import { getThemeById, refreshThemes, getThemesDir } from './themes';
 import {
   insertClaudeSession,
   updateClaudeSessionId,
@@ -2141,12 +2143,23 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
   const payload = envelope.payload as SettingsPayload;
 
   if (payload.type === 'get_settings') {
+    const settings = getSettings();
     sendEnvelope(ws, {
       channel: 'settings',
       sessionId: '',
-      payload: { type: 'settings_update', settings: getSettings() },
+      payload: { type: 'settings_update', settings },
       auth: '',
     });
+    // Send active theme colors immediately to prevent FOUC
+    const activeTheme = getThemeById(settings.activeThemeId);
+    if (activeTheme) {
+      sendEnvelope(ws, {
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'theme_colors', theme: activeTheme },
+        auth: '',
+      });
+    }
   } else if (payload.type === 'add_project') {
     if (payload.createDir && !fs.existsSync(payload.path)) {
       try {
@@ -2196,6 +2209,57 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
     });
   } else if (payload.type === 'set_last_used_project') {
     setLastUsedProject(payload.id);
+  } else if (payload.type === 'set_theme') {
+    const theme = getThemeById(payload.themeId);
+    if (!theme) {
+      sendEnvelope(ws, {
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'settings_error', message: `Theme not found: ${payload.themeId}` },
+        auth: '',
+      });
+      return;
+    }
+    setActiveTheme(payload.themeId);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'theme_colors', theme },
+      auth: '',
+    });
+  } else if (payload.type === 'get_theme_colors') {
+    const theme = getThemeById(payload.themeId);
+    if (theme) {
+      sendEnvelope(ws, {
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'theme_colors', theme },
+        auth: '',
+      });
+    } else {
+      sendEnvelope(ws, {
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'settings_error', message: `Theme not found: ${payload.themeId}` },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'refresh_themes') {
+    refreshThemes();
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
+  } else if (payload.type === 'open_themes_folder') {
+    shell.openPath(getThemesDir());
   } else {
     sendError(ws, '', `Unknown settings type: ${(payload as { type: string }).type}`);
   }

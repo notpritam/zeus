@@ -4,12 +4,14 @@ import crypto from 'crypto';
 import { app } from 'electron';
 import type { ZeusSettings, SavedProject, ClaudeDefaults } from '../../shared/types';
 import { insertProject, getAllProjects, deleteProject } from './db';
+import { getThemeMeta } from './themes';
 
 const SETTINGS_FILE = 'zeus-settings.json';
 
 interface SettingsOnDisk {
   claudeDefaults: ClaudeDefaults;
   lastUsedProjectId: string | null;
+  activeThemeId: string;
 }
 
 const DEFAULT_SETTINGS: SettingsOnDisk = {
@@ -19,6 +21,7 @@ const DEFAULT_SETTINGS: SettingsOnDisk = {
     notificationSound: true,
   },
   lastUsedProjectId: null,
+  activeThemeId: 'zeus-dark',
 };
 
 let settings: SettingsOnDisk = { ...DEFAULT_SETTINGS };
@@ -56,6 +59,7 @@ export function initSettings(): void {
           ...parsed.claudeDefaults,
         },
         lastUsedProjectId: parsed.lastUsedProjectId ?? DEFAULT_SETTINGS.lastUsedProjectId,
+        activeThemeId: (parsed as Partial<SettingsOnDisk>).activeThemeId ?? DEFAULT_SETTINGS.activeThemeId,
       };
       // Re-write without savedProjects to complete migration
       writeToDisk();
@@ -77,7 +81,14 @@ export function getSettings(): ZeusSettings {
     savedProjects: getAllProjects(),
     claudeDefaults: settings.claudeDefaults,
     lastUsedProjectId: settings.lastUsedProjectId,
+    activeThemeId: settings.activeThemeId,
+    themes: getThemeMeta(),
   };
+}
+
+export function setActiveTheme(themeId: string): void {
+  settings.activeThemeId = themeId;
+  writeToDisk();
 }
 
 export function addProject(name: string, projectPath: string): SavedProject {

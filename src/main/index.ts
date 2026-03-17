@@ -11,6 +11,7 @@ import { destroyAllSessions } from './services/terminal';
 import { getActiveSessions, markKilled } from './services/sessions';
 import { initAuthToken } from './services/auth';
 import { initSettings } from './services/settings';
+import { loadAllThemes } from './services/themes';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
 import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleQaAgentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
@@ -42,6 +43,7 @@ app.whenReady().then(async () => {
   initAuthToken();
   initDatabase();
   initSettings();
+  loadAllThemes();
   markStaleSessionsErrored();
   markStaleQaAgentsErrored();
   finalizeAllCompletedSessions();

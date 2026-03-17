@@ -29,64 +29,48 @@ import {
   List,
 } from 'lucide-react';
 import Markdown from '@/components/Markdown';
+import { ToolCard } from '@/components/ToolCard';
 import { useZeusStore } from '@/stores/useZeusStore';
-import type { QaAgentLogEntry } from '../../../shared/types';
+import type { QaAgentLogEntry, NormalizedEntryType, ActionType, ToolStatus } from '../../../shared/types';
 
 type QAViewTab = 'snapshot' | 'screenshot' | 'text' | 'console' | 'network' | 'errors';
 
-function AgentToolCall({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_call' } }) {
-  return (
-    <div className="bg-secondary border-border border-primary/30 rounded-lg border px-3 py-2">
-      <div className="flex items-center gap-2">
-        <span className="bg-primary inline-block size-1.5 shrink-0 animate-pulse rounded-full" />
-        <span className="text-primary text-[10px] font-semibold">{entry.tool}</span>
-        <span className="text-muted-foreground min-w-0 truncate font-mono text-xs">{entry.args}</span>
-      </div>
-    </div>
-  );
-}
+// ─── QA Tool Card (converts QA entries to shared ToolCard format) ───
 
-function AgentToolResult({ entry }: { entry: QaAgentLogEntry & { kind: 'tool_result' } }) {
-  const [expanded, setExpanded] = useState(!!entry.imageData);
-  const dotColor = entry.success ? 'bg-green-400' : 'bg-red-400';
-  const borderColor = entry.success ? '' : 'border-red-400/30';
-  const hasContent = !!(entry.summary || entry.imageData);
+function QAToolCard({ group }: { group: CompressedGroup & { type: 'tool_pair' } }) {
+  const toolName = group.call.tool;
+  const hasResult = !!group.result;
+  const status: ToolStatus = hasResult
+    ? (group.result!.success ? 'success' : 'failed')
+    : 'created';
+
+  const actionType: ActionType = {
+    action: 'mcp_tool',
+    server: 'qa',
+    method: toolName,
+    input: group.call.args || '',
+  };
+
+  const entryType: NormalizedEntryType = {
+    type: 'tool_use',
+    toolName,
+    actionType,
+    status,
+  };
+
+  const metadata = hasResult ? {
+    output: group.result!.summary || '',
+    images: group.result!.imageData ? [group.result!.imageData] : [],
+  } : undefined;
 
   return (
-    <div className={`bg-secondary border-border rounded-lg border px-3 py-2 ${borderColor}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
-          <span className={`text-[10px] font-semibold ${entry.success ? 'text-primary' : 'text-red-400'}`}>
-            {entry.tool}
-          </span>
-          <span className="text-muted-foreground text-[10px]">{entry.success ? 'success' : 'failed'}</span>
-          {entry.imageData && <Camera className="text-muted-foreground size-3" />}
-        </div>
-        {hasContent && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-muted-foreground hover:text-foreground shrink-0 transition-colors"
-          >
-            {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-          </button>
-        )}
-      </div>
-      {expanded && (
-        <div className="mt-2 space-y-2">
-          {entry.imageData && (
-            <div className="border-border overflow-hidden rounded border">
-              <img src={entry.imageData} alt="Screenshot" className="w-full" />
-            </div>
-          )}
-          {entry.summary && (
-            <div className="border-border max-h-60 overflow-auto rounded border bg-black/20 p-2">
-              <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[11px]">{entry.summary}</pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+    <ToolCard
+      entryType={entryType}
+      content={group.call.args}
+      metadata={metadata}
+      sessionDone={hasResult}
+      isLastEntry={!hasResult}
+    />
   );
 }
 
@@ -117,52 +101,7 @@ function AgentThinking({ entry }: { entry: QaAgentLogEntry & { kind: 'thinking' 
   );
 }
 
-function AgentLogEntry({ entry }: { entry: QaAgentLogEntry }) {
-  if (entry.kind === 'tool_call') {
-    return <AgentToolCall entry={entry} />;
-  }
-  if (entry.kind === 'tool_result') {
-    return <AgentToolResult entry={entry} />;
-  }
-  if (entry.kind === 'text') {
-    return (
-      <div className="flex flex-col items-start">
-        <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
-          <div className="select-text">
-            <Markdown content={entry.content} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (entry.kind === 'error') {
-    return (
-      <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-lg border px-3 py-2 text-sm">
-        {entry.message}
-      </div>
-    );
-  }
-  if (entry.kind === 'user_message') {
-    return (
-      <div className="flex flex-col items-end">
-        <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
-          <p className="text-foreground select-text text-sm whitespace-pre-wrap">{entry.content}</p>
-        </div>
-      </div>
-    );
-  }
-  if (entry.kind === 'thinking') {
-    return <AgentThinking entry={entry} />;
-  }
-  if (entry.kind === 'status') {
-    return (
-      <div className="text-muted-foreground text-center text-xs italic">
-        {entry.message}
-      </div>
-    );
-  }
-  return null;
-}
+// (AgentLogEntry removed — replaced by GroupedLogEntry below)
 
 // --- Compressed mode ---
 
@@ -224,46 +163,7 @@ function compressEntries(entries: QaAgentLogEntry[]): CompressedGroup[] {
   return groups;
 }
 
-function CompressedToolPair({ group }: { group: CompressedGroup & { type: 'tool_pair' } }) {
-  const [expanded, setExpanded] = useState(!!group.result?.imageData);
-  const success = group.result ? group.result.success : undefined;
-  const dotColor = success === undefined ? 'bg-primary animate-pulse' : success ? 'bg-green-400' : 'bg-red-400';
-  const hasImage = !!group.result?.imageData;
-
-  return (
-    <div
-      className="bg-secondary border-border hover:bg-secondary/80 w-full rounded-md border px-2.5 py-1.5 text-left transition-colors"
-    >
-      <button className="flex w-full items-center gap-2" onClick={() => setExpanded(!expanded)}>
-        <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotColor}`} />
-        <span className="text-primary text-[10px] font-semibold">{group.call.tool}</span>
-        <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-[10px]">{group.call.args}</span>
-        {hasImage && <Camera className="text-muted-foreground size-3 shrink-0" />}
-        {success !== undefined && (
-          <span className={`text-[9px] ${success ? 'text-green-400' : 'text-red-400'}`}>
-            {success ? 'OK' : 'FAIL'}
-          </span>
-        )}
-      </button>
-      {expanded && (
-        <div className="mt-1.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-          {group.result?.imageData && (
-            <div className="border-border overflow-hidden rounded border">
-              <img src={group.result.imageData} alt="Screenshot" className="w-full" />
-            </div>
-          )}
-          {group.result?.summary && (
-            <div className="border-border w-full rounded border bg-black/20 p-1.5">
-              <pre className="text-muted-foreground whitespace-pre-wrap font-mono text-[10px]">
-                {group.result.summary.slice(0, 300)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// (CompressedToolPair removed — replaced by QAToolCard above)
 
 function CompressedThinkingGroup({ group }: { group: CompressedGroup & { type: 'thinking' } }) {
   const [expanded, setExpanded] = useState(false);
@@ -296,33 +196,61 @@ function CompressedStatusGroup({ group }: { group: CompressedGroup & { type: 'st
   );
 }
 
-function CompressedLogEntry({ group }: { group: CompressedGroup }) {
+function GroupedLogEntry({ group, compressed }: { group: CompressedGroup; compressed: boolean }) {
   switch (group.type) {
     case 'tool_pair':
-      return <CompressedToolPair group={group} />;
+      return <QAToolCard group={group} />;
     case 'thinking':
-      return <CompressedThinkingGroup group={group} />;
+      if (compressed) return <CompressedThinkingGroup group={group} />;
+      return <>{group.entries.map((e, i) => <AgentThinking key={i} entry={e} />)}</>;
     case 'status_group':
       return <CompressedStatusGroup group={group} />;
     case 'text':
+      if (compressed) {
+        return (
+          <div className="bg-card border-border max-w-[85%] rounded-lg border px-2.5 py-1.5">
+            <div className="select-text text-[11px]">
+              <Markdown content={group.entry.content} />
+            </div>
+          </div>
+        );
+      }
       return (
-        <div className="bg-card border-border max-w-[85%] rounded-lg border px-2.5 py-1.5">
-          <div className="select-text text-[11px]">
-            <Markdown content={group.entry.content} />
+        <div className="flex flex-col items-start">
+          <div className="bg-card border-border max-w-[85%] rounded-xl rounded-bl-sm border px-3 py-2">
+            <div className="select-text">
+              <Markdown content={group.entry.content} />
+            </div>
           </div>
         </div>
       );
     case 'user_message':
+      if (compressed) {
+        return (
+          <div className="flex justify-end">
+            <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-lg border px-2.5 py-1.5">
+              <p className="text-foreground select-text text-[11px] whitespace-pre-wrap">{group.entry.content}</p>
+            </div>
+          </div>
+        );
+      }
       return (
-        <div className="flex justify-end">
-          <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-lg border px-2.5 py-1.5">
-            <p className="text-foreground select-text text-[11px] whitespace-pre-wrap">{group.entry.content}</p>
+        <div className="flex flex-col items-end">
+          <div className="bg-primary/10 border-primary/20 max-w-[80%] rounded-xl rounded-br-sm border px-3 py-2">
+            <p className="text-foreground select-text text-sm whitespace-pre-wrap">{group.entry.content}</p>
           </div>
         </div>
       );
     case 'error':
+      if (compressed) {
+        return (
+          <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-md border px-2.5 py-1.5 text-[11px]">
+            {group.entry.message}
+          </div>
+        );
+      }
       return (
-        <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-md border px-2.5 py-1.5 text-[11px]">
+        <div className="bg-destructive/10 border-destructive/20 text-destructive rounded-lg border px-3 py-2 text-sm">
           {group.entry.message}
         </div>
       );
@@ -1071,13 +999,9 @@ function QAPanel() {
                           <p className="text-muted-foreground py-4 text-center text-xs">
                             {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
                           </p>
-                        ) : compressedLog ? (
-                          compressEntries(selectedAgent.entries).map((group, i) => (
-                            <CompressedLogEntry key={i} group={group} />
-                          ))
                         ) : (
-                          selectedAgent.entries.map((entry, i) => (
-                            <AgentLogEntry key={i} entry={entry} />
+                          compressEntries(selectedAgent.entries).map((group, i) => (
+                            <GroupedLogEntry key={i} group={group} compressed={compressedLog} />
                           ))
                         )}
                       </div>
