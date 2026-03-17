@@ -606,7 +606,8 @@ Never use AskUserQuestion — make your best judgment and proceed.`;
 }
 
 function wireQAAgent(record: QaAgentRecord): void {
-  const { session, qaAgentId, parentSessionId } = record;
+  const { qaAgentId, parentSessionId } = record;
+  const session = record.session!; // guaranteed non-null when wiring
   const toolEntries = new Map<string, string>();
   // Track streaming text blocks: accumulate content, emit only when block is finalized
   let pendingTextId: string | null = null;
