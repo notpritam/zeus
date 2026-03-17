@@ -56,7 +56,7 @@ function SessionCard({ session, active, onSelect, onStop, onDelete }: SessionCar
       onClick={onSelect}
     >
       {/* Auto icon */}
-      <Icon className="size-3.5 shrink-0" style={{ color: iconColor }} />
+      <Icon className="size-4 shrink-0" style={{ color: iconColor }} />
 
       {/* Content */}
       <div className="min-w-0 flex-1">

@@ -130,13 +130,32 @@ function activityLabel(activity: SessionActivity): string | null {
 
 function statusDotColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
   if (session.status === 'error') return 'bg-red-400';
-  if (session.status === 'done') return 'bg-muted-foreground/30';
+  if (session.status === 'done') return 'bg-green-400/50';
   if (activity.state === 'waiting_approval') return 'bg-orange-400';
   if (activity.state === 'thinking') return 'bg-yellow-400';
   if (activity.state === 'streaming') return 'bg-green-400';
   if (activity.state === 'tool_running') return 'bg-blue-400';
   if (activity.state === 'starting') return 'bg-purple-400';
   return 'bg-muted-foreground/30';
+}
+
+function statusTextColor(session: ClaudeSessionInfo, activity: SessionActivity): string {
+  if (session.status === 'error') return 'text-red-400';
+  if (session.status === 'done') return 'text-green-400/70';
+  if (activity.state === 'waiting_approval') return 'text-orange-400';
+  if (activity.state === 'thinking') return 'text-yellow-400';
+  if (activity.state === 'streaming') return 'text-green-400';
+  if (activity.state === 'tool_running') return 'text-blue-400';
+  if (activity.state === 'starting') return 'text-purple-400';
+  return 'text-muted-foreground';
+}
+
+function statusLabel(session: ClaudeSessionInfo, activity: SessionActivity): string {
+  if (activity.state === 'tool_running') return activity.toolName || 'tool';
+  if (activity.state !== 'idle') return activity.state.replace('_', ' ');
+  if (session.status === 'done') return 'completed';
+  if (session.status === 'error') return 'error';
+  return 'idle';
 }
 
 // ─── Claude Session Card ───
@@ -177,15 +196,10 @@ function ClaudeCard({
   };
 
   const needsApproval = activity.state === 'waiting_approval';
-  const isActive = session.status === 'running' && activity.state !== 'idle';
-  const label = activityLabel(activity);
+  const isRunning = session.status === 'running' && activity.state !== 'idle';
   const dotClass = statusDotColor(session, activity);
-
-  const attentionClass =
-    needsApproval ? 'zeus-attention-approval' :
-    session.status === 'done' ? 'zeus-attention-done' :
-    session.status === 'error' ? 'zeus-attention-error' :
-    '';
+  const textClass = statusTextColor(session, activity);
+  const stLabel = statusLabel(session, activity);
 
   const displayName = session.name || (session.prompt ? session.prompt.slice(0, 40) : 'Untitled');
 
@@ -196,7 +210,7 @@ function ClaudeCard({
         active
           ? 'bg-primary/10 text-foreground'
           : 'text-foreground/80 hover:bg-secondary/60'
-      } ${attentionClass}`}
+      }`}
       onClick={onSelect}
     >
       {/* Approval ping */}
@@ -240,18 +254,10 @@ function ClaudeCard({
               {displayName}
             </span>
             <div className="mt-0.5 flex items-center gap-1.5">
-              {/* Status dot */}
-              <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass} ${isActive || needsApproval ? 'animate-pulse' : ''}`} />
-              {label && (
-                <span className={`truncate text-[9px] capitalize ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-                  {label}
-                </span>
-              )}
-              {!label && (
-                <span className="text-muted-foreground truncate text-[9px]">
-                  {session.status === 'done' ? 'done' : session.status === 'error' ? 'error' : 'idle'}
-                </span>
-              )}
+              <span className={`inline-block size-1.5 shrink-0 rounded-full ${dotClass} ${isRunning || needsApproval ? 'animate-pulse' : ''}`} />
+              <span className={`truncate text-[9px] capitalize ${textClass}`}>
+                {stLabel}
+              </span>
               {(session.qaAgentCount ?? 0) > 0 && (
                 <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[9px]">
                   <Eye className="size-2.5" />
@@ -543,7 +549,7 @@ function SessionSidebar({
       {/* Header */}
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <div className="flex items-center gap-2">
-          <Zap className="text-primary size-3.5" />
+          <Zap className="text-primary size-4" />
           <span className="text-foreground text-xs font-semibold tracking-tight">Zeus</span>
         </div>
         {onCloseSidebar && (
