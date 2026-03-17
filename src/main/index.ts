@@ -39,6 +39,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  const isDev = !!process.env.ELECTRON_RENDERER_URL;
+  const wsPort = isDev ? 8889 : 8888;
+
+  // Expose WS port so child processes (MCP bridges) connect to the right server
+  process.env.ZEUS_WS_URL = `ws://127.0.0.1:${wsPort}`;
+
   startPowerBlock();
   initAuthToken();
   initDatabase();
@@ -48,10 +54,14 @@ app.whenReady().then(async () => {
   markStaleQaAgentsErrored();
   finalizeAllCompletedSessions();
   pruneOldSessions(30);
-  await startWebSocketServer();
+  await startWebSocketServer(wsPort);
 
-  const tunnelUrl = await startTunnel(8888);
-  if (tunnelUrl) notifyTunnelStatus();
+  if (!isDev) {
+    const tunnelUrl = await startTunnel(wsPort);
+    if (tunnelUrl) notifyTunnelStatus();
+  } else {
+    console.log('[Zeus] Dev mode — tunnel disabled, WS on port', wsPort);
+  }
 
   createWindow();
 

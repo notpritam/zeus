@@ -72,6 +72,7 @@ import { SystemMonitorService } from './system-monitor';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
+let serverPort = 8888;
 
 // Track which sessions belong to which client
 const clientSessions = new Map<WebSocket, Set<string>>();
@@ -392,7 +393,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         if (isTunnelActive()) {
           await stopTunnel();
         } else {
-          await startTunnel(8888);
+          await startTunnel(serverPort);
         }
         broadcastEnvelope({
           channel: 'status',
@@ -2384,6 +2385,7 @@ function handleClose(ws: WebSocket): void {
 
 export async function startWebSocketServer(port = 8888): Promise<void> {
   if (server) return;
+  serverPort = port;
 
   return new Promise((resolve, reject) => {
     // Serve built renderer files (gracefully skip if dir doesn't exist — e.g. in tests)
@@ -2488,4 +2490,8 @@ export function notifyTunnelStatus(): void {
 
 export function isWebSocketRunning(): boolean {
   return server !== null && server.listening;
+}
+
+export function getServerPort(): number {
+  return serverPort;
 }

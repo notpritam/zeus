@@ -6,6 +6,7 @@
     "dev": "electron-vite build && electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "serve": "electron-vite build && electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
