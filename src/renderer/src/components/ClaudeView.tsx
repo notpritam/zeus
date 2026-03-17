@@ -613,8 +613,8 @@ function ClaudeView({
 
   return (
     <div data-testid="claude-view" className="bg-background flex h-full flex-col">
-      {/* Header bar — on mobile this replaces the main Header, so add traffic-light padding */}
-      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2.5 md:pt-2.5 pt-8 [-webkit-app-region:drag]">
+      {/* Header bar */}
+      <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2.5 [-webkit-app-region:drag]">
         <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
           {/* Sidebar toggle — mobile only */}
           {onToggleSidebar && (
@@ -639,17 +639,6 @@ function ClaudeView({
           >
             {compressed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
           </Button>
-          {(session.status === 'error' || session.status === 'done') && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground hover:text-primary"
-              onClick={() => onResume()}
-            >
-              <RotateCcw className="size-3.5" />
-              Resume
-            </Button>
-          )}
           {/* Right panel toggle — mobile only */}
           {onToggleRightPanel && (
             <Button

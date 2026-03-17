@@ -249,7 +249,7 @@ function App() {
               onClick={() => setMobileRightPanelOpen(false)}
             />
             <div className="bg-background absolute inset-0 z-30 flex flex-col">
-              <div className="border-border flex items-center justify-between border-b px-4 pt-8 pb-2.5 [-webkit-app-region:drag]">
+              <div className="border-border flex items-center justify-between border-b px-4 py-2.5 [-webkit-app-region:drag]">
                 <span className="text-foreground text-sm font-semibold [-webkit-app-region:no-drag]">Panels</span>
                 <button
                   onClick={() => setMobileRightPanelOpen(false)}
