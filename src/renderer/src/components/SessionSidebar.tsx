@@ -108,6 +108,7 @@ interface SessionSidebarProps {
   activeClaudeId: string | null;
   viewMode: 'terminal' | 'claude' | 'diff';
   sessionActivity: Record<string, SessionActivity>;
+  lastActivityAt: Record<string, number>;
   onNewSession: () => void;
   onNewClaudeSession: () => void;
   onSelectSession: (id: string) => void;
@@ -325,6 +326,7 @@ function CollapsedSidebar({
   activeClaudeId,
   viewMode,
   sessionActivity,
+  lastActivityAt,
   onExpandSidebar,
   onNewClaudeSession,
   onNewSession,
@@ -338,6 +340,7 @@ function CollapsedSidebar({
   activeClaudeId: string | null;
   viewMode: 'terminal' | 'claude' | 'diff';
   sessionActivity: Record<string, SessionActivity>;
+  lastActivityAt: Record<string, number>;
   onExpandSidebar?: () => void;
   onNewClaudeSession: () => void;
   onNewSession: () => void;
@@ -345,13 +348,15 @@ function CollapsedSidebar({
   onSelectSession: (id: string) => void;
   onOpenSettings: () => void;
 }) {
-  const runningClaude = claudeSessions.filter((s) => s.status === 'running');
-  const doneClaude = claudeSessions.filter((s) => s.status !== 'running');
-  const allClaude = [...runningClaude, ...doneClaude];
+  // Sort by last activity (most recent first), fallback to startedAt
+  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
+    const aTime = lastActivityAt[a.id] ?? a.startedAt;
+    const bTime = lastActivityAt[b.id] ?? b.startedAt;
+    return bTime - aTime;
+  };
 
-  const activeSessions = sessions.filter((s) => s.status === 'active');
-  const completedSessions = sessions.filter((s) => s.status !== 'active');
-  const allTerminal = [...activeSessions, ...completedSessions];
+  const allClaude = [...claudeSessions].sort(byActivity);
+  const allTerminal = [...sessions].sort(byActivity);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -486,6 +491,7 @@ function SessionSidebar({
   activeClaudeId,
   viewMode,
   sessionActivity,
+  lastActivityAt,
   onNewSession,
   onNewClaudeSession,
   onSelectSession,
@@ -529,6 +535,7 @@ function SessionSidebar({
         activeClaudeId={activeClaudeId}
         viewMode={viewMode}
         sessionActivity={sessionActivity}
+        lastActivityAt={lastActivityAt}
         onExpandSidebar={onExpandSidebar}
         onNewClaudeSession={onNewClaudeSession}
         onNewSession={onNewSession}
@@ -539,13 +546,15 @@ function SessionSidebar({
     );
   }
 
-  const activeSessions = sessions.filter((s) => s.status === 'active');
-  const completedSessions = sessions.filter((s) => s.status !== 'active');
-  const runningClaude = claudeSessions.filter((s) => s.status === 'running');
-  const doneClaude = claudeSessions.filter((s) => s.status !== 'running');
+  // Sort by last activity (most recent first), fallback to startedAt
+  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
+    const aTime = lastActivityAt[a.id] ?? a.startedAt;
+    const bTime = lastActivityAt[b.id] ?? b.startedAt;
+    return bTime - aTime;
+  };
 
-  const allClaude = [...runningClaude, ...doneClaude];
-  const allTerminal = [...activeSessions, ...completedSessions];
+  const allClaude = [...claudeSessions].sort(byActivity);
+  const allTerminal = [...sessions].sort(byActivity);
 
   return (
     <div

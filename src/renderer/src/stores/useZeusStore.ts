@@ -70,6 +70,7 @@ interface ZeusState {
   claudeEntriesMeta: Record<string, { oldestSeq: number | null; totalCount: number; hasMore: boolean; loading: boolean }>;
   pendingApprovals: ClaudeApprovalInfo[];
   sessionActivity: Record<string, SessionActivity>;
+  lastActivityAt: Record<string, number>; // sessionId → timestamp of last activity
   messageQueue: Record<string, Array<{ id: string; content: string }>>;
 
   // Git
@@ -355,6 +356,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   claudeEntriesMeta: {},
   pendingApprovals: [],
   sessionActivity: {},
+  lastActivityAt: {},
   messageQueue: {},
 
   gitStatus: {},
@@ -462,7 +464,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
       if (payload.type === 'session_started') {
         const p = envelope.payload as SessionStartedPayload;
-        set({ activeSessionId: p.sessionId });
+        set((state) => ({
+          activeSessionId: p.sessionId,
+          lastActivityAt: { ...state.lastActivityAt, [p.sessionId]: Date.now() },
+        }));
       }
 
       if (payload.type === 'session_list') {
@@ -486,9 +491,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           if (exists) {
             return {
               sessions: state.sessions.map((s) => (s.id === p.session.id ? p.session : s)),
+              lastActivityAt: { ...state.lastActivityAt, [p.session.id]: Date.now() },
             };
           }
-          return { sessions: [...state.sessions, p.session] };
+          return {
+            sessions: [...state.sessions, p.session],
+            lastActivityAt: { ...state.lastActivityAt, [p.session.id]: Date.now() },
+          };
         });
       }
 
@@ -619,6 +628,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'claude_started') {
         set((state) => ({
           sessionActivity: { ...state.sessionActivity, [sid]: { state: 'starting' } },
+          lastActivityAt: { ...state.lastActivityAt, [sid]: Date.now() },
           claudeSessions: state.claudeSessions.map((s) =>
             s.id === sid ? { ...s, status: 'running' as const } : s,
           ),
@@ -640,7 +650,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             idx >= 0
               ? [...existing.slice(0, idx), entry, ...existing.slice(idx + 1)]
               : [...existing, entry];
-          return { claudeEntries: { ...state.claudeEntries, [sid]: updated } };
+          return {
+            claudeEntries: { ...state.claudeEntries, [sid]: updated },
+            lastActivityAt: { ...state.lastActivityAt, [sid]: Date.now() },
+          };
         });
       }
 
@@ -678,6 +691,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         const { activity } = envelope.payload as { activity: SessionActivity };
         set((state) => ({
           sessionActivity: { ...state.sessionActivity, [sid]: activity },
+          lastActivityAt: { ...state.lastActivityAt, [sid]: Date.now() },
         }));
 
         // Auto-drain queued messages when session becomes idle
@@ -1310,6 +1324,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       activeClaudeId: id,
       claudeEntries: { ...state.claudeEntries, [id]: [userEntry] },
       sessionActivity: { ...state.sessionActivity, [id]: { state: 'starting' } },
+      lastActivityAt: { ...state.lastActivityAt, [id]: Date.now() },
       viewMode: 'claude',
     }));
 
@@ -1372,6 +1387,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         [activeClaudeId]: [...(state.claudeEntries[activeClaudeId] ?? []), userEntry],
       },
       sessionActivity: { ...state.sessionActivity, [activeClaudeId]: { state: 'starting' } },
+      lastActivityAt: { ...state.lastActivityAt, [activeClaudeId]: Date.now() },
     }));
 
     zeusWs.send({
@@ -1490,6 +1506,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           : { oldestSeq: null, totalCount: existingEntries.length + 1, hasMore: false, loading: false },
       },
       sessionActivity: { ...state.sessionActivity, [newId]: { state: 'starting' } },
+      lastActivityAt: { ...state.lastActivityAt, [newId]: Date.now() },
       viewMode: 'claude',
     }));
 

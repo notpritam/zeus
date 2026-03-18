@@ -52,6 +52,7 @@ function App() {
     interruptClaude,
     resumeClaudeSession,
     sessionActivity,
+    lastActivityAt,
     messageQueue,
     queueMessage,
     editQueuedMessage,
@@ -172,6 +173,7 @@ function App() {
             activeClaudeId={activeClaudeId}
             viewMode={viewMode}
             sessionActivity={sessionActivity}
+            lastActivityAt={lastActivityAt}
             onNewSession={() => {
               startSession();
               setSidebarOpen(false);
@@ -283,6 +285,7 @@ function App() {
                 activeClaudeId={activeClaudeId}
                 viewMode={viewMode}
                 sessionActivity={sessionActivity}
+                lastActivityAt={lastActivityAt}
                 onNewSession={() => startSession()}
                 onNewClaudeSession={() => openNewClaudeModal()}
                 onSelectSession={(id) => selectSession(id)}
@@ -308,6 +311,7 @@ function App() {
                   activeClaudeId={activeClaudeId}
                   viewMode={viewMode}
                   sessionActivity={sessionActivity}
+                  lastActivityAt={lastActivityAt}
                   onNewSession={() => startSession()}
                   onNewClaudeSession={() => openNewClaudeModal()}
                   onSelectSession={(id) => selectSession(id)}
