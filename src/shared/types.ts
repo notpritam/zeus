@@ -576,6 +576,8 @@ export type QaPayload =
   | { type: 'get_qa_agent_entries'; qaAgentId: string }
   | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
   | { type: 'clear_qa_agent_entries'; qaAgentId: string }
+  // QA Agent MCP → Server (qa_finish signal)
+  | { type: 'qa_agent_finish'; qaAgentId: string; summary: string; status: string }
   // Server → Client (QA Agent)
   | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }

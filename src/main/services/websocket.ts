@@ -646,6 +646,7 @@ You have full access to:
 - Batch: qa_batch_actions (run multiple actions in one call — much faster)
 - Compound: qa_run_test_flow (navigate + wait + snapshot + screenshot + errors in one call)
 - Instance info: qa_list_instances, qa_list_profiles
+- Completion: qa_finish (REQUIRED — call when done to send results to parent agent)
 - File editing: Read, Edit, Write tools
 - Shell commands: Bash tool
 
@@ -664,7 +665,10 @@ Your workflow:
 3. Use qa_assert_element and qa_wait_for_element to verify state changes
 4. Check qa_console_logs, qa_network_requests, and qa_js_errors
 5. If you find bugs: fix the code, then re-test to confirm the fix
-6. Report findings concisely
+6. Call qa_finish with your complete findings — this is MANDATORY
+
+CRITICAL: You MUST call qa_finish when you are done. This sends your results back to the parent agent.
+Without it, the parent agent will timeout waiting for your response. Always call qa_finish as your LAST action.
 
 Always use qa_run_test_flow after making code changes to verify the fix.
 Be concise — the user sees a compact action log, not a full chat.
@@ -770,6 +774,37 @@ function wireQAAgent(record: QaAgentRecord): void {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
     });
+
+    // Fallback: if qa_finish wasn't called but the turn ended, send deferred response
+    // and kill the process so zeus_qa_run doesn't timeout waiting forever
+    if (record.pendingResponseId && record.pendingResponseWs) {
+      console.log(`[QA Agent] Fallback: result event sending deferred response for ${qaAgentId} (qa_finish was not called)`);
+      const lastEntries = record.collectedTextEntries;
+      const summary = lastEntries.length > 0
+        ? lastEntries[lastEntries.length - 1]
+        : 'QA agent completed without calling qa_finish.';
+      try {
+        sendEnvelope(record.pendingResponseWs, {
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'start_qa_agent_response',
+            responseId: record.pendingResponseId,
+            qaAgentId,
+            status: 'done',
+            summary,
+          },
+        });
+      } catch {
+        // WebSocket may have closed
+      }
+      record.pendingResponseId = undefined;
+      record.pendingResponseWs = undefined;
+
+      // Kill the process — it's hanging waiting for stdin input we'll never send
+      if (record.session && record.session.isRunning) {
+        record.session.kill();
+      }
+    }
   });
 
   session.on('done', () => {
@@ -2138,6 +2173,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         enableQA: true,
         qaTargetUrl: targetUrl,
         zeusSessionId: payload.parentSessionId,
+        qaAgentId,
       });
 
       const agentName = payload.name || undefined;
@@ -2212,6 +2248,37 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'qa_error', message: `Failed to start QA agent: ${(err as Error).message}` },
       });
     }
+  } else if (payload.type === 'qa_agent_finish') {
+    // QA agent called qa_finish tool — send deferred response to zeus_qa_run caller
+    const record = qaAgentSessions.get(payload.qaAgentId);
+    if (record && record.pendingResponseId && record.pendingResponseWs) {
+      console.log(`[QA Agent] qa_finish received for ${payload.qaAgentId}: status=${payload.status}`);
+      try {
+        sendEnvelope(record.pendingResponseWs, {
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'start_qa_agent_response',
+            responseId: record.pendingResponseId,
+            qaAgentId: payload.qaAgentId,
+            status: payload.status ?? 'done',
+            summary: payload.summary ?? 'QA agent completed.',
+          },
+        });
+      } catch {
+        // WebSocket may have closed
+      }
+      // Clear pending so done/result handlers don't double-send
+      record.pendingResponseId = undefined;
+      record.pendingResponseWs = undefined;
+
+      // Kill the Claude CLI process — it's done, no need to keep it alive
+      if (record.session && record.session.isRunning) {
+        record.session.kill();
+      }
+    } else {
+      console.warn(`[QA Agent] qa_finish received for unknown/already-resolved agent: ${payload.qaAgentId}`);
+    }
+
   } else if (payload.type === 'stop_qa_agent') {
     const record = qaAgentSessions.get(payload.qaAgentId);
     if (record && record.session && record.session.isRunning) {

@@ -29,6 +29,7 @@ export interface SessionOptions {
   enableQA?: boolean;
   qaTargetUrl?: string;
   zeusSessionId?: string;
+  qaAgentId?: string;
 }
 
 export interface ApprovalRequest {
@@ -84,6 +85,7 @@ export class ClaudeSession extends EventEmitter {
         ...process.env,
         NPM_CONFIG_LOGLEVEL: 'error',
         ...(this.options.zeusSessionId ? { ZEUS_SESSION_ID: this.options.zeusSessionId } : {}),
+        ...(this.options.qaAgentId ? { ZEUS_QA_AGENT_ID: this.options.qaAgentId } : {}),
       },
     });
 

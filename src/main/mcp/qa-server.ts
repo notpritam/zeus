@@ -8,10 +8,13 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import WebSocket from 'ws';
 
 const PINCHTAB_PORT = parseInt(process.env.ZEUS_PINCHTAB_PORT ?? '9867', 10);
 const PINCHTAB_BASE = `http://127.0.0.1:${PINCHTAB_PORT}`;
 const CDP_STATE_FILE = path.join(os.tmpdir(), 'zeus-qa-cdp-state.json');
+const ZEUS_WS_URL = process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888';
+const QA_AGENT_ID = process.env.ZEUS_QA_AGENT_ID ?? '';
 
 // Track read pointers for since_last_call
 let lastConsoleRead = 0;
@@ -904,6 +907,75 @@ server.tool(
       return { content };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error running test flow: ${(err as Error).message}` }], isError: true };
+    }
+  },
+);
+
+// ═══════════════════════════════════════════
+// ─── QA Finish Tool (sends results to Zeus) ───
+// ═══════════════════════════════════════════
+
+function sendFinishToZeus(summary: string, status: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!QA_AGENT_ID) {
+      console.error('[zeus-qa] No ZEUS_QA_AGENT_ID — cannot send finish signal');
+      resolve(); // Don't block the agent
+      return;
+    }
+
+    const finishWs = new WebSocket(ZEUS_WS_URL);
+    const timer = setTimeout(() => {
+      try { finishWs.close(); } catch { /* ignore */ }
+      console.error('[zeus-qa] Timeout connecting to Zeus for qa_finish');
+      resolve(); // Don't block the agent
+    }, 5000);
+
+    finishWs.on('open', () => {
+      clearTimeout(timer);
+      const envelope = {
+        channel: 'qa',
+        sessionId: '',
+        auth: '',
+        payload: {
+          type: 'qa_agent_finish',
+          qaAgentId: QA_AGENT_ID,
+          summary,
+          status,
+        },
+      };
+      finishWs.send(JSON.stringify(envelope), () => {
+        // Give Zeus a moment to process before closing
+        setTimeout(() => {
+          try { finishWs.close(); } catch { /* ignore */ }
+          resolve();
+        }, 200);
+      });
+    });
+
+    finishWs.on('error', (err) => {
+      clearTimeout(timer);
+      console.error('[zeus-qa] WebSocket error sending finish:', err.message);
+      resolve(); // Don't block the agent
+    });
+  });
+}
+
+server.tool(
+  'qa_finish',
+  'REQUIRED: Call this tool when you are done testing. Sends your findings back to the parent agent that spawned you. You MUST call this before ending your session — without it, the parent agent will timeout waiting for your results.',
+  {
+    summary: z.string().describe('Your complete test findings: what was tested, what passed, what failed, and any bugs found. Be thorough but concise.'),
+    status: z.enum(['pass', 'fail', 'warning']).describe('Overall test result: pass (all good), fail (bugs found), warning (minor issues)'),
+  },
+  async ({ summary, status }) => {
+    try {
+      await sendFinishToZeus(summary, status);
+      return textResult({
+        success: true,
+        message: 'Findings sent to parent agent. You can stop now.',
+      });
+    } catch (err) {
+      return errorResult(`Failed to send finish signal: ${(err as Error).message}`);
     }
   },
 );
