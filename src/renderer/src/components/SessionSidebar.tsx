@@ -666,7 +666,7 @@ function SessionSidebar({
                   activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
-                  onDelete={() => onDeleteClaudeSession(s.id)}
+                  onDelete={() => setDeleteConfirm({ type: 'claude', session: s })}
                   onLongPress={() => setSheetTarget({ type: 'claude', session: s })}
                 />
               ))}
@@ -691,7 +691,7 @@ function SessionSidebar({
                   active={viewMode === 'terminal' && s.id === activeSessionId}
                   onSelect={() => onSelectSession(s.id)}
                   onStop={() => onStopSession(s.id)}
-                  onDelete={s.status !== 'active' ? () => onDeleteTerminalSession(s.id) : undefined}
+                  onDelete={s.status !== 'active' ? () => setDeleteConfirm({ type: 'terminal', session: s }) : undefined}
                   onArchive={s.status !== 'active' ? () => onArchiveTerminalSession(s.id) : undefined}
                   onLongPress={() => setSheetTarget({ type: 'terminal', session: s })}
                 />
