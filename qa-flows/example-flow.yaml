@@ -1,0 +1,50 @@
+# qa-flows/example-flow.yaml
+# Example flow definition — demonstrates the schema.
+# Copy and modify this to create flows for your app.
+
+id: example_login_flow
+name: Login Flow
+description: Verify login behavior across user types
+targetPath: /login
+tags:
+  - auth
+  - core
+
+personas:
+  - id: valid_user
+    credentialRef: QA_VALID_USER
+    assertions:
+      - description: Should redirect to dashboard after login
+        check: url_matches
+        pattern: "/dashboard"
+      - description: No JS errors during login
+        check: console_no_errors
+
+  - id: invalid_user
+    credentialRef: QA_INVALID_USER
+    assertions:
+      - description: Error message should appear
+        check: text_present
+        textContains: "Invalid credentials"
+      - description: Should stay on login page
+        check: url_matches
+        pattern: "/login"
+
+steps:
+  - intent: Navigate to the login page
+    hints:
+      loginUrl: /login
+
+  - intent: Fill in the credentials for this persona
+    hints:
+      selectors:
+        - "[data-testid='email-input']"
+        - "input[type='email']"
+
+  - intent: Submit the login form
+    hints:
+      selectors:
+        - "[data-testid='login-btn']"
+        - "button[type='submit']"
+
+  - intent: Wait for navigation and verify the outcome
