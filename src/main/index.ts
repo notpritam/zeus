@@ -28,6 +28,23 @@ function createWindow(): void {
   Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow(createMainWindowOptions());
 
+  // Prevent renderer crashes from JS errors (e.g. ResizeObserver loop)
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Zeus] Renderer process gone:', details.reason, details.exitCode);
+    // Reload on crash instead of showing blank screen
+    if (details.reason === 'crashed' || details.reason === 'oom') {
+      mainWindow?.reload();
+    }
+  });
+
+  // Suppress console-level JS errors that are benign
+  mainWindow.webContents.on('console-message', (_event, level, message) => {
+    // level 3 = error — log to main process for debugging
+    if (level === 3 && !message.includes('ResizeObserver')) {
+      console.error('[Renderer Error]', message);
+    }
+  });
+
   // In dev: use Vite HMR server. In prod: load from the HTTP server.
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);

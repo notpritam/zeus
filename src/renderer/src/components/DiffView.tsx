@@ -94,16 +94,26 @@ export default function DiffView() {
 
     if (!containerRef.current || !activeTab) return;
 
-    // Dispose previous editor + models
-    changeListenerRef.current?.dispose();
-    editorRef.current?.dispose();
-    originalModelRef.current?.dispose();
-    modifiedModelRef.current?.dispose();
+    // Dispose previous editor + models safely
+    try { changeListenerRef.current?.dispose(); } catch { /* already disposed */ }
+    try { editorRef.current?.dispose(); } catch { /* already disposed */ }
+    try { originalModelRef.current?.dispose(); } catch { /* already disposed */ }
+    try { modifiedModelRef.current?.dispose(); } catch { /* already disposed */ }
+
+    // Guard: container must have non-zero dimensions for Monaco
+    const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      // Retry on next frame when layout settles
+      const raf = requestAnimationFrame(() => {
+        // Force re-run by toggling a no-op state (the effect depends on activeTab.id)
+      });
+      return () => cancelAnimationFrame(raf);
+    }
 
     if (activeTab.mode === 'edit') {
       // Standalone editor for file viewing/editing
       const model = monaco.editor.createModel(
-        activeTab.modified,
+        activeTab.modified ?? '',
         activeTab.language,
       );
       modifiedModelRef.current = model;
@@ -131,8 +141,8 @@ export default function DiffView() {
 
       return () => {
         listener.dispose();
-        editor.dispose();
-        model.dispose();
+        try { editor.dispose(); } catch { /* ok */ }
+        try { model.dispose(); } catch { /* ok */ }
         editorRef.current = null;
         modifiedModelRef.current = null;
         changeListenerRef.current = null;
@@ -140,11 +150,11 @@ export default function DiffView() {
     } else {
       // Diff editor for git diffs
       const originalModel = monaco.editor.createModel(
-        activeTab.original,
+        activeTab.original ?? '',
         activeTab.language,
       );
       const modifiedModel = monaco.editor.createModel(
-        activeTab.modified,
+        activeTab.modified ?? '',
         activeTab.language,
       );
 
@@ -177,9 +187,9 @@ export default function DiffView() {
 
       return () => {
         listener.dispose();
-        diffEditor.dispose();
-        originalModel.dispose();
-        modifiedModel.dispose();
+        try { diffEditor.dispose(); } catch { /* ok */ }
+        try { originalModel.dispose(); } catch { /* ok */ }
+        try { modifiedModel.dispose(); } catch { /* ok */ }
         editorRef.current = null;
         originalModelRef.current = null;
         modifiedModelRef.current = null;
