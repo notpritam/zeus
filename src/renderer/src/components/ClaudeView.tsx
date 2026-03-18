@@ -6,6 +6,7 @@ import { Send, Loader2, Check, X, StopCircle, File, Folder, ImagePlus, Pencil, T
 import { Kbd } from '@/components/ui/kbd';
 import FileMentionPopover from '@/components/FileMentionPopover';
 import ApprovalCard from '@/components/ApprovalCard';
+import SessionTerminalPanel from '@/components/SessionTerminalPanel';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
 import type {
@@ -142,6 +143,44 @@ function ClaudeView({
   // Pagination — read from store
   const meta = useZeusStore((s) => session ? s.claudeEntriesMeta[session.id] : null);
   const loadMoreEntries = useZeusStore((s) => s.loadMoreEntries);
+
+  // Session terminal panel
+  const sessionTerminalState = useZeusStore((s) =>
+    session ? s.sessionTerminals[session.id] : undefined
+  );
+  const terminalPanelHeight = useZeusStore((s) => s.terminalPanelHeight);
+  const setTerminalPanelHeight = useZeusStore((s) => s.setTerminalPanelHeight);
+  const panelVisible = sessionTerminalState?.panelVisible ?? false;
+
+  // Drag resize state
+  const [isDragging, setIsDragging] = useState(false);
+  const claudeViewRef = useRef<HTMLDivElement>(null);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!claudeViewRef.current) return;
+      const rect = claudeViewRef.current.getBoundingClientRect();
+      const mouseY = e.clientY - rect.top;
+      const pct = ((rect.height - mouseY) / rect.height) * 100;
+      setTerminalPanelHeight(pct);
+    };
+
+    const handleMouseUp = () => setIsDragging(false);
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, setTerminalPanelHeight]);
 
   // Preserve scroll position when older entries are prepended
   const prevScrollHeightRef = useRef<number>(0);
@@ -308,7 +347,7 @@ function ClaudeView({
   };
 
   return (
-    <div data-testid="claude-view" className="bg-background flex h-full flex-col">
+    <div ref={claudeViewRef} data-testid="claude-view" className="bg-background flex h-full flex-col">
       {/* Header bar */}
       <div className="border-border bg-card flex items-center justify-between border-b px-4 py-2.5 [-webkit-app-region:drag]">
         <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
@@ -385,218 +424,245 @@ function ClaudeView({
         </div>
       </div>
 
-      {/* Entry list */}
-      <div className="relative min-h-0 flex-1">
-        {/* Floating "loading older" badge */}
-        {meta?.loading && (
-          <div className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2 animate-in fade-in slide-in-from-top-2 duration-200">
-            <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
-              <Loader2 className="size-3 animate-spin" />
-              Loading...
-            </div>
-          </div>
-        )}
-        <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
-          {compressed ? (
-            groupEntriesByUser(entries).map((group, i, arr) => (
-              <CompressedGroup
-                key={group.userEntry?.id ?? `group-${i}`}
-                group={group}
-                isLast={i === arr.length - 1}
-                sessionDone={session.status !== 'running'}
-              />
-            ))
-          ) : (
-            entries.map((entry, i) => (
-              <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
-            ))
-          )}
+      {/* Chat + Terminal split */}
+      <div className="relative min-h-0 flex-1 flex flex-col">
+        {/* Chat area */}
+        <div
+          className="min-h-0 flex flex-col"
+          style={panelVisible ? { height: `${100 - terminalPanelHeight}%` } : { flex: '1' }}
+        >
+          {/* Entry list */}
+          <div className="relative min-h-0 flex-1">
+            {/* Floating "loading older" badge */}
+            {meta?.loading && (
+              <div className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
+                  <Loader2 className="size-3 animate-spin" />
+                  Loading...
+                </div>
+              </div>
+            )}
+            <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
+              {compressed ? (
+                groupEntriesByUser(entries).map((group, i, arr) => (
+                  <CompressedGroup
+                    key={group.userEntry?.id ?? `group-${i}`}
+                    group={group}
+                    isLast={i === arr.length - 1}
+                    sessionDone={session.status !== 'running'}
+                  />
+                ))
+              ) : (
+                entries.map((entry, i) => (
+                  <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
+                ))
+              )}
 
-          {/* Queued messages */}
-          {queue.length > 0 && (
-            <div className="space-y-2">
-              {queue.map((msg) => (
-                <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+              {/* Queued messages */}
+              {queue.length > 0 && (
+                <div className="space-y-2">
+                  {queue.map((msg) => (
+                    <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+                  ))}
+                </div>
+              )}
+
+              {entries.length === 0 && session.status === 'running' && (
+                <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Loader2 className="size-3 animate-spin" />
+                  Starting Claude session...
+                </div>
+              )}
+
+              {/* Scroll anchor — keeps content pinned to bottom */}
+              <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
+            </div>
+
+            {/* Floating scroll-to-bottom button */}
+            {showScrollToBottom && (
+              <button
+                onClick={scrollToBottom}
+                className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
+              >
+                <ArrowDown className="size-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Approval cards */}
+          {sessionApprovals.length > 0 && (
+            <div className="border-border space-y-2 border-t px-4 py-2">
+              {sessionApprovals.map((a) => (
+                <ApprovalCard
+                  key={a.approvalId}
+                  approval={a}
+                  onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
+                  onDeny={(reason) => onDeny(a.approvalId, reason)}
+                />
               ))}
             </div>
           )}
 
-          {entries.length === 0 && session.status === 'running' && (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Loader2 className="size-3 animate-spin" />
-              Starting Claude session...
+          {/* Activity bar — always visible at bottom when busy */}
+          {isBusy && (
+            <div className="border-border flex items-center gap-2 border-t px-4 py-1.5">
+              <Sparkles className={`size-3.5 animate-pulse ${
+                activity.state === 'thinking' ? 'text-yellow-400' :
+                activity.state === 'streaming' ? 'text-green-400' :
+                activity.state === 'tool_running' ? 'text-blue-400' :
+                activity.state === 'waiting_approval' ? 'text-orange-400' :
+                'text-purple-400'
+              }`} />
+              <span className="text-muted-foreground text-xs font-medium">
+                {activity.state === 'thinking' && 'Thinking...'}
+                {activity.state === 'streaming' && 'Writing...'}
+                {activity.state === 'tool_running' && activity.description}
+                {activity.state === 'waiting_approval' && `Approval: ${activity.toolName}`}
+                {activity.state === 'starting' && 'Starting...'}
+              </span>
             </div>
           )}
 
-          {/* Scroll anchor — keeps content pinned to bottom */}
-          <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
-        </div>
-
-        {/* Floating scroll-to-bottom button */}
-        {showScrollToBottom && (
-          <button
-            onClick={scrollToBottom}
-            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
-          >
-            <ArrowDown className="size-4" />
-          </button>
-        )}
-      </div>
-
-      {/* Approval cards */}
-      {sessionApprovals.length > 0 && (
-        <div className="border-border space-y-2 border-t px-4 py-2">
-          {sessionApprovals.map((a) => (
-            <ApprovalCard
-              key={a.approvalId}
-              approval={a}
-              onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
-              onDeny={(reason) => onDeny(a.approvalId, reason)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Activity bar — always visible at bottom when busy */}
-      {isBusy && (
-        <div className="border-border flex items-center gap-2 border-t px-4 py-1.5">
-          <Sparkles className={`size-3.5 animate-pulse ${
-            activity.state === 'thinking' ? 'text-yellow-400' :
-            activity.state === 'streaming' ? 'text-green-400' :
-            activity.state === 'tool_running' ? 'text-blue-400' :
-            activity.state === 'waiting_approval' ? 'text-orange-400' :
-            'text-purple-400'
-          }`} />
-          <span className="text-muted-foreground text-xs font-medium">
-            {activity.state === 'thinking' && 'Thinking...'}
-            {activity.state === 'streaming' && 'Writing...'}
-            {activity.state === 'tool_running' && activity.description}
-            {activity.state === 'waiting_approval' && `Approval: ${activity.toolName}`}
-            {activity.state === 'starting' && 'Starting...'}
-          </span>
-        </div>
-      )}
-
-      {/* Input area */}
-      <div className="border-border bg-card shrink-0 border-t">
-        {(session.status === 'error' || session.status === 'done') ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              onResume(resumeInput.trim() || undefined);
-              setResumeInput('');
-            }}
-            className="flex items-center gap-2 px-4 py-3"
-          >
-            <input
-              type="text"
-              value={resumeInput}
-              onChange={(e) => setResumeInput(e.target.value)}
-              placeholder={session.status === 'error' ? 'Resume with message...' : 'Continue with message...'}
-              className="bg-muted text-foreground placeholder:text-muted-foreground flex-1 rounded-md border-none px-3 py-1.5 text-sm outline-none"
-            />
-            <Button size="sm" variant="outline" type="submit">
-              <RotateCcw className="size-3" />
-              {resumeInput.trim() ? 'Send' : 'Resume'}
-            </Button>
-          </form>
-        ) : (
-          <>
-            {/* Attached file chips + image thumbnails */}
-            {(attachedFiles.length > 0 || attachedImages.length > 0) && (
-              <div className="flex flex-wrap gap-1.5 px-4 pt-2">
-                {attachedImages.map((img) => (
-                  <div key={img.id} className="group/thumb relative">
-                    <img
-                      src={img.dataUrl}
-                      alt={img.filename}
-                      className="h-16 w-16 rounded-md border border-border object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(img.id)}
-                      className="absolute -right-1 -top-1 hidden rounded-full bg-destructive p-0.5 text-white group-hover/thumb:block"
-                    >
-                      <X className="size-2.5" />
-                    </button>
-                  </div>
-                ))}
-                {attachedFiles.map((f) => (
-                  <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
-                    {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
-                    {f.path}
-                    <button
-                      type="button"
-                      onClick={() => removeFile(f.path)}
-                      className="hover:text-destructive ml-0.5"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-
-            {/* Input bar with popover */}
-            <form onSubmit={handleSubmit} className="relative flex items-center gap-2 px-4 py-3">
-              {showMentionPopover && session.status === 'running' && (
-                <FileMentionPopover
-                  sessionId={session.id}
-                  initialQuery={mentionQuery}
-                  onSelect={handleFileSelect}
-                  onClose={() => setShowMentionPopover(false)}
+          {/* Input area */}
+          <div className="border-border bg-card shrink-0 border-t">
+            {(session.status === 'error' || session.status === 'done') ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onResume(resumeInput.trim() || undefined);
+                  setResumeInput('');
+                }}
+                className="flex items-center gap-2 px-4 py-3"
+              >
+                <input
+                  type="text"
+                  value={resumeInput}
+                  onChange={(e) => setResumeInput(e.target.value)}
+                  placeholder={session.status === 'error' ? 'Resume with message...' : 'Continue with message...'}
+                  className="bg-muted text-foreground placeholder:text-muted-foreground flex-1 rounded-md border-none px-3 py-1.5 text-sm outline-none"
                 />
-              )}
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                multiple
-                className="hidden"
-                onChange={handleImagePick}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground size-8 shrink-0"
-                onClick={() => imageInputRef.current?.click()}
-                disabled={session.status !== 'running'}
-              >
-                <ImagePlus className="size-4" />
-              </Button>
-              <Input
-                ref={inputRef}
-                data-testid="claude-input"
-                value={input}
-                onChange={handleInputChange}
-                onPaste={handlePaste}
-                placeholder="Send follow-up... (@ files, paste images)"
-                disabled={session.status !== 'running'}
-                className="text-sm"
-              />
-              {isBusy && (
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="destructive"
-                  onClick={onInterrupt}
-                  className="size-8 shrink-0"
-                >
-                  <StopCircle className="size-4" />
+                <Button size="sm" variant="outline" type="submit">
+                  <RotateCcw className="size-3" />
+                  {resumeInput.trim() ? 'Send' : 'Resume'}
                 </Button>
-              )}
-              <Button
-                data-testid="claude-send"
-                type="submit"
-                disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0 && attachedImages.length === 0)}
-                size="sm"
-                variant={isBusy ? 'secondary' : 'default'}
-              >
-                <Send className="size-3" />
-                {isBusy ? 'Queue' : 'Send'}
-              </Button>
-            </form>
+              </form>
+            ) : (
+              <>
+                {/* Attached file chips + image thumbnails */}
+                {(attachedFiles.length > 0 || attachedImages.length > 0) && (
+                  <div className="flex flex-wrap gap-1.5 px-4 pt-2">
+                    {attachedImages.map((img) => (
+                      <div key={img.id} className="group/thumb relative">
+                        <img
+                          src={img.dataUrl}
+                          alt={img.filename}
+                          className="h-16 w-16 rounded-md border border-border object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(img.id)}
+                          className="absolute -right-1 -top-1 hidden rounded-full bg-destructive p-0.5 text-white group-hover/thumb:block"
+                        >
+                          <X className="size-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {attachedFiles.map((f) => (
+                      <Badge key={f.path} variant="secondary" className="gap-1 text-xs">
+                        {f.type === 'directory' ? <Folder className="size-3" /> : <File className="size-3" />}
+                        {f.path}
+                        <button
+                          type="button"
+                          onClick={() => removeFile(f.path)}
+                          className="hover:text-destructive ml-0.5"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {/* Input bar with popover */}
+                <form onSubmit={handleSubmit} className="relative flex items-center gap-2 px-4 py-3">
+                  {showMentionPopover && session.status === 'running' && (
+                    <FileMentionPopover
+                      sessionId={session.id}
+                      initialQuery={mentionQuery}
+                      onSelect={handleFileSelect}
+                      onClose={() => setShowMentionPopover(false)}
+                    />
+                  )}
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    multiple
+                    className="hidden"
+                    onChange={handleImagePick}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground size-8 shrink-0"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={session.status !== 'running'}
+                  >
+                    <ImagePlus className="size-4" />
+                  </Button>
+                  <Input
+                    ref={inputRef}
+                    id="claude-input"
+                    data-testid="claude-input"
+                    value={input}
+                    onChange={handleInputChange}
+                    onPaste={handlePaste}
+                    placeholder="Send follow-up... (@ files, paste images)"
+                    disabled={session.status !== 'running'}
+                    className="text-sm"
+                  />
+                  {isBusy && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="destructive"
+                      onClick={onInterrupt}
+                      className="size-8 shrink-0"
+                    >
+                      <StopCircle className="size-4" />
+                    </Button>
+                  )}
+                  <Button
+                    data-testid="claude-send"
+                    type="submit"
+                    disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0 && attachedImages.length === 0)}
+                    size="sm"
+                    variant={isBusy ? 'secondary' : 'default'}
+                  >
+                    <Send className="size-3" />
+                    {isBusy ? 'Queue' : 'Send'}
+                  </Button>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Drag handle + Terminal panel */}
+        {panelVisible && session && (
+          <>
+            <div
+              onMouseDown={handleDragStart}
+              className="border-border hover:bg-primary/20 h-1 shrink-0 cursor-row-resize border-y transition-colors"
+              style={isDragging ? { backgroundColor: 'var(--primary)' } : undefined}
+            />
+            <div style={{ height: `${terminalPanelHeight}%` }} className="shrink-0">
+              <SessionTerminalPanel
+                claudeSessionId={session.id}
+                cwd={session.workingDir || '/'}
+              />
+            </div>
           </>
         )}
       </div>
