@@ -570,13 +570,14 @@ export type QaPayload =
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude' }
+  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; flowId?: string; personas?: string[] }
   | { type: 'stop_qa_agent'; qaAgentId: string }
   | { type: 'qa_agent_message'; qaAgentId: string; text: string }
   | { type: 'list_qa_agents'; parentSessionId: string }
   | { type: 'get_qa_agent_entries'; qaAgentId: string }
   | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
   | { type: 'clear_qa_agent_entries'; qaAgentId: string }
+  | { type: 'list_qa_flows' }
   // Server → Client (QA Agent)
   | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
@@ -584,4 +585,5 @@ export type QaPayload =
   | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: NormalizedEntry }
   | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
   | { type: 'qa_agent_entries'; qaAgentId: string; entries: NormalizedEntry[] }
+  | { type: 'qa_flows_list'; flows: import('./qa-flow-types').FlowSummary[] }
   | { type: 'qa_error'; message: string };
