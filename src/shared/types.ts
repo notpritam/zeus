@@ -206,6 +206,8 @@ export interface StartSessionPayload {
   type: 'start_session';
   cols?: number;
   rows?: number;
+  cwd?: string;           // working directory, defaults to $HOME
+  correlationId?: string;  // echoed back in session_started for request matching
 }
 
 export interface StopSessionPayload {
@@ -216,6 +218,7 @@ export interface SessionStartedPayload {
   type: 'session_started';
   sessionId: string;
   shell: string;
+  correlationId?: string;  // echoed from start_session
 }
 
 export interface ListSessionsPayload {

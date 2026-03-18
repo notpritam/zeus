@@ -33,7 +33,7 @@ import type {
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings';
 
 interface QaAgentClient {
   info: QaAgentSessionInfo;
@@ -135,6 +135,21 @@ interface ZeusState {
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null;
+
+  // Session terminal panel (per-Claude-session terminals)
+  sessionTerminals: Record<string, {
+    tabs: Array<{
+      tabId: string;
+      terminalSessionId: string;
+      label: string;
+      createdAt: number;
+      exited: boolean;
+      exitCode?: number;
+    }>;
+    activeTabId: string | null;
+    panelVisible: boolean;
+  }>;
+  terminalPanelHeight: number;
 
   // Actions
   connect: () => () => void;
@@ -256,6 +271,16 @@ interface ZeusState {
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => void;
   toggleRightPanel: () => void;
 
+  // Session terminal actions
+  createSessionTerminal: (claudeSessionId: string, cwd: string) => void;
+  closeSessionTerminal: (claudeSessionId: string, tabId: string) => void;
+  switchSessionTerminal: (claudeSessionId: string, tabId: string) => void;
+  toggleSessionTerminalPanel: (claudeSessionId: string) => void;
+  setSessionTerminalExited: (claudeSessionId: string, tabId: string, exitCode: number) => void;
+  restartSessionTerminal: (claudeSessionId: string, tabId: string, cwd: string) => void;
+  setTerminalPanelHeight: (height: number) => void;
+  destroyAllSessionTerminals: (claudeSessionId: string) => void;
+
   // Performance actions
   startPerfMonitoring: () => void;
   stopPerfMonitoring: () => void;
@@ -276,6 +301,9 @@ const ENTRIES_PAGE_SIZE = 50;
 
 let claudeIdCounter = 0;
 let drainInFlight: Record<string, boolean> = {};
+
+// Maps correlationId (= tabId) → claudeSessionId for pending terminal tab creation
+const pendingSessionTerminals = new Map<string, string>();
 
 /**
  * Drain the next queued message for a session.
@@ -439,6 +467,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   activeRightTab: null,
 
+  sessionTerminals: {},
+  terminalPanelHeight: parseInt(localStorage.getItem('zeus-terminal-panel-height') || '30', 10),
+
   connect: () => {
     // Subscribe to status channel
     const unsubStatus = zeusWs.on('status', (envelope: WsEnvelope) => {
@@ -494,10 +525,41 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
       if (payload.type === 'session_started') {
         const p = envelope.payload as SessionStartedPayload;
-        set((state) => ({
-          activeSessionId: p.sessionId,
-          lastActivityAt: { ...state.lastActivityAt, [p.sessionId]: Date.now() },
-        }));
+
+        // Check if this session belongs to a pending session terminal tab
+        const correlationId = p.correlationId;
+        const matchedClaudeId = correlationId ? pendingSessionTerminals.get(correlationId) : undefined;
+
+        if (correlationId && matchedClaudeId) {
+          // This is a session terminal tab — link it using the correlationId as tabId
+          pendingSessionTerminals.delete(correlationId);
+          const shellName = p.shell.split('/').pop() || 'shell';
+          set((state) => {
+            const st = state.sessionTerminals[matchedClaudeId];
+            if (!st) return {};
+            const tabNumber = st.tabs.length;
+            return {
+              sessionTerminals: {
+                ...state.sessionTerminals,
+                [matchedClaudeId]: {
+                  ...st,
+                  tabs: st.tabs.map(t =>
+                    t.tabId === correlationId
+                      ? { ...t, terminalSessionId: p.sessionId, label: `${shellName} ${tabNumber}` }
+                      : t
+                  ),
+                },
+              },
+              lastActivityAt: { ...state.lastActivityAt, [p.sessionId]: Date.now() },
+            };
+          });
+        } else {
+          // Normal standalone terminal session (existing behavior)
+          set((state) => ({
+            activeSessionId: p.sessionId,
+            lastActivityAt: { ...state.lastActivityAt, [p.sessionId]: Date.now() },
+          }));
+        }
       }
 
       if (payload.type === 'session_list') {
@@ -1822,6 +1884,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   deleteClaudeSession: (id: string) => {
+    get().destroyAllSessionTerminals(id);
     zeusWs.send({
       channel: 'claude',
       sessionId: id,
@@ -1840,6 +1903,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   archiveClaudeSession: (id: string) => {
+    get().destroyAllSessionTerminals(id);
     zeusWs.send({
       channel: 'claude',
       sessionId: id,
@@ -2450,6 +2514,194 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     set((state) => ({ activeRightTab: state.activeRightTab ? null : 'source-control' }));
   },
 
+  // --- Session terminal actions ---
+
+  toggleSessionTerminalPanel: (claudeSessionId: string) => {
+    const state = get();
+    const existing = state.sessionTerminals[claudeSessionId];
+
+    if (!existing) {
+      // First open — create state and auto-create first tab
+      const session = state.claudeSessions.find(s => s.id === claudeSessionId);
+      const cwd = session?.workingDir || '/';
+
+      set((s) => ({
+        sessionTerminals: {
+          ...s.sessionTerminals,
+          [claudeSessionId]: { tabs: [], activeTabId: null, panelVisible: true },
+        },
+      }));
+
+      get().createSessionTerminal(claudeSessionId, cwd);
+      return;
+    }
+
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: { ...existing, panelVisible: !existing.panelVisible },
+      },
+    }));
+  },
+
+  createSessionTerminal: (claudeSessionId: string, cwd: string) => {
+    const state = get();
+    const existing = state.sessionTerminals[claudeSessionId];
+    const tabs = existing?.tabs || [];
+
+    // 5-tab cap — count ALL tabs (including exited)
+    if (tabs.length >= 5) return;
+
+    // Generate stable tabId — also used as correlationId
+    const tabId = crypto.randomUUID();
+
+    const pendingTab = {
+      tabId,
+      terminalSessionId: '',
+      label: 'starting...',
+      createdAt: Date.now(),
+      exited: false,
+    };
+
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: {
+          tabs: [...tabs, pendingTab],
+          activeTabId: tabId,
+          panelVisible: true,
+        },
+      },
+    }));
+
+    pendingSessionTerminals.set(tabId, claudeSessionId);
+
+    zeusWs.send({
+      channel: 'control',
+      sessionId: '',
+      payload: { type: 'start_session', cwd, correlationId: tabId },
+      auth: '',
+    });
+  },
+
+  closeSessionTerminal: (claudeSessionId: string, tabId: string) => {
+    const state = get();
+    const st = state.sessionTerminals[claudeSessionId];
+    if (!st) return;
+
+    const tab = st.tabs.find(t => t.tabId === tabId);
+    if (!tab) return;
+
+    if (!tab.exited && tab.terminalSessionId) {
+      zeusWs.send({
+        channel: 'control',
+        sessionId: tab.terminalSessionId,
+        payload: { type: 'stop_session' },
+        auth: '',
+      });
+    }
+
+    const newTabs = st.tabs.filter(t => t.tabId !== tabId);
+    const newActiveTabId = st.activeTabId === tabId
+      ? (newTabs.length > 0 ? newTabs[newTabs.length - 1].tabId : null)
+      : st.activeTabId;
+
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: {
+          ...st,
+          tabs: newTabs,
+          activeTabId: newActiveTabId,
+          panelVisible: newTabs.length > 0 ? st.panelVisible : false,
+        },
+      },
+    }));
+  },
+
+  switchSessionTerminal: (claudeSessionId: string, tabId: string) => {
+    const st = get().sessionTerminals[claudeSessionId];
+    if (!st) return;
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: { ...st, activeTabId: tabId },
+      },
+    }));
+  },
+
+  setSessionTerminalExited: (claudeSessionId: string, tabId: string, exitCode: number) => {
+    const st = get().sessionTerminals[claudeSessionId];
+    if (!st) return;
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: {
+          ...st,
+          tabs: st.tabs.map(t =>
+            t.tabId === tabId ? { ...t, exited: true, exitCode } : t
+          ),
+        },
+      },
+    }));
+  },
+
+  restartSessionTerminal: (claudeSessionId: string, tabId: string, cwd: string) => {
+    const st = get().sessionTerminals[claudeSessionId];
+    if (!st) return;
+    const tab = st.tabs.find(t => t.tabId === tabId);
+    if (!tab) return;
+
+    pendingSessionTerminals.set(tabId, claudeSessionId);
+
+    set((s) => ({
+      sessionTerminals: {
+        ...s.sessionTerminals,
+        [claudeSessionId]: {
+          ...st,
+          tabs: st.tabs.map(t =>
+            t.tabId === tabId
+              ? { ...t, terminalSessionId: '', exited: false, exitCode: undefined, label: 'restarting...' }
+              : t
+          ),
+        },
+      },
+    }));
+
+    zeusWs.send({
+      channel: 'control',
+      sessionId: '',
+      payload: { type: 'start_session', cwd, correlationId: tabId },
+      auth: '',
+    });
+  },
+
+  setTerminalPanelHeight: (height: number) => {
+    const clamped = Math.min(80, Math.max(15, height));
+    localStorage.setItem('zeus-terminal-panel-height', String(clamped));
+    set({ terminalPanelHeight: clamped });
+  },
+
+  destroyAllSessionTerminals: (claudeSessionId: string) => {
+    const st = get().sessionTerminals[claudeSessionId];
+    if (!st) return;
+
+    for (const tab of st.tabs) {
+      if (!tab.exited && tab.terminalSessionId) {
+        zeusWs.send({
+          channel: 'control',
+          sessionId: tab.terminalSessionId,
+          payload: { type: 'stop_session' },
+          auth: '',
+        });
+      }
+    }
+
+    set((s) => {
+      const { [claudeSessionId]: _, ...rest } = s.sessionTerminals;
+      return { sessionTerminals: rest };
+    });
+  },
 
   // --- Performance actions ---
 

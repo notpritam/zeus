@@ -8,6 +8,7 @@ import type { WsEnvelope, TerminalOutputPayload, TerminalExitPayload } from '../
 export function useTerminal(
   sessionId: string | null,
   containerRef: React.RefObject<HTMLDivElement | null>,
+  onExit?: (code: number) => void,
 ) {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -90,6 +91,7 @@ export function useTerminal(
       } else if (payload.type === 'exit') {
         const { code } = envelope.payload as TerminalExitPayload;
         term.write(`\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`);
+        onExit?.(code);
       }
     });
 
