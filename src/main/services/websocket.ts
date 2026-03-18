@@ -80,6 +80,7 @@ import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
 import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
+import { FlowRunner } from './flow-runner';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -142,6 +143,9 @@ const qaAgentSessions = new Map<string, QaAgentRecord>();
 // Track parentSessionId for external QA agents (registered via zeus-bridge MCP)
 const externalQaParentMap = new Map<string, string>();
 let qaAgentIdCounter = 0;
+
+// QA flow runner — loads structured flow definitions from qa-flows/
+const flowRunner = new FlowRunner(path.join(app.getAppPath(), 'qa-flows'));
 
 /** Kill all running QA agents that belong to a given parent session. */
 function stopQaAgentsByParent(parentSessionId: string): void {
@@ -2209,6 +2213,13 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     } catch (err) {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
     }
+  } else if (payload.type === 'list_qa_flows') {
+    // Reload flows from disk in case they changed, then send summaries
+    flowRunner.loadFlows();
+    sendEnvelope(ws, {
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_flows_list', flows: flowRunner.listFlows() },
+    });
   } else if (payload.type === 'start_qa_agent') {
     console.log('[QA Agent] start_qa_agent received:', { task: payload.task, parentSessionId: payload.parentSessionId, parentSessionType: payload.parentSessionType, workingDir: payload.workingDir, targetUrl: payload.targetUrl });
     try {
@@ -2265,6 +2276,100 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           console.warn(`[QA Agent] No target URL detected — agent will start without a URL. Detail: ${detected.detail}`);
         }
       }
+
+      // ── Flow Resolution ──
+      const resolved = flowRunner.resolve(payload.task, {
+        flowId: payload.flowId,
+        personas: payload.personas,
+      });
+
+      if (resolved) {
+        // ── Structured flow: spawn one agent per persona ──
+        const personaPromises = resolved.personas.map(async (persona) => {
+          const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}-${persona.id}`;
+          const parentSessionId = payload.parentSessionId;
+          const parentSessionType = payload.parentSessionType;
+          const agentName = payload.name
+            ? `${payload.name} (${persona.id})`
+            : `${resolved.flow.name} — ${persona.id}`;
+
+          const session = new ClaudeSession({
+            workingDir: payload.workingDir,
+            permissionMode: 'bypassPermissions',
+            enableQA: true,
+            qaTargetUrl: targetUrl,
+            zeusSessionId: payload.parentSessionId,
+            qaAgentId,
+          });
+
+          const record: QaAgentRecord = {
+            qaAgentId,
+            parentSessionId,
+            parentSessionType,
+            name: agentName,
+            task: `[Flow: ${resolved.flow.id}] ${persona.id}`,
+            targetUrl,
+            workingDir: payload.workingDir,
+            session,
+            startedAt: Date.now(),
+            pendingResponseId: payload.responseId,
+            pendingResponseWs: ws,
+            collectedTextEntries: [],
+          };
+
+          qaAgentSessions.set(qaAgentId, record);
+          console.log(`[QA Agent] Created flow record: qaAgentId=${qaAgentId}, flow=${resolved.flow.id}, persona=${persona.id}`);
+          wireQAAgent(record);
+
+          insertQaAgentSession({
+            id: qaAgentId,
+            parentSessionId,
+            parentSessionType,
+            name: agentName,
+            task: record.task,
+            targetUrl,
+            status: 'running',
+            startedAt: record.startedAt,
+            endedAt: null,
+            workingDir: payload.workingDir,
+          });
+
+          console.log('[QA Agent] Flow agent started successfully:', qaAgentId);
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: {
+              type: 'qa_agent_started',
+              qaAgentId,
+              parentSessionId,
+              parentSessionType,
+              name: agentName,
+              task: record.task,
+              targetUrl,
+            },
+          });
+
+          const initialMsgEntry: NormalizedEntry = {
+            id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: new Date().toISOString(),
+            entryType: { type: 'user_message' },
+            content: record.task,
+          };
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
+          });
+          insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
+
+          const flowPrompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\n${flowRunner.buildAgentPrompt(resolved.flow, persona, targetUrl)}`;
+          await session.start(flowPrompt);
+        });
+
+        // Spawn all persona agents in parallel
+        await Promise.all(personaPromises);
+        return; // Skip the free-form path below
+      }
+
+      // ── Free-form fallback: no flow matched — existing code below runs unchanged ──
       const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}`;
       const parentSessionId = payload.parentSessionId;
       const parentSessionType = payload.parentSessionType;
