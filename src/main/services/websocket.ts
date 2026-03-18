@@ -2325,7 +2325,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
             id: qaAgentId,
             parentSessionId,
             parentSessionType,
-            name: agentName,
+            name: agentName ?? null,
             task: record.task,
             targetUrl,
             status: 'running',
@@ -2348,11 +2348,15 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
             },
           });
 
+          const effectiveUrl = targetUrl || 'http://localhost:5173';
+          const flowSection = flowRunner.buildAgentPrompt(resolved.flow, persona, effectiveUrl);
+          const flowPrompt = `${buildQAAgentSystemPrompt(effectiveUrl)}\n\n---\n\n${flowSection}`;
+
           const initialMsgEntry: NormalizedEntry = {
             id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             timestamp: new Date().toISOString(),
             entryType: { type: 'user_message' },
-            content: record.task,
+            content: flowSection,
           };
           broadcastEnvelope({
             channel: 'qa', sessionId: '', auth: '',
@@ -2360,7 +2364,6 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           });
           insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
 
-          const flowPrompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\n${flowRunner.buildAgentPrompt(resolved.flow, persona, targetUrl)}`;
           await session.start(flowPrompt);
         });
 

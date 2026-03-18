@@ -800,6 +800,19 @@ function QAPanel() {
                         );
                       })}
                     </select>
+                    {selectedAgent && selectedAgent.info.status !== 'running' && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground hover:text-destructive size-5 shrink-0"
+                        onClick={() => {
+                          deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId);
+                        }}
+                        title="Delete agent"
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-xs"

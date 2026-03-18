@@ -570,7 +570,7 @@ export type QaPayload =
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; flowId?: string; personas?: string[] }
+  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; flowId?: string; personas?: string[]; responseId?: string }
   | { type: 'stop_qa_agent'; qaAgentId: string }
   | { type: 'qa_agent_message'; qaAgentId: string; text: string }
   | { type: 'list_qa_agents'; parentSessionId: string }

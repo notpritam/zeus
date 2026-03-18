@@ -223,17 +223,18 @@ export class ClaudeSession extends EventEmitter {
     }
 
     // MCP server integration — mutually exclusive:
+    //   QA agent sessions (have qaAgentId) get zeus-qa (browser automation tools)
     //   Regular sessions get zeus-bridge (orchestration, QA dispatch)
-    //   QA agent sessions get zeus-qa (browser automation tools)
     const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+    const isQAAgent = !!this.options.qaAgentId;
 
-    if (this.options.enableQA) {
+    if (isQAAgent) {
       const qaServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
       mcpServers['zeus-qa'] = {
         command: 'node',
         args: [qaServerPath],
         env: {
-          ...(this.options.qaAgentId ? { ZEUS_QA_AGENT_ID: this.options.qaAgentId } : {}),
+          ZEUS_QA_AGENT_ID: this.options.qaAgentId!,
           ZEUS_WS_URL: process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888',
           ZEUS_PINCHTAB_PORT: process.env.ZEUS_PINCHTAB_PORT ?? '9867',
         },
