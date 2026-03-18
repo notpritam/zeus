@@ -25,7 +25,7 @@ import { registerSession, markExited, markKilled, getSession, getAllSessions } f
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
 import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel, stopRemoteTunnel } from './tunnel';
 import { zeusEnv } from './env';
-import { validateToken } from './auth';
+import { validateToken, getAuthToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
 import {
@@ -78,6 +78,18 @@ import { SystemMonitorService } from './system-monitor';
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
 let serverPort = 8888;
+
+/** Return tunnel URL with auth token appended so remote clients can authenticate. */
+function getAuthenticatedTunnelUrl(): string | null {
+  const url = getTunnelUrl();
+  if (!url) return null;
+  try {
+    const token = getAuthToken();
+    return `${url}?token=${token}`;
+  } catch {
+    return url;
+  }
+}
 
 // Track which sessions belong to which client
 const clientSessions = new Map<WebSocket, Set<string>>();
@@ -375,7 +387,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: getTunnelUrl(),
+        tunnel: getAuthenticatedTunnelUrl(),
       },
       auth: '',
     });
@@ -393,7 +405,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: getTunnelUrl(),
+        tunnel: getAuthenticatedTunnelUrl(),
       },
       auth: '',
     });
@@ -412,7 +424,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
             type: 'status_update',
             powerBlock: isPowerBlocked(),
             websocket: true,
-            tunnel: getTunnelUrl(),
+            tunnel: getAuthenticatedTunnelUrl(),
           },
           auth: '',
         });
@@ -456,7 +468,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
             type: 'status_update',
             powerBlock: isPowerBlocked(),
             websocket: true,
-            tunnel: getTunnelUrl(),
+            tunnel: getAuthenticatedTunnelUrl(),
           },
           auth: '',
         });
@@ -2627,7 +2639,7 @@ export function notifyTunnelStatus(): void {
       type: 'status_update',
       powerBlock: isPowerBlocked(),
       websocket: true,
-      tunnel: getTunnelUrl(),
+      tunnel: getAuthenticatedTunnelUrl(),
     },
     auth: '',
   });
