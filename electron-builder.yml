@@ -1,0 +1,24 @@
+appId: com.zeus.app
+productName: Zeus
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  target:
+    - dmg
+    - zip
+win:
+  icon: resources/icon.png
+  target:
+    - nsis
+linux:
+  icon: resources/icon.png
+  target:
+    - AppImage
+    - deb

@@ -4,7 +4,8 @@ import { resolve } from 'path';
 // Load .env from project root (one level up from out/main/)
 loadEnv({ path: resolve(__dirname, '../../.env') });
 
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage } from 'electron';
+import path from 'path';
 import { startPowerBlock } from './services/power';
 import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from './services/websocket';
 import { destroyAllSessions } from './services/terminal';
@@ -25,7 +26,67 @@ export function getMainWindow(): BrowserWindow | null {
 }
 
 function createWindow(): void {
-  Menu.setApplicationMenu(null);
+  // Set macOS dock icon (dev mode shows Electron icon otherwise)
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = path.join(__dirname, '../../resources/icon.png');
+    const dockIcon = nativeImage.createFromPath(iconPath);
+    if (!dockIcon.isEmpty()) {
+      app.dock.setIcon(dockIcon);
+    }
+  }
+
+  // Application menu with Zeus branding
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Zeus',
+      submenu: [
+        { role: 'about', label: 'About Zeus' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Hide Zeus' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Zeus' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+
   mainWindow = new BrowserWindow(createMainWindowOptions());
 
   // Prevent renderer crashes from JS errors (e.g. ResizeObserver loop)
@@ -56,6 +117,8 @@ function createWindow(): void {
     mainWindow = null;
   });
 }
+
+app.setName('Zeus');
 
 app.whenReady().then(async () => {
   const { isDev, wsPort, shouldTunnel, label } = zeusEnv;

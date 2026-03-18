@@ -8,8 +8,10 @@ export function createMainWindowOptions(): BrowserWindowConstructorOptions {
     minWidth: 480,
     minHeight: 360,
     resizable: true,
+    title: 'Zeus',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 12 },
+    icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
