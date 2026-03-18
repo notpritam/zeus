@@ -567,13 +567,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           const mostRecent = running ?? sessions.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
           activeId = mostRecent.id;
           set({ activeClaudeId: activeId, viewMode: 'claude' });
-          // Lazy-load latest page of entries from DB for the auto-selected session
-          zeusWs.send({
-            channel: 'claude',
-            sessionId: activeId,
-            payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
-            auth: '',
-          });
+          // Lazy-load latest page of entries from DB (skip if already loaded from previous connection)
+          const existing = get().claudeEntries[activeId];
+          if (!existing || existing.length === 0) {
+            zeusWs.send({
+              channel: 'claude',
+              sessionId: activeId,
+              payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
+              auth: '',
+            });
+          }
         }
 
         // Only request state for the active session (watchers are already alive on backend)
@@ -619,7 +622,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             const isLoadMore = meta && meta.oldestSeq !== null; // already had entries
             const existingEntries = isLoadMore ? (state.claudeEntries[sid] ?? []) : [];
             // Prepend older entries (loadMore) or set initial page
-            const merged = isLoadMore ? [...entries, ...existingEntries] : entries;
+            // Deduplicate by entry ID to prevent duplicate keys on reconnect
+            const incomingIds = new Set(entries.map((e) => e.id));
+            const deduped = existingEntries.filter((e) => !incomingIds.has(e.id));
+            const merged = isLoadMore ? [...entries, ...deduped] : entries;
             return {
               claudeEntries: { ...state.claudeEntries, [sid]: merged },
               claudeEntriesMeta: {

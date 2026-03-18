@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -115,6 +115,11 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE claude_sessions ADD COLUMN qa_target_url TEXT`);
   }
 
+  if (currentVersion < 9) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN deleted_at INTEGER`);
+    database.exec(`ALTER TABLE terminal_sessions ADD COLUMN deleted_at INTEGER`);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -182,6 +187,7 @@ export interface ClaudeSessionRow {
   model: string | null;
   startedAt: number;
   endedAt: number | null;
+  deletedAt: number | null;
 }
 
 export function insertClaudeSession(info: ClaudeSessionRow): void {
@@ -252,14 +258,27 @@ interface ClaudeSessionDbRow {
   model: string | null;
   started_at: number;
   ended_at: number | null;
+  deleted_at: number | null;
 }
 
 export function getAllClaudeSessions(): ClaudeSessionRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM claude_sessions ORDER BY started_at DESC`)
+    .prepare(`SELECT * FROM claude_sessions WHERE status != 'deleted' ORDER BY started_at DESC`)
     .all() as ClaudeSessionDbRow[];
-  return rows.map((r) => ({
+  return rows.map(mapClaudeRow);
+}
+
+export function getDeletedClaudeSessions(): ClaudeSessionRow[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM claude_sessions WHERE status = 'deleted' ORDER BY deleted_at DESC`)
+    .all() as ClaudeSessionDbRow[];
+  return rows.map(mapClaudeRow);
+}
+
+function mapClaudeRow(r: ClaudeSessionDbRow): ClaudeSessionRow {
+  return {
     id: r.id,
     claudeSessionId: r.claude_session_id,
     status: r.status,
@@ -274,7 +293,8 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     model: r.model,
     startedAt: r.started_at,
     endedAt: r.ended_at,
-  }));
+    deletedAt: r.deleted_at,
+  };
 }
 
 export function updateClaudeSessionMeta(
@@ -298,6 +318,22 @@ export function updateClaudeSessionMeta(
 }
 
 export function deleteClaudeSession(id: string): void {
+  if (!db) return;
+  // Soft-delete: mark as deleted with timestamp for recovery
+  db.prepare(`UPDATE claude_sessions SET status = 'deleted', deleted_at = ? WHERE id = ?`).run(
+    Date.now(),
+    id,
+  );
+}
+
+export function restoreClaudeSession(id: string): void {
+  if (!db) return;
+  db.prepare(
+    `UPDATE claude_sessions SET status = 'completed', deleted_at = NULL WHERE id = ? AND status = 'deleted'`,
+  ).run(id);
+}
+
+export function permanentlyDeleteClaudeSession(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM claude_entries WHERE session_id = ?`).run(id);
   db.prepare(`DELETE FROM claude_sessions WHERE id = ?`).run(id);
@@ -607,7 +643,7 @@ interface TerminalSessionDbRow {
 export function getAllTerminalSessions(): SessionRecord[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM terminal_sessions ORDER BY started_at DESC`)
+    .prepare(`SELECT * FROM terminal_sessions WHERE status != 'deleted' ORDER BY started_at DESC`)
     .all() as TerminalSessionDbRow[];
   return rows.map((r) => ({
     id: r.id,
@@ -623,6 +659,22 @@ export function getAllTerminalSessions(): SessionRecord[] {
 }
 
 export function deleteTerminalSession(id: string): void {
+  if (!db) return;
+  // Soft-delete: mark as deleted with timestamp for recovery
+  db.prepare(`UPDATE terminal_sessions SET status = 'deleted', deleted_at = ? WHERE id = ?`).run(
+    Date.now(),
+    id,
+  );
+}
+
+export function restoreTerminalSession(id: string): void {
+  if (!db) return;
+  db.prepare(
+    `UPDATE terminal_sessions SET status = 'killed', deleted_at = NULL WHERE id = ? AND status = 'deleted'`,
+  ).run(id);
+}
+
+export function permanentlyDeleteTerminalSession(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM terminal_sessions WHERE id = ?`).run(id);
 }
