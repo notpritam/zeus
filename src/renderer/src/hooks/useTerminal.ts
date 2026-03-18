@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -12,9 +12,11 @@ export function useTerminal(
 ) {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const disposedRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!sessionId || !containerRef.current) return;
+    disposedRef.current = false;
 
     const container = containerRef.current;
 
@@ -63,6 +65,7 @@ export function useTerminal(
 
     // Initial fit (guard against hidden containers)
     requestAnimationFrame(() => {
+      if (disposedRef.current) return;
       if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
       try {
         fitAddon.fit();
@@ -108,6 +111,7 @@ export function useTerminal(
     // Resize observer — skip when container is hidden (display:none → zero dimensions)
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => {
+        if (disposedRef.current) return;
         if (!fitAddonRef.current || !termRef.current) return;
         if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
         try {
@@ -126,6 +130,7 @@ export function useTerminal(
     resizeObserver.observe(container);
 
     return () => {
+      disposedRef.current = true;
       resizeObserver.disconnect();
       inputDisposable.dispose();
       unsubscribe();

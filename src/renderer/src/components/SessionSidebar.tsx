@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Settings, Trash2, Eye, Pencil, Check, X,
@@ -595,11 +595,23 @@ function SessionSidebar({
 
   const closeSheet = () => setSheetTarget(null);
 
+  // Filter out terminal sessions that belong to session terminal tabs (Cmd+J panels)
+  const sessionTerminals = useZeusStore((s) => s.sessionTerminals);
+  const standaloneSessions = useMemo(() => {
+    const embeddedIds = new Set<string>();
+    for (const st of Object.values(sessionTerminals)) {
+      for (const tab of st.tabs) {
+        if (tab.terminalSessionId) embeddedIds.add(tab.terminalSessionId);
+      }
+    }
+    return embeddedIds.size > 0 ? sessions.filter((s) => !embeddedIds.has(s.id)) : sessions;
+  }, [sessions, sessionTerminals]);
+
   // Collapsed view — thin activity bar with session icons
   if (collapsed) {
     return (
       <CollapsedSidebar
-        sessions={sessions}
+        sessions={standaloneSessions}
         claudeSessions={claudeSessions}
         activeSessionId={activeSessionId}
         activeClaudeId={activeClaudeId}
@@ -624,7 +636,7 @@ function SessionSidebar({
   };
 
   const allClaude = [...claudeSessions].sort(byActivity);
-  const allTerminal = [...sessions].sort(byActivity);
+  const allTerminal = [...standaloneSessions].sort(byActivity);
 
   return (
     <div
@@ -691,7 +703,7 @@ function SessionSidebar({
                   active={viewMode === 'terminal' && s.id === activeSessionId}
                   onSelect={() => onSelectSession(s.id)}
                   onStop={() => onStopSession(s.id)}
-                  onDelete={s.status !== 'active' ? () => setDeleteConfirm({ type: 'terminal', session: s }) : undefined}
+                  onDelete={s.status !== 'active' ? () => onDeleteTerminalSession(s.id) : undefined}
                   onArchive={s.status !== 'active' ? () => onArchiveTerminalSession(s.id) : undefined}
                   onLongPress={() => setSheetTarget({ type: 'terminal', session: s })}
                 />
@@ -762,10 +774,7 @@ function SessionSidebar({
                   icon={<Trash2 className="size-4" />}
                   label="Delete"
                   destructive
-                  onClick={() => {
-                    closeSheet();
-                    setDeleteConfirm(sheetTarget);
-                  }}
+                  onClick={() => { closeSheet(); onDeleteTerminalSession(s.id); }}
                 />
               )}
             </>

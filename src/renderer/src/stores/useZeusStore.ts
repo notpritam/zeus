@@ -2592,11 +2592,20 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const tab = st.tabs.find(t => t.tabId === tabId);
     if (!tab) return;
 
-    if (!tab.exited && tab.terminalSessionId) {
+    if (tab.terminalSessionId) {
+      if (!tab.exited) {
+        zeusWs.send({
+          channel: 'control',
+          sessionId: tab.terminalSessionId,
+          payload: { type: 'stop_session' },
+          auth: '',
+        });
+      }
+      // Remove from DB so it doesn't reappear in the sidebar terminal list
       zeusWs.send({
         channel: 'control',
         sessionId: tab.terminalSessionId,
-        payload: { type: 'stop_session' },
+        payload: { type: 'delete_terminal_session' },
         auth: '',
       });
     }
@@ -2687,11 +2696,19 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     if (!st) return;
 
     for (const tab of st.tabs) {
-      if (!tab.exited && tab.terminalSessionId) {
+      if (tab.terminalSessionId) {
+        if (!tab.exited) {
+          zeusWs.send({
+            channel: 'control',
+            sessionId: tab.terminalSessionId,
+            payload: { type: 'stop_session' },
+            auth: '',
+          });
+        }
         zeusWs.send({
           channel: 'control',
           sessionId: tab.terminalSessionId,
-          payload: { type: 'stop_session' },
+          payload: { type: 'delete_terminal_session' },
           auth: '',
         });
       }
