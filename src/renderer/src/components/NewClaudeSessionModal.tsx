@@ -72,7 +72,7 @@ function NewClaudeSessionModal({
   const [notificationSound, setNotificationSound] = useState(claudeDefaults.notificationSound);
   const [enableGitWatcher, setEnableGitWatcher] = useState(true);
   const [enableQA, setEnableQA] = useState(false);
-  const [qaTargetUrl, setQaTargetUrl] = useState('http://localhost:5173');
+  const [qaTargetUrl, setQaTargetUrl] = useState(window.location.origin);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -84,7 +84,7 @@ function NewClaudeSessionModal({
       setNotificationSound(claudeDefaults.notificationSound);
       setEnableGitWatcher(true);
       setEnableQA(false);
-      setQaTargetUrl('http://localhost:5173');
+      setQaTargetUrl(window.location.origin);
       setSelectedProjectId(lastUsedProjectId);
       setCustomDir('');
       setShowCustomDir(savedProjects.length === 0);
@@ -415,7 +415,7 @@ function NewClaudeSessionModal({
                 <Input
                   value={qaTargetUrl}
                   onChange={(e) => setQaTargetUrl(e.target.value)}
-                  placeholder="http://localhost:5173"
+                  placeholder={window.location.origin}
                   className="text-xs"
                 />
               </div>

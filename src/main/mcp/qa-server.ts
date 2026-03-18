@@ -815,7 +815,7 @@ server.tool(
   'qa_run_test_flow',
   'Run a complete test check: navigate, wait, snapshot, screenshot, collect console/network/errors. Call this after making UI changes.',
   {
-    url: z.string().describe('URL to test (e.g., http://localhost:5173)'),
+    url: z.string().describe('URL to test (e.g., http://localhost:5199)'),
     wait_for_network_idle: z.boolean().optional().describe('Wait for network idle before capturing (default true)'),
   },
   async ({ url, wait_for_network_idle }) => {

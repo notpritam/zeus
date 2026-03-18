@@ -4,7 +4,7 @@ import { resolve } from 'path';
 // Load .env from project root (one level up from out/main/)
 loadEnv({ path: resolve(__dirname, '../../.env') });
 
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu } from 'electron';
 import { startPowerBlock } from './services/power';
 import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from './services/websocket';
 import { destroyAllSessions } from './services/terminal';
@@ -25,6 +25,7 @@ export function getMainWindow(): BrowserWindow | null {
 }
 
 function createWindow(): void {
+  Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow(createMainWindowOptions());
 
   // In dev: use Vite HMR server. In prod: load from the HTTP server.
@@ -45,6 +46,10 @@ app.whenReady().then(async () => {
 
   // Expose WS port so child processes (MCP bridges) connect to the right server
   process.env.ZEUS_WS_URL = `ws://127.0.0.1:${wsPort}`;
+
+  // Expose default QA target URL — uses the dev server URL in dev mode,
+  // so QA agents test the correct app without manual URL entry
+  process.env.ZEUS_QA_DEFAULT_URL = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173';
 
   startPowerBlock();
   initAuthToken();

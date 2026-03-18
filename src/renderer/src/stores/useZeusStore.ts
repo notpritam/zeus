@@ -164,6 +164,8 @@ interface ZeusState {
   removeQueuedMessage: (msgId: string) => void;
   loadMoreEntries: (sessionId: string) => void;
   updateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => void;
+  updateQaTargetUrl: (sessionId: string, qaTargetUrl: string) => void;
+  detectQaTargetUrl: (sessionId: string) => void;
   deleteClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
@@ -394,7 +396,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaError: null,
   qaLoading: false,
   qaTabs: [],
-  qaCurrentUrl: 'http://localhost:5173',
+  qaCurrentUrl: window.location.origin,
   qaConsoleLogs: [],
   qaNetworkRequests: [],
   qaJsErrors: [],
@@ -776,6 +778,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      if (payload.type === 'qa_target_url_updated') {
+        const { sessionId, qaTargetUrl } = envelope.payload as { sessionId: string; qaTargetUrl: string | null };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sessionId ? { ...s, qaTargetUrl: qaTargetUrl ?? undefined } : s,
+          ),
+        }));
+      }
+
     });
 
     // Subscribe to settings channel
@@ -1117,7 +1128,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaRunning: false, qaInstances: [], qaTabs: [],
           qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
           qaText: null, qaLoading: false, qaError: null,
-          qaCurrentUrl: 'http://localhost:5173',
+          qaCurrentUrl: window.location.origin,
           qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
           qaAgents: {}, activeQaAgentId: {},
         });
@@ -1724,6 +1735,24 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'claude',
       sessionId: id,
       payload: { type: 'update_claude_session', ...updates },
+      auth: '',
+    });
+  },
+
+  updateQaTargetUrl: (sessionId: string, qaTargetUrl: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'update_qa_target_url', qaTargetUrl },
+      auth: '',
+    });
+  },
+
+  detectQaTargetUrl: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'detect_qa_target_url' },
       auth: '',
     });
   },

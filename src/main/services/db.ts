@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -111,6 +111,10 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN working_dir TEXT`);
   }
 
+  if (currentVersion < 8) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN qa_target_url TEXT`);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -173,6 +177,7 @@ export interface ClaudeSessionRow {
   color: string | null;
   notificationSound: boolean;
   workingDir: string | null;
+  qaTargetUrl: string | null;
   permissionMode: string | null;
   model: string | null;
   startedAt: number;
@@ -182,8 +187,8 @@ export interface ClaudeSessionRow {
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
@@ -194,11 +199,17 @@ export function insertClaudeSession(info: ClaudeSessionRow): void {
     info.color,
     info.notificationSound ? 1 : 0,
     info.workingDir,
+    info.qaTargetUrl,
     info.permissionMode,
     info.model,
     info.startedAt,
     info.endedAt,
   );
+}
+
+export function updateClaudeSessionQaTargetUrl(id: string, qaTargetUrl: string): void {
+  if (!db) return;
+  db.prepare(`UPDATE claude_sessions SET qa_target_url = ? WHERE id = ?`).run(qaTargetUrl, id);
 }
 
 export function updateClaudeSessionId(id: string, claudeSessionId: string): void {
@@ -236,6 +247,7 @@ interface ClaudeSessionDbRow {
   color: string | null;
   notification_sound: number;
   working_dir: string | null;
+  qa_target_url: string | null;
   permission_mode: string | null;
   model: string | null;
   started_at: number;
@@ -257,6 +269,7 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     color: r.color,
     notificationSound: r.notification_sound === 1,
     workingDir: r.working_dir,
+    qaTargetUrl: r.qa_target_url,
     permissionMode: r.permission_mode,
     model: r.model,
     startedAt: r.started_at,

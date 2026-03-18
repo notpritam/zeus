@@ -67,12 +67,14 @@ import {
   markStaleQaAgentsErrored,
   finalizeCreatedToolEntries,
   copyClaudeEntriesForResume,
+  updateClaudeSessionQaTargetUrl,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload, SessionIconName } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { detectDevServerUrl } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
 
 let server: http.Server | null = null;
@@ -916,6 +918,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: null,
         notificationSound: opts.notificationSound ?? true,
         workingDir,
+        qaTargetUrl: null,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
         model: opts.model ?? null,
         startedAt: Date.now(),
@@ -934,6 +937,19 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);
 
       wireClaudeSession(ws, session, envelope);
+
+      // Auto-detect QA target URL for this session's working directory
+      detectDevServerUrl(workingDir).then((detectedUrl) => {
+        if (detectedUrl) {
+          updateClaudeSessionQaTargetUrl(envelope.sessionId, detectedUrl);
+          broadcastEnvelope({
+            channel: 'claude',
+            sessionId: envelope.sessionId,
+            payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: detectedUrl },
+            auth: '',
+          });
+        }
+      }).catch(() => { /* detection failed silently */ });
 
       broadcastEnvelope({
         channel: 'claude',
@@ -1026,6 +1042,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: opts.color ?? null,
         notificationSound: true,
         workingDir,
+        qaTargetUrl: null,
         permissionMode: 'bypassPermissions',
         model: null,
         startedAt: Date.now(),
@@ -1177,6 +1194,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: s.color ?? undefined,
         notificationSound: s.notificationSound,
         workingDir: s.workingDir ?? undefined,
+        qaTargetUrl: s.qaTargetUrl ?? undefined,
         startedAt: s.startedAt,
         qaAgentCount: countQaAgentsByParent(s.id),
       };
@@ -1226,6 +1244,40 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       payload: { type: 'claude_session_updated', sessionId: envelope.sessionId, ...updates },
       auth: '',
     });
+  } else if (payload.type === 'update_qa_target_url') {
+    const newUrl = (payload as Record<string, unknown>).qaTargetUrl as string;
+    if (newUrl) {
+      updateClaudeSessionQaTargetUrl(envelope.sessionId, newUrl);
+      broadcastEnvelope({
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: newUrl },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'detect_qa_target_url') {
+    // Re-detect dev server URL for this session's working directory
+    const dbSessions = getAllClaudeSessions();
+    const session = dbSessions.find((s) => s.id === envelope.sessionId);
+    const workDir = session?.workingDir || process.env.HOME || '/';
+    detectDevServerUrl(workDir).then((detectedUrl) => {
+      if (detectedUrl) {
+        updateClaudeSessionQaTargetUrl(envelope.sessionId, detectedUrl);
+        broadcastEnvelope({
+          channel: 'claude',
+          sessionId: envelope.sessionId,
+          payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: detectedUrl },
+          auth: '',
+        });
+      } else {
+        sendEnvelope(ws, {
+          channel: 'claude',
+          sessionId: envelope.sessionId,
+          payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: null },
+          auth: '',
+        });
+      }
+    }).catch(() => { /* detection failed silently */ });
   } else if (payload.type === 'delete_claude_session') {
     // Kill if still running, stop git watcher, clean up QA agents, then delete from DB
     claudeManager.killSession(envelope.sessionId);
@@ -1271,6 +1323,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       color: null,
       notificationSound: true,
       workingDir: payload.workingDir || process.env.HOME || '/',
+      qaTargetUrl: null,
       permissionMode: 'bypassPermissions',
       model: null,
       startedAt: now,
@@ -2018,7 +2071,13 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         }
       }
 
-      const targetUrl = payload.targetUrl || 'http://localhost:5173';
+      // Resolve target URL: explicit payload > parent session's detected URL > env default
+      let targetUrl = payload.targetUrl;
+      if (!targetUrl) {
+        const parentSessions = getAllClaudeSessions();
+        const parentSession = parentSessions.find((s) => s.id === payload.parentSessionId);
+        targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
+      }
       const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}`;
       const parentSessionId = payload.parentSessionId;
       const parentSessionType = payload.parentSessionType;
@@ -2273,7 +2332,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       } else {
         // Session is dead — start a new session (with --resume if we have Claude session ID)
         console.log(`[QA] Starting new session for agent ${record.qaAgentId} (resume=${!!record.claudeSessionId})`);
-        const targetUrl = record.targetUrl || 'http://localhost:5173';
+        const targetUrl = record.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
         const sessionOpts: import('./claude-session').SessionOptions = {
           workingDir: record.workingDir,
           permissionMode: 'bypassPermissions',
@@ -2338,7 +2397,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     const parentSessionId = payload.parentSessionId || 'external';
     const parentSessionType = payload.parentSessionType || 'claude';
     const task = payload.task || 'External QA test';
-    const targetUrl = payload.targetUrl || 'http://localhost:5173';
+    const targetUrl = payload.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
     const agentName = payload.name || undefined;
 
     insertQaAgentSession({

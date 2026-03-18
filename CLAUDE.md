@@ -187,7 +187,7 @@ npm run build        # Full production build
 
 After implementing any UI feature or fix, use the `zeus_qa_run` MCP tool (via zeus-bridge) to spawn a server-side QA agent. The agent runs independently with full browser automation and results appear in the Zeus QA panel.
 
-Usage: Call `zeus_qa_run` with a `task` describing what to test. The `target_url` defaults to `http://localhost:5173`.
+Usage: Call `zeus_qa_run` with a `task` describing what to test. The `target_url` auto-detects from the dev server (via `ZEUS_QA_DEFAULT_URL` env var, set from `ELECTRON_RENDERER_URL` at startup).
 
 ### Screenshot Handling
 

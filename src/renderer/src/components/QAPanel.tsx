@@ -46,6 +46,7 @@ function useCurrentSessionContext() {
       parentSessionId: activeClaudeId,
       parentSessionType: 'claude' as const,
       workingDir: cs?.workingDir || '/',
+      qaTargetUrl: cs?.qaTargetUrl,
     };
   }
   if (activeSessionId) {
@@ -54,6 +55,7 @@ function useCurrentSessionContext() {
       parentSessionId: activeSessionId,
       parentSessionType: 'terminal' as const,
       workingDir: ts?.cwd || '/',
+      qaTargetUrl: undefined,
     };
   }
   // Fallback: pick whatever session exists
@@ -63,6 +65,7 @@ function useCurrentSessionContext() {
       parentSessionId: activeClaudeId,
       parentSessionType: 'claude' as const,
       workingDir: cs?.workingDir || '/',
+      qaTargetUrl: cs?.qaTargetUrl,
     };
   }
   if (sessions.length > 0) {
@@ -71,6 +74,7 @@ function useCurrentSessionContext() {
       parentSessionId: ts.id,
       parentSessionType: 'terminal' as const,
       workingDir: ts.cwd || '/',
+      qaTargetUrl: undefined,
     };
   }
   return null;
@@ -125,13 +129,20 @@ function QAPanel() {
   const [agentTask, setAgentTask] = useState('');
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [compressedLog, setCompressedLog] = useState(true);
-  const [agentTargetUrl, setAgentTargetUrl] = useState('http://localhost:5173');
+  const [agentTargetUrl, setAgentTargetUrl] = useState(sessionCtx?.qaTargetUrl || window.location.origin);
   const { lightbox, openLightbox, closeLightbox } = useLightbox();
   const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
   const agentUserScrolledUp = useRef(false);
   const [showAgentScrollToBottom, setShowAgentScrollToBottom] = useState(false);
+
+  // Sync agent target URL when session's detected URL changes
+  useEffect(() => {
+    if (sessionCtx?.qaTargetUrl) {
+      setAgentTargetUrl(sessionCtx.qaTargetUrl);
+    }
+  }, [sessionCtx?.qaTargetUrl]);
 
   // Session-scoped agents
   const parentSessionId = sessionCtx?.parentSessionId ?? '';
@@ -364,7 +375,7 @@ function QAPanel() {
                         if (e.key === 'Enter') navigateQA(url);
                       }}
                       className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
-                      placeholder="http://localhost:5173"
+                      placeholder={window.location.origin}
                     />
                     <Button
                       variant="ghost"

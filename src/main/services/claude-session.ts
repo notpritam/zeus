@@ -229,7 +229,7 @@ export class ClaudeSession extends EventEmitter {
       const qaServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
       mcpServers['zeus-qa'] = { command: 'node', args: [qaServerPath] };
 
-      const targetUrl = this.options.qaTargetUrl || 'http://localhost:5173';
+      const targetUrl = this.options.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
       const qaPrompt = [
         'You have access to QA browser testing tools via the zeus-qa MCP server.',
         `After making UI changes, call qa_run_test_flow with url "${targetUrl}".`,

@@ -401,6 +401,7 @@ export interface ClaudeSessionInfo {
   enableGitWatcher?: boolean;
   enableQA?: boolean;
   workingDir?: string;
+  qaTargetUrl?: string; // auto-detected or user-set QA target URL
   startedAt: number;
   qaAgentCount?: number;
   permissionMode?: PermissionMode;
