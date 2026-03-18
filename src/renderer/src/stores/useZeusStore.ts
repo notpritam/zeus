@@ -31,6 +31,7 @@ import type {
   ThemeMeta,
   ThemeFile,
 } from '../../../shared/types';
+import type { FlowSummary } from '../../../shared/qa-flow-types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
 
@@ -126,6 +127,7 @@ interface ZeusState {
   // QA Agent — keyed by parentSessionId → multiple agents
   qaAgents: Record<string, QaAgentClient[]>;        // parentSessionId → agents
   activeQaAgentId: Record<string, string | null>;   // parentSessionId → selected qaAgentId
+  qaFlows: FlowSummary[];
 
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
@@ -240,7 +242,7 @@ interface ZeusState {
   clearQAError: () => void;
 
   // QA Agent actions
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => void;
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => void;
   stopQAAgent: (qaAgentId: string) => void;
   deleteQAAgent: (qaAgentId: string, parentSessionId: string) => void;
   sendQAAgentMessage: (qaAgentId: string, text: string) => void;
@@ -248,6 +250,7 @@ interface ZeusState {
   selectQaAgent: (parentSessionId: string, qaAgentId: string | null) => void;
   fetchQaAgents: (parentSessionId: string) => void;
   fetchQaAgentEntries: (qaAgentId: string) => void;
+  fetchQaFlows: () => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => void;
@@ -413,6 +416,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   qaAgents: {},
   activeQaAgentId: {},
+  qaFlows: [] as FlowSummary[],
 
 
   perfMetrics: null,
@@ -1335,6 +1339,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           }
           return { qaAgents: updated };
         });
+      }
+      if (payload.type === 'qa_flows_list') {
+        set({ qaFlows: payload.flows });
       }
     });
 
@@ -2351,11 +2358,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- QA Agent actions ---
 
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => {
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => {
     set({ qaError: null });
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType },
+      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType, flowId, personas },
     });
   },
 
@@ -2419,6 +2426,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'get_qa_agent_entries', qaAgentId },
+    });
+  },
+
+  fetchQaFlows: () => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'list_qa_flows' },
     });
   },
 
