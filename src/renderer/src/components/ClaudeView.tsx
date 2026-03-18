@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -436,21 +437,28 @@ function ClaudeView({
       {/* Chat + Terminal split */}
       <div className="relative min-h-0 flex-1 flex flex-col">
         {/* Chat area */}
-        <div
-          className="min-h-0 flex flex-col"
-          style={panelVisible ? { height: `${100 - terminalPanelHeight}%` } : { flex: '1' }}
-        >
+        <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
+
           {/* Entry list */}
           <div className="relative min-h-0 flex-1">
             {/* Floating "loading older" badge */}
-            {meta?.loading && (
-              <div className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
-                  <Loader2 className="size-3 animate-spin" />
-                  Loading...
-                </div>
-              </div>
-            )}
+            <AnimatePresence>
+              {meta?.loading && (
+                <motion.div
+                  key="loading-badge"
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.2 }}
+                  className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2"
+                >
+                  <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
+                    <Loader2 className="size-3 animate-spin" />
+                    Loading...
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
               {compressed ? (
                 groupEntriesByUser(entries).map((group, i, arr) => (
@@ -488,49 +496,78 @@ function ClaudeView({
             </div>
 
             {/* Floating scroll-to-bottom button */}
-            {showScrollToBottom && (
-              <button
-                onClick={scrollToBottom}
-                className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
-              >
-                <ArrowDown className="size-4" />
-              </button>
-            )}
+            <AnimatePresence>
+              {showScrollToBottom && (
+                <motion.button
+                  key="scroll-to-bottom"
+                  initial={{ opacity: 0, scale: 0.8, x: '-50%' }}
+                  animate={{ opacity: 1, scale: 1, x: '-50%' }}
+                  exit={{ opacity: 0, scale: 0.8, x: '-50%' }}
+                  transition={{ duration: 0.15 }}
+                  onClick={scrollToBottom}
+                  className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-10 flex size-8 items-center justify-center rounded-full shadow-lg hover:opacity-90"
+                >
+                  <ArrowDown className="size-4" />
+                </motion.button>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Approval cards */}
-          {sessionApprovals.length > 0 && (
-            <div className="border-border space-y-2 border-t px-4 py-2">
-              {sessionApprovals.map((a) => (
-                <ApprovalCard
-                  key={a.approvalId}
-                  approval={a}
-                  onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
-                  onDeny={(reason) => onDeny(a.approvalId, reason)}
-                />
-              ))}
-            </div>
-          )}
+          <AnimatePresence>
+            {sessionApprovals.length > 0 && (
+              <motion.div
+                key="approvals"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="border-border space-y-2 border-t px-4 py-2">
+                  {sessionApprovals.map((a) => (
+                    <ApprovalCard
+                      key={a.approvalId}
+                      approval={a}
+                      onApprove={(updatedInput) => onApprove(a.approvalId, updatedInput)}
+                      onDeny={(reason) => onDeny(a.approvalId, reason)}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Activity bar — always visible at bottom when busy */}
-          {isBusy && (
-            <div className="border-border flex items-center gap-2 border-t px-4 py-1.5">
-              <Sparkles className={`size-3.5 animate-pulse ${
-                activity.state === 'thinking' ? 'text-yellow-400' :
-                activity.state === 'streaming' ? 'text-green-400' :
-                activity.state === 'tool_running' ? 'text-blue-400' :
-                activity.state === 'waiting_approval' ? 'text-orange-400' :
-                'text-purple-400'
-              }`} />
-              <span className="text-muted-foreground text-xs font-medium">
-                {activity.state === 'thinking' && 'Thinking...'}
-                {activity.state === 'streaming' && 'Writing...'}
-                {activity.state === 'tool_running' && activity.description}
-                {activity.state === 'waiting_approval' && `Approval: ${activity.toolName}`}
-                {activity.state === 'starting' && 'Starting...'}
-              </span>
-            </div>
-          )}
+          <AnimatePresence>
+            {isBusy && (
+              <motion.div
+                key="activity-bar"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="border-border flex items-center gap-2 border-t px-4 py-1.5">
+                  <Sparkles className={`size-3.5 animate-pulse ${
+                    activity.state === 'thinking' ? 'text-yellow-400' :
+                    activity.state === 'streaming' ? 'text-green-400' :
+                    activity.state === 'tool_running' ? 'text-blue-400' :
+                    activity.state === 'waiting_approval' ? 'text-orange-400' :
+                    'text-purple-400'
+                  }`} />
+                  <span className="text-muted-foreground text-xs font-medium">
+                    {activity.state === 'thinking' && 'Thinking...'}
+                    {activity.state === 'streaming' && 'Writing...'}
+                    {activity.state === 'tool_running' && activity.description}
+                    {activity.state === 'waiting_approval' && `Approval: ${activity.toolName}`}
+                    {activity.state === 'starting' && 'Starting...'}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Input area */}
           <div className="border-border bg-card shrink-0 border-t">
@@ -658,21 +695,28 @@ function ClaudeView({
           </div>
         </div>
 
-        {/* Drag handle + Terminal panel — always mounted, hidden via CSS to preserve xterm state */}
+        {/* Drag handle + Terminal panel — always mounted, animated height to preserve xterm state */}
         {session && (
-          <div style={{ display: panelVisible ? 'contents' : 'none' }}>
+          <motion.div
+            initial={false}
+            animate={{
+              height: panelVisible ? `${terminalPanelHeight}%` : 0,
+            }}
+            transition={isDragging ? { duration: 0 } : { duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+            className="shrink-0 overflow-hidden flex flex-col"
+          >
             <div
               onMouseDown={handleDragStart}
               className="border-border hover:bg-primary/20 h-1 shrink-0 cursor-row-resize border-y transition-colors"
               style={isDragging ? { backgroundColor: 'var(--primary)' } : undefined}
             />
-            <div style={{ height: `${terminalPanelHeight}%` }} className="shrink-0">
+            <div className="min-h-0 flex-1">
               <SessionTerminalPanel
                 claudeSessionId={session.id}
                 cwd={session.workingDir || '/'}
               />
             </div>
-          </div>
+          </motion.div>
         )}
       </div>
     </div>

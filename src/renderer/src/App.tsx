@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, Component, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertTriangle, RotateCcw } from 'lucide-react';
 import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
@@ -263,12 +264,19 @@ function App() {
         </div>
 
         {/* Backdrop for mobile slide-over */}
-        {sidebarOpen && (
-          <div
-            className="absolute inset-0 z-[5] bg-black/50"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+        <AnimatePresence>
+          {sidebarOpen && (
+            <motion.div
+              key="sidebar-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute inset-0 z-[5] bg-black/50"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Main Content — Terminal, Claude, or Settings */}
         <div data-testid="main-area" className="min-w-0 flex-1">
@@ -312,28 +320,42 @@ function App() {
         </div>
 
         {/* Mobile right panel — full-width overlay */}
-        {mobileRightPanelOpen && (
-          <>
-            <div
-              className="absolute inset-0 z-20 bg-black/50"
-              onClick={() => setMobileRightPanelOpen(false)}
-            />
-            <div className="bg-background absolute inset-0 z-30 flex flex-col">
-              <div className="border-border flex items-center justify-between border-b px-4 py-2.5 [-webkit-app-region:drag]">
-                <span className="text-foreground text-sm font-semibold [-webkit-app-region:no-drag]">Panels</span>
-                <button
-                  onClick={() => setMobileRightPanelOpen(false)}
-                  className="text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
-                >
-                  <X className="size-5" />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                <RightPanel />
-              </div>
-            </div>
-          </>
-        )}
+        <AnimatePresence>
+          {mobileRightPanelOpen && (
+            <>
+              <motion.div
+                key="right-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 z-20 bg-black/50"
+                onClick={() => setMobileRightPanelOpen(false)}
+              />
+              <motion.div
+                key="right-panel-mobile"
+                initial={{ y: '100%' }}
+                animate={{ y: 0 }}
+                exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+                className="bg-background absolute inset-0 z-30 flex flex-col"
+              >
+                <div className="border-border flex items-center justify-between border-b px-4 py-2.5 [-webkit-app-region:drag]">
+                  <span className="text-foreground text-sm font-semibold [-webkit-app-region:no-drag]">Panels</span>
+                  <button
+                    onClick={() => setMobileRightPanelOpen(false)}
+                    className="text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+                  >
+                    <X className="size-5" />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <RightPanel />
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Desktop 3-panel layout */}

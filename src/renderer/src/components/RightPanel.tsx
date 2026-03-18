@@ -1,4 +1,5 @@
 import { GitBranch, FolderOpen, Eye, RefreshCw, Info, Settings } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
@@ -174,14 +175,23 @@ function RightPanel() {
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full">
         {/* Panel content - only when a tab is active */}
-        {activeRightTab && (
-          <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <QAPanel />}
-            </div>
-            <WatcherStatusBar />
-          </div>
-        )}
+        <AnimatePresence mode="popLayout">
+          {activeRightTab && (
+            <motion.div
+              key={activeRightTab}
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+              className="min-w-0 flex-1 flex flex-col overflow-hidden"
+            >
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <QAPanel />}
+              </div>
+              <WatcherStatusBar />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Activity Bar - always visible */}
         <div className="bg-bg border-border w-10 shrink-0 flex flex-col items-center border-l pt-2 gap-3">
