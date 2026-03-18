@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 9;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -111,6 +111,15 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE qa_agent_sessions ADD COLUMN working_dir TEXT`);
   }
 
+  if (currentVersion < 8) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN qa_target_url TEXT`);
+  }
+
+  if (currentVersion < 9) {
+    database.exec(`ALTER TABLE claude_sessions ADD COLUMN deleted_at INTEGER`);
+    database.exec(`ALTER TABLE terminal_sessions ADD COLUMN deleted_at INTEGER`);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -150,6 +159,16 @@ export function pruneOldSessions(maxAgeDays = 30): void {
   if (!db) return;
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
 
+  // Permanently purge soft-deleted sessions older than 30 days
+  db.prepare(
+    `DELETE FROM claude_entries WHERE session_id IN (SELECT id FROM claude_sessions WHERE status = 'deleted' AND deleted_at < ?)`,
+  ).run(cutoff);
+  db.prepare(`DELETE FROM claude_sessions WHERE status = 'deleted' AND deleted_at < ?`).run(cutoff);
+  db.prepare(`DELETE FROM terminal_sessions WHERE status = 'deleted' AND deleted_at < ?`).run(
+    cutoff,
+  );
+
+  // Also prune very old non-deleted sessions
   db.prepare(
     `DELETE FROM claude_entries WHERE session_id IN (SELECT id FROM claude_sessions WHERE started_at < ?)`,
   ).run(cutoff);
@@ -173,17 +192,19 @@ export interface ClaudeSessionRow {
   color: string | null;
   notificationSound: boolean;
   workingDir: string | null;
+  qaTargetUrl: string | null;
   permissionMode: string | null;
   model: string | null;
   startedAt: number;
   endedAt: number | null;
+  deletedAt: number | null;
 }
 
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, permission_mode, model, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
@@ -194,11 +215,17 @@ export function insertClaudeSession(info: ClaudeSessionRow): void {
     info.color,
     info.notificationSound ? 1 : 0,
     info.workingDir,
+    info.qaTargetUrl,
     info.permissionMode,
     info.model,
     info.startedAt,
     info.endedAt,
   );
+}
+
+export function updateClaudeSessionQaTargetUrl(id: string, qaTargetUrl: string): void {
+  if (!db) return;
+  db.prepare(`UPDATE claude_sessions SET qa_target_url = ? WHERE id = ?`).run(qaTargetUrl, id);
 }
 
 export function updateClaudeSessionId(id: string, claudeSessionId: string): void {
@@ -236,18 +263,32 @@ interface ClaudeSessionDbRow {
   color: string | null;
   notification_sound: number;
   working_dir: string | null;
+  qa_target_url: string | null;
   permission_mode: string | null;
   model: string | null;
   started_at: number;
   ended_at: number | null;
+  deleted_at: number | null;
 }
 
 export function getAllClaudeSessions(): ClaudeSessionRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM claude_sessions ORDER BY started_at DESC`)
+    .prepare(`SELECT * FROM claude_sessions WHERE status != 'deleted' ORDER BY started_at DESC`)
     .all() as ClaudeSessionDbRow[];
-  return rows.map((r) => ({
+  return rows.map(mapClaudeRow);
+}
+
+export function getDeletedClaudeSessions(): ClaudeSessionRow[] {
+  if (!db) return [];
+  const rows = db
+    .prepare(`SELECT * FROM claude_sessions WHERE status = 'deleted' ORDER BY deleted_at DESC`)
+    .all() as ClaudeSessionDbRow[];
+  return rows.map(mapClaudeRow);
+}
+
+function mapClaudeRow(r: ClaudeSessionDbRow): ClaudeSessionRow {
+  return {
     id: r.id,
     claudeSessionId: r.claude_session_id,
     status: r.status,
@@ -257,11 +298,13 @@ export function getAllClaudeSessions(): ClaudeSessionRow[] {
     color: r.color,
     notificationSound: r.notification_sound === 1,
     workingDir: r.working_dir,
+    qaTargetUrl: r.qa_target_url,
     permissionMode: r.permission_mode,
     model: r.model,
     startedAt: r.started_at,
     endedAt: r.ended_at,
-  }));
+    deletedAt: r.deleted_at,
+  };
 }
 
 export function updateClaudeSessionMeta(
@@ -285,6 +328,22 @@ export function updateClaudeSessionMeta(
 }
 
 export function deleteClaudeSession(id: string): void {
+  if (!db) return;
+  // Soft-delete: mark as deleted with timestamp for recovery
+  db.prepare(`UPDATE claude_sessions SET status = 'deleted', deleted_at = ? WHERE id = ?`).run(
+    Date.now(),
+    id,
+  );
+}
+
+export function restoreClaudeSession(id: string): void {
+  if (!db) return;
+  db.prepare(
+    `UPDATE claude_sessions SET status = 'completed', deleted_at = NULL WHERE id = ? AND status = 'deleted'`,
+  ).run(id);
+}
+
+export function permanentlyDeleteClaudeSession(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM claude_entries WHERE session_id = ?`).run(id);
   db.prepare(`DELETE FROM claude_sessions WHERE id = ?`).run(id);
@@ -589,12 +648,13 @@ interface TerminalSessionDbRow {
   started_at: number;
   ended_at: number | null;
   exit_code: number | null;
+  deleted_at: number | null;
 }
 
 export function getAllTerminalSessions(): SessionRecord[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM terminal_sessions ORDER BY started_at DESC`)
+    .prepare(`SELECT * FROM terminal_sessions WHERE status != 'deleted' ORDER BY started_at DESC`)
     .all() as TerminalSessionDbRow[];
   return rows.map((r) => ({
     id: r.id,
@@ -610,6 +670,22 @@ export function getAllTerminalSessions(): SessionRecord[] {
 }
 
 export function deleteTerminalSession(id: string): void {
+  if (!db) return;
+  // Soft-delete: mark as deleted with timestamp for recovery
+  db.prepare(`UPDATE terminal_sessions SET status = 'deleted', deleted_at = ? WHERE id = ?`).run(
+    Date.now(),
+    id,
+  );
+}
+
+export function restoreTerminalSession(id: string): void {
+  if (!db) return;
+  db.prepare(
+    `UPDATE terminal_sessions SET status = 'killed', deleted_at = NULL WHERE id = ? AND status = 'deleted'`,
+  ).run(id);
+}
+
+export function permanentlyDeleteTerminalSession(id: string): void {
   if (!db) return;
   db.prepare(`DELETE FROM terminal_sessions WHERE id = ?`).run(id);
 }

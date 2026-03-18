@@ -1,10 +1,13 @@
-import { useState, useEffect, Component, type ReactNode } from 'react';
+import { useState, useEffect, useRef, Component, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2, Loader2, CheckCircle2, FolderGit2, AlertTriangle } from 'lucide-react';
+import {
+  GitBranch, RefreshCw, ChevronDown, ChevronRight, Plus, Minus, Undo2,
+  Loader2, CheckCircle2, FolderGit2, AlertTriangle, ArrowUp, ArrowDown,
+  Search, X, Trash2, Cloud,
+} from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
-import type { GitFileChange } from '../../../shared/types';
+import type { GitFileChange, GitBranchInfo } from '../../../shared/types';
 
 // ─── Status badge styles ───
 
@@ -102,6 +105,157 @@ function FileEntry({
   );
 }
 
+// ─── Branch Switcher Popover ───
+
+const EMPTY_BRANCHES: GitBranchInfo[] = [];
+
+function BranchSwitcher({
+  sessionId,
+  currentBranch,
+  onClose,
+}: {
+  sessionId: string;
+  currentBranch: string;
+  onClose: () => void;
+}) {
+  const branches = useZeusStore((s) => s.gitBranches[sessionId] ?? EMPTY_BRANCHES);
+  const listBranches = useZeusStore((s) => s.listBranches);
+  const checkoutBranch = useZeusStore((s) => s.checkoutBranch);
+  const createBranch = useZeusStore((s) => s.createBranch);
+  const deleteBranch = useZeusStore((s) => s.deleteBranch);
+
+  const [search, setSearch] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listBranches(sessionId);
+  }, [sessionId, listBranches]);
+
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  // Close on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const filtered = branches.filter((b) =>
+    b.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const exactMatch = branches.some((b) => b.name === search.trim());
+  const showCreate = search.trim() && !exactMatch;
+
+  const handleCheckout = (branch: string) => {
+    checkoutBranch(sessionId, branch);
+    onClose();
+  };
+
+  const handleCreate = () => {
+    const name = search.trim();
+    if (!name) return;
+    createBranch(sessionId, name, true);
+    onClose();
+  };
+
+  const handleDelete = (e: React.MouseEvent, branch: string) => {
+    e.stopPropagation();
+    deleteBranch(sessionId, branch);
+    // Re-fetch after a short delay
+    setTimeout(() => listBranches(sessionId), 300);
+  };
+
+  return (
+    <div
+      ref={popoverRef}
+      className="border-border bg-card absolute top-full left-0 right-0 z-50 mt-0.5 overflow-hidden rounded-md border shadow-lg"
+    >
+      {/* Search input */}
+      <div className="border-border flex items-center gap-1.5 border-b px-2 py-1.5">
+        <Search className="text-muted-foreground size-3 shrink-0" />
+        <input
+          ref={searchRef}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onClose();
+            if (e.key === 'Enter' && showCreate && !isCreating) {
+              setIsCreating(true);
+              handleCreate();
+            }
+          }}
+          placeholder="Switch or create branch..."
+          className="bg-transparent text-foreground placeholder:text-muted-foreground w-full text-xs outline-none"
+        />
+        {search && (
+          <button onClick={() => setSearch('')} className="text-muted-foreground hover:text-foreground">
+            <X className="size-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Create new branch option */}
+      {showCreate && (
+        <button
+          onClick={handleCreate}
+          className="hover:bg-secondary text-accent flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs"
+        >
+          <Plus className="size-3" />
+          Create branch <span className="font-medium">{search.trim()}</span>
+        </button>
+      )}
+
+      {/* Branch list */}
+      <div className="max-h-[200px] overflow-y-auto">
+        {filtered.length === 0 && !showCreate ? (
+          <div className="px-3 py-2">
+            <p className="text-muted-foreground text-[10px]">No branches found</p>
+          </div>
+        ) : (
+          filtered.map((b) => (
+            <div
+              key={b.name}
+              className={`group hover:bg-secondary flex cursor-pointer items-center gap-1.5 px-3 py-1 ${
+                b.name === currentBranch ? 'bg-secondary/50' : ''
+              }`}
+              onClick={() => b.name !== currentBranch && handleCheckout(b.name)}
+            >
+              {b.isRemoteOnly ? (
+                <Cloud className="text-muted-foreground size-3 shrink-0" />
+              ) : (
+                <GitBranch className={`size-3 shrink-0 ${b.current ? 'text-accent' : 'text-muted-foreground'}`} />
+              )}
+              <span className={`flex-1 truncate text-xs ${b.current ? 'text-accent font-medium' : 'text-foreground'}`}>
+                {b.name}
+              </span>
+              {b.remote && (
+                <span className="text-muted-foreground/50 text-[9px]">{b.remote}</span>
+              )}
+              {!b.current && !b.isRemoteOnly && (
+                <button
+                  onClick={(e) => handleDelete(e, b.name)}
+                  className="text-muted-foreground hover:text-destructive shrink-0 opacity-0 group-hover:opacity-100"
+                  title="Delete branch"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Error Boundary ───
 
 class GitPanelErrorBoundary extends Component<
@@ -155,16 +309,26 @@ function GitPanelInner() {
   const isConnected = useZeusStore((s) =>
     activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false,
   );
+  const isPushing = useZeusStore((s) =>
+    activeClaudeId ? s.gitPushing[activeClaudeId] === true : false,
+  );
+  const isPulling = useZeusStore((s) =>
+    activeClaudeId ? s.gitPulling[activeClaudeId] === true : false,
+  );
   const refreshGitStatus = useZeusStore((s) => s.refreshGitStatus);
   const initGitRepo = useZeusStore((s) => s.initGitRepo);
   const stageAll = useZeusStore((s) => s.stageAll);
   const unstageAll = useZeusStore((s) => s.unstageAll);
   const commitChanges = useZeusStore((s) => s.commitChanges);
+  const gitPush = useZeusStore((s) => s.gitPush);
+  const gitPull = useZeusStore((s) => s.gitPull);
+  const gitFetch = useZeusStore((s) => s.gitFetch);
 
   const [commitMessage, setCommitMessage] = useState('');
   const [stagedOpen, setStagedOpen] = useState(true);
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
 
   // Reset initializing state when repo status changes
   useEffect(() => {
@@ -307,28 +471,113 @@ function GitPanelInner() {
             </Badge>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => activeClaudeId && refreshGitStatus(activeClaudeId)}
-          title="Refresh"
-        >
-          <RefreshCw className="size-3.5" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => activeClaudeId && gitFetch(activeClaudeId)}
+            title="Fetch"
+          >
+            <Cloud className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => activeClaudeId && refreshGitStatus(activeClaudeId)}
+            title="Refresh"
+          >
+            <RefreshCw className="size-3.5" />
+          </Button>
+        </div>
       </div>
 
-      {/* Branch info */}
-      <div className="border-border shrink-0 border-b px-3 py-1.5">
+      {/* Branch info + Push/Pull */}
+      <div className="border-border relative shrink-0 border-b px-3 py-1.5">
         <div className="flex items-center gap-1.5">
-          <GitBranch className="text-muted-foreground size-3" />
-          <span className="text-foreground text-[11px] font-medium">{gitStatus!.branch}</span>
-          {(gitStatus!.ahead > 0 || gitStatus!.behind > 0) && (
-            <span className="text-muted-foreground text-[10px]">
-              {gitStatus!.ahead > 0 && `↑${gitStatus!.ahead}`}
-              {gitStatus!.behind > 0 && ` ↓${gitStatus!.behind}`}
-            </span>
-          )}
+          <GitBranch className="text-muted-foreground size-3 shrink-0" />
+
+          {/* Branch name — clickable to open picker */}
+          <button
+            onClick={() => setBranchPickerOpen(!branchPickerOpen)}
+            className="text-foreground hover:text-primary flex min-w-0 items-center gap-1 text-[11px] font-medium transition-colors"
+            title="Switch branch"
+          >
+            <span className="truncate">{gitStatus!.branch}</span>
+            <ChevronDown className="text-muted-foreground size-2.5 shrink-0" />
+          </button>
+
+          {/* Ahead/Behind badges with push/pull actions */}
+          <div className="ml-auto flex items-center gap-1">
+            {gitStatus!.behind > 0 && (
+              <button
+                onClick={() => !isPulling && gitPull(activeClaudeId)}
+                disabled={isPulling}
+                className="text-muted-foreground hover:text-accent flex items-center gap-0.5 text-[10px] transition-colors disabled:opacity-50"
+                title={`Pull ${gitStatus!.behind} commit${gitStatus!.behind > 1 ? 's' : ''}`}
+              >
+                {isPulling ? (
+                  <Loader2 className="size-2.5 animate-spin" />
+                ) : (
+                  <ArrowDown className="size-2.5" />
+                )}
+                <span>{gitStatus!.behind}</span>
+              </button>
+            )}
+            {gitStatus!.ahead > 0 && (
+              <button
+                onClick={() => !isPushing && gitPush(activeClaudeId)}
+                disabled={isPushing}
+                className="text-muted-foreground hover:text-accent flex items-center gap-0.5 text-[10px] transition-colors disabled:opacity-50"
+                title={`Push ${gitStatus!.ahead} commit${gitStatus!.ahead > 1 ? 's' : ''}`}
+              >
+                {isPushing ? (
+                  <Loader2 className="size-2.5 animate-spin" />
+                ) : (
+                  <ArrowUp className="size-2.5" />
+                )}
+                <span>{gitStatus!.ahead}</span>
+              </button>
+            )}
+            {/* Always-visible push/pull when no ahead/behind */}
+            {gitStatus!.ahead === 0 && gitStatus!.behind === 0 && (
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={() => !isPulling && gitPull(activeClaudeId)}
+                  disabled={isPulling}
+                  className="text-muted-foreground/40 hover:text-muted-foreground p-0.5 transition-colors disabled:opacity-50"
+                  title="Pull"
+                >
+                  {isPulling ? (
+                    <Loader2 className="size-2.5 animate-spin" />
+                  ) : (
+                    <ArrowDown className="size-2.5" />
+                  )}
+                </button>
+                <button
+                  onClick={() => !isPushing && gitPush(activeClaudeId)}
+                  disabled={isPushing}
+                  className="text-muted-foreground/40 hover:text-muted-foreground p-0.5 transition-colors disabled:opacity-50"
+                  title="Push"
+                >
+                  {isPushing ? (
+                    <Loader2 className="size-2.5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="size-2.5" />
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Branch Picker */}
+        {branchPickerOpen && (
+          <BranchSwitcher
+            sessionId={activeClaudeId}
+            currentBranch={gitStatus!.branch}
+            onClose={() => setBranchPickerOpen(false)}
+          />
+        )}
       </div>
 
       {/* Error */}
@@ -375,7 +624,7 @@ function GitPanelInner() {
           </div>
 
           {/* Changes lists */}
-          <ScrollArea className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {/* Staged Changes */}
             <div>
               <div className="hover:bg-secondary flex items-center justify-between px-3 py-1.5">
@@ -469,7 +718,7 @@ function GitPanelInner() {
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
         </>
       )}
     </div>

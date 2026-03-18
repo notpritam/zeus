@@ -29,7 +29,22 @@ export default defineConfig({
     server: {
       port: 5199,
     },
-    plugins: [react(), tailwindcss()],
+    build: {
+      modulePreload: { polyfill: false },
+    },
+    plugins: [
+      react(),
+      tailwindcss(),
+      // Strip crossorigin from built HTML — ngrok free-tier interstitial
+      // sets a cookie that crossorigin="anonymous" strips from asset requests,
+      // causing JS/CSS to fail loading on mobile via tunnel.
+      {
+        name: 'strip-crossorigin',
+        transformIndexHtml(html) {
+          return html.replace(/ crossorigin/g, '');
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src/renderer/src'),

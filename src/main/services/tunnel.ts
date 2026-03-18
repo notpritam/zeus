@@ -16,6 +16,8 @@ export async function startTunnel(port: number): Promise<string | null> {
       addr: port,
       authtoken,
       domain: process.env.NGROK_DOMAIN || undefined,
+      // Bypass ngrok free-tier interstitial ("Visit Site" warning page)
+      request_header_add: ['ngrok-skip-browser-warning:true'],
     });
 
     tunnelUrl = listener.url() ?? null;

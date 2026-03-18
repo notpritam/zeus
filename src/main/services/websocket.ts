@@ -2,6 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import { stat as fsStat } from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
 import { app, Notification as ElectronNotification, shell } from 'electron';
@@ -25,7 +26,7 @@ import { registerSession, markExited, markKilled, getSession, getAllSessions } f
 import { isPowerBlocked, startPowerBlock, stopPowerBlock } from './power';
 import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel, stopRemoteTunnel } from './tunnel';
 import { zeusEnv } from './env';
-import { validateToken } from './auth';
+import { validateToken, getAuthToken } from './auth';
 import { ClaudeSessionManager, ClaudeSession } from './claude-session';
 import type { NormalizedEntry } from './claude-types';
 import {
@@ -47,11 +48,14 @@ import {
   getClaudeEntries,
   getClaudeEntriesPaginated,
   deleteClaudeSession,
+  restoreClaudeSession,
+  getDeletedClaudeSessions,
   archiveClaudeSession,
   insertTerminalSession,
   updateTerminalSession,
   getAllTerminalSessions,
   deleteTerminalSession,
+  restoreTerminalSession,
   archiveTerminalSession,
   insertQaAgentSession,
   updateQaAgentSessionStatus,
@@ -67,17 +71,32 @@ import {
   markStaleQaAgentsErrored,
   finalizeCreatedToolEntries,
   copyClaudeEntriesForResume,
+  updateClaudeSessionQaTargetUrl,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload, SessionIconName } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
+import { FlowRunner } from './flow-runner';
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
 let serverPort = 8888;
+
+/** Return tunnel URL with auth token appended so remote clients can authenticate. */
+function getAuthenticatedTunnelUrl(): string | null {
+  const url = getTunnelUrl();
+  if (!url) return null;
+  try {
+    const token = getAuthToken();
+    return `${url}?token=${token}`;
+  } catch {
+    return url;
+  }
+}
 
 // Track which sessions belong to which client
 const clientSessions = new Map<WebSocket, Set<string>>();
@@ -124,6 +143,9 @@ const qaAgentSessions = new Map<string, QaAgentRecord>();
 // Track parentSessionId for external QA agents (registered via zeus-bridge MCP)
 const externalQaParentMap = new Map<string, string>();
 let qaAgentIdCounter = 0;
+
+// QA flow runner — loads structured flow definitions from qa-flows/
+const flowRunner = new FlowRunner(path.join(app.getAppPath(), 'qa-flows'));
 
 /** Kill all running QA agents that belong to a given parent session. */
 function stopQaAgentsByParent(parentSessionId: string): void {
@@ -206,6 +228,8 @@ function requestAttention(title: string, body: string): void {
 function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(envelope));
+  } else {
+    console.error(`[Zeus] sendEnvelope DROPPED: ws.readyState=${ws.readyState} (expected ${WebSocket.OPEN}), channel=${envelope.channel}, type=${(envelope.payload as Record<string, unknown>)?.type}`);
   }
 }
 
@@ -314,7 +338,6 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     destroySession(sid);
     markKilled(sid);
     stopQaAgentsByParent(sid);
-    deleteQaAgentsByParent(sid);
     deleteTerminalSession(sid);
     const owned = clientSessions.get(ws);
     if (owned) owned.delete(sid);
@@ -322,6 +345,15 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
       channel: 'control',
       sessionId: sid,
       payload: { type: 'terminal_session_deleted', deletedId: sid },
+      auth: '',
+    });
+  } else if (payload.type === 'restore_terminal_session') {
+    const sid = envelope.sessionId;
+    restoreTerminalSession(sid);
+    broadcastEnvelope({
+      channel: 'control',
+      sessionId: sid,
+      payload: { type: 'terminal_session_restored', sessionId: sid },
       auth: '',
     });
   } else if (payload.type === 'archive_terminal_session') {
@@ -375,7 +407,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: getTunnelUrl(),
+        tunnel: getAuthenticatedTunnelUrl(),
       },
       auth: '',
     });
@@ -393,7 +425,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
         type: 'status_update',
         powerBlock: isPowerBlocked(),
         websocket: true,
-        tunnel: getTunnelUrl(),
+        tunnel: getAuthenticatedTunnelUrl(),
       },
       auth: '',
     });
@@ -412,7 +444,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
             type: 'status_update',
             powerBlock: isPowerBlocked(),
             websocket: true,
-            tunnel: getTunnelUrl(),
+            tunnel: getAuthenticatedTunnelUrl(),
           },
           auth: '',
         });
@@ -456,7 +488,7 @@ function handleStatus(ws: WebSocket, envelope: WsEnvelope): void {
             type: 'status_update',
             powerBlock: isPowerBlocked(),
             websocket: true,
-            tunnel: getTunnelUrl(),
+            tunnel: getAuthenticatedTunnelUrl(),
           },
           auth: '',
         });
@@ -613,8 +645,11 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
   });
 }
 
-function buildQAAgentSystemPrompt(targetUrl: string): string {
-  return `You are a QA agent for a web application running at ${targetUrl}.
+function buildQAAgentSystemPrompt(targetUrl: string | undefined): string {
+  const urlLine = targetUrl
+    ? `You are a QA agent for a web application running at ${targetUrl}.`
+    : `You are a QA agent. No target URL was auto-detected — use qa_navigate to the correct URL once you determine it from the project config or ask the task description.`;
+  return `${urlLine}
 
 You have full access to:
 - Navigation & page info: qa_navigate, qa_text, qa_pdf, qa_health
@@ -629,6 +664,7 @@ You have full access to:
 - Batch: qa_batch_actions (run multiple actions in one call — much faster)
 - Compound: qa_run_test_flow (navigate + wait + snapshot + screenshot + errors in one call)
 - Instance info: qa_list_instances, qa_list_profiles
+- Completion: qa_finish (REQUIRED — call when done to send results to parent agent)
 - File editing: Read, Edit, Write tools
 - Shell commands: Bash tool
 
@@ -647,11 +683,38 @@ Your workflow:
 3. Use qa_assert_element and qa_wait_for_element to verify state changes
 4. Check qa_console_logs, qa_network_requests, and qa_js_errors
 5. If you find bugs: fix the code, then re-test to confirm the fix
-6. Report findings concisely
+6. Call qa_finish with your complete findings — this is MANDATORY
+
+CRITICAL: You MUST call qa_finish when you are done. This sends your results back to the parent agent.
+Without it, the parent agent will timeout waiting for your response. Always call qa_finish as your LAST action.
 
 Always use qa_run_test_flow after making code changes to verify the fix.
 Be concise — the user sees a compact action log, not a full chat.
 Never use AskUserQuestion — make your best judgment and proceed.`;
+}
+
+/** Read the qa_finish file written by the QA agent's MCP server */
+function readQaFinishFile(qaAgentId: string, sessionPid?: number): { summary: string; status: string } | null {
+  // Try qaAgentId-based path first, then fallback to PID-based
+  const paths = [
+    path.join(os.tmpdir(), `zeus-qa-finish-${qaAgentId}.json`),
+    ...(sessionPid ? [path.join(os.tmpdir(), `zeus-qa-finish-ppid-${sessionPid}.json`)] : []),
+  ];
+  for (const filePath of paths) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        // Clean up the file
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        console.log(`[QA Agent] Read finish file: ${filePath}`);
+        return { summary: data.summary ?? '', status: data.status ?? 'done' };
+      }
+    } catch {
+      // ignore read errors
+    }
+  }
+  return null;
 }
 
 function wireQAAgent(record: QaAgentRecord): void {
@@ -738,8 +801,9 @@ function wireQAAgent(record: QaAgentRecord): void {
     }
   });
 
-  // Turn ended (process still alive) — broadcast stopped so UI updates
+  // Turn ended (process still alive) — send deferred response and kill
   session.on('result', () => {
+    console.log(`[QA Agent] result event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'}, pid=${session.pid}, isRunning=${session.isRunning})`);
     flushPendingText();
     flushPendingThinking();
 
@@ -753,9 +817,55 @@ function wireQAAgent(record: QaAgentRecord): void {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
     });
+
+    // Send deferred response to zeus_qa_run caller.
+    // Read the finish file (written by qa_finish tool) for structured findings.
+    // If no finish file, use collected text entries as fallback summary.
+    if (record.pendingResponseId && record.pendingResponseWs) {
+      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      let summary: string;
+      let status: string;
+
+      if (finishData) {
+        summary = finishData.summary;
+        status = finishData.status;
+        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+      } else {
+        const lastEntries = record.collectedTextEntries;
+        summary = lastEntries.length > 0
+          ? lastEntries[lastEntries.length - 1]
+          : 'QA agent completed (no qa_finish called).';
+        status = 'done';
+        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text)`);
+      }
+
+      try {
+        sendEnvelope(record.pendingResponseWs, {
+          channel: 'qa', sessionId: '', auth: '',
+          payload: {
+            type: 'start_qa_agent_response',
+            responseId: record.pendingResponseId,
+            qaAgentId,
+            status,
+            summary,
+          },
+        });
+        console.log(`[QA Agent] result: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId}, wsState=${record.pendingResponseWs.readyState})`);
+      } catch (err) {
+        console.error(`[QA Agent] result: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
+      }
+      record.pendingResponseId = undefined;
+      record.pendingResponseWs = undefined;
+
+      // Kill the process — it's hanging waiting for stdin input we'll never send
+      if (record.session && record.session.isRunning) {
+        record.session.kill();
+      }
+    }
   });
 
   session.on('done', () => {
+    console.log(`[QA Agent] done event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'})`);
     flushPendingText();
     flushPendingThinking();
     updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
@@ -768,10 +878,23 @@ function wireQAAgent(record: QaAgentRecord): void {
 
     // Send deferred response to zeus_qa_run caller with the final summary
     if (record.pendingResponseId && record.pendingResponseWs) {
-      const lastEntries = record.collectedTextEntries;
-      const summary = lastEntries.length > 0
-        ? lastEntries[lastEntries.length - 1]
-        : 'QA agent completed without a summary.';
+      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      let summary: string;
+      let status: string;
+
+      if (finishData) {
+        summary = finishData.summary;
+        status = finishData.status;
+        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+      } else {
+        const lastEntries = record.collectedTextEntries;
+        summary = lastEntries.length > 0
+          ? lastEntries[lastEntries.length - 1]
+          : 'QA agent completed without a summary.';
+        status = 'done';
+        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text, entries=${lastEntries.length})`);
+      }
+
       try {
         sendEnvelope(record.pendingResponseWs, {
           channel: 'qa', sessionId: '', auth: '',
@@ -779,13 +902,18 @@ function wireQAAgent(record: QaAgentRecord): void {
             type: 'start_qa_agent_response',
             responseId: record.pendingResponseId,
             qaAgentId,
-            status: 'done',
+            status,
             summary,
           },
         });
-      } catch {
-        // WebSocket may have closed — non-critical
+        console.log(`[QA Agent] done: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId})`);
+      } catch (err) {
+        console.error(`[QA Agent] done: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
       }
+      record.pendingResponseId = undefined;
+      record.pendingResponseWs = undefined;
+    } else {
+      console.log(`[QA Agent] done: no pending response for ${qaAgentId} (already sent or not a zeus_qa_run agent)`);
     }
 
     broadcastEnvelope({
@@ -796,6 +924,7 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('error', (err) => {
+    console.error(`[QA Agent] error event fired for ${qaAgentId}: ${err.message} (pendingResponseId=${record.pendingResponseId ?? 'NONE'})`);
     flushPendingText();
     flushPendingThinking();
     const crashEntry = { kind: 'error' as const, message: `Agent crashed: ${err.message}`, timestamp: Date.now() };
@@ -904,6 +1033,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: null,
         notificationSound: opts.notificationSound ?? true,
         workingDir,
+        qaTargetUrl: null,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
         model: opts.model ?? null,
         startedAt: Date.now(),
@@ -922,6 +1052,31 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       clientClaudeSessions.get(ws)!.add(envelope.sessionId);
 
       wireClaudeSession(ws, session, envelope);
+
+      // Auto-detect QA target URL for this session's working directory
+      detectDevServerUrlDetailed(workingDir).then((result) => {
+        console.log(`[QA URL] Auto-detect for new session ${envelope.sessionId}:`, result.detail);
+        if (result.url) {
+          updateClaudeSessionQaTargetUrl(envelope.sessionId, result.url);
+        }
+        broadcastEnvelope({
+          channel: 'claude',
+          sessionId: envelope.sessionId,
+          payload: {
+            type: 'qa_target_url_detected',
+            sessionId: envelope.sessionId,
+            qaTargetUrl: result.url,
+            source: result.source,
+            detail: result.detail,
+            port: result.port ?? null,
+            framework: result.framework ?? null,
+            verification: result.verification ?? null,
+          },
+          auth: '',
+        });
+      }).catch((err) => {
+        console.error(`[QA URL] Auto-detect failed for session ${envelope.sessionId}:`, err);
+      });
 
       broadcastEnvelope({
         channel: 'claude',
@@ -1014,6 +1169,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: opts.color ?? null,
         notificationSound: true,
         workingDir,
+        qaTargetUrl: null,
         permissionMode: 'bypassPermissions',
         model: null,
         startedAt: Date.now(),
@@ -1165,6 +1321,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         color: s.color ?? undefined,
         notificationSound: s.notificationSound,
         workingDir: s.workingDir ?? undefined,
+        qaTargetUrl: s.qaTargetUrl ?? undefined,
         startedAt: s.startedAt,
         qaAgentCount: countQaAgentsByParent(s.id),
       };
@@ -1214,12 +1371,66 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       payload: { type: 'claude_session_updated', sessionId: envelope.sessionId, ...updates },
       auth: '',
     });
+  } else if (payload.type === 'update_qa_target_url') {
+    const newUrl = (payload as Record<string, unknown>).qaTargetUrl as string;
+    if (newUrl) {
+      updateClaudeSessionQaTargetUrl(envelope.sessionId, newUrl);
+      broadcastEnvelope({
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: newUrl },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'detect_qa_target_url') {
+    // Re-detect dev server URL for this session's working directory
+    const dbSessions = getAllClaudeSessions();
+    const sessionRow = dbSessions.find((s) => s.id === envelope.sessionId);
+    const workDir = sessionRow?.workingDir || process.env.HOME || '/';
+    console.log(`[QA URL] Detecting dev server for session ${envelope.sessionId} in ${workDir}`);
+    detectDevServerUrlDetailed(workDir).then((result) => {
+      console.log(`[QA URL] Detection result:`, result);
+      if (result.url) {
+        updateClaudeSessionQaTargetUrl(envelope.sessionId, result.url);
+      }
+      broadcastEnvelope({
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: {
+          type: 'qa_target_url_detected',
+          sessionId: envelope.sessionId,
+          qaTargetUrl: result.url,
+          source: result.source,
+          detail: result.detail,
+          port: result.port ?? null,
+          framework: result.framework ?? null,
+          verification: result.verification ?? null,
+        },
+        auth: '',
+      });
+    }).catch((err) => {
+      console.error(`[QA URL] Detection failed:`, err);
+      sendEnvelope(ws, {
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: {
+          type: 'qa_target_url_detected',
+          sessionId: envelope.sessionId,
+          qaTargetUrl: null,
+          source: 'none',
+          detail: `Detection failed: ${(err as Error).message}`,
+          port: null,
+          framework: null,
+          verification: null,
+        },
+        auth: '',
+      });
+    });
   } else if (payload.type === 'delete_claude_session') {
-    // Kill if still running, stop git watcher, clean up QA agents, then delete from DB
+    // Kill if still running, stop git watcher, stop QA agents, then soft-delete (recoverable for 30 days)
     claudeManager.killSession(envelope.sessionId);
     gitManager.stopWatching(envelope.sessionId);
     stopQaAgentsByParent(envelope.sessionId);
-    deleteQaAgentsByParent(envelope.sessionId);
     deleteClaudeSession(envelope.sessionId);
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
@@ -1227,6 +1438,36 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       channel: 'claude',
       sessionId: envelope.sessionId,
       payload: { type: 'claude_session_deleted', deletedId: envelope.sessionId },
+      auth: '',
+    });
+  } else if (payload.type === 'restore_claude_session') {
+    restoreClaudeSession(envelope.sessionId);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_session_restored', sessionId: envelope.sessionId },
+      auth: '',
+    });
+  } else if (payload.type === 'list_deleted_sessions') {
+    const deletedRows = getDeletedClaudeSessions();
+    const sessions: ClaudeSessionInfo[] = deletedRows.map((s) => ({
+      id: s.id,
+      claudeSessionId: s.claudeSessionId,
+      status: s.status as ClaudeSessionInfo['status'],
+      prompt: s.prompt,
+      name: s.name ?? undefined,
+      icon: (s.icon as SessionIconName) ?? undefined,
+      color: s.color ?? undefined,
+      notificationSound: s.notificationSound,
+      workingDir: s.workingDir ?? undefined,
+      qaTargetUrl: s.qaTargetUrl ?? undefined,
+      startedAt: s.startedAt,
+      deletedAt: s.deletedAt ?? undefined,
+    }));
+    sendEnvelope(ws, {
+      channel: 'claude',
+      sessionId: '',
+      payload: { type: 'deleted_sessions_list', sessions },
       auth: '',
     });
   } else if (payload.type === 'archive_claude_session') {
@@ -1259,6 +1500,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       color: null,
       notificationSound: true,
       workingDir: payload.workingDir || process.env.HOME || '/',
+      qaTargetUrl: null,
       permissionMode: 'bypassPermissions',
       model: null,
       startedAt: now,
@@ -1550,6 +1792,92 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         channel: 'git',
         sessionId,
         payload: { type: 'git_error', message: 'No active git watcher for this session' },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_list_branches') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        const branches = await watcher.listBranches();
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_branches_result', branches },
+          auth: '',
+        });
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_checkout') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.checkoutBranch(payload.branch);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_checkout_result', ...result, branch: result.success ? payload.branch : undefined },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_create_branch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.createBranch(payload.branch, payload.checkout ?? true);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_create_branch_result', ...result, branch: result.success ? payload.branch : undefined },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_delete_branch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.deleteBranch(payload.branch, payload.force ?? false);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_delete_branch_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_push') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.push(payload.force ?? false);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_push_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_pull') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.pull();
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_pull_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_fetch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.fetch();
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_fetch_result', ...result },
         auth: '',
       });
     }
@@ -1885,6 +2213,13 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     } catch (err) {
       sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: (err as Error).message }, auth: '' });
     }
+  } else if (payload.type === 'list_qa_flows') {
+    // Reload flows from disk in case they changed, then send summaries
+    flowRunner.loadFlows();
+    sendEnvelope(ws, {
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'qa_flows_list', flows: flowRunner.listFlows() },
+    });
   } else if (payload.type === 'start_qa_agent') {
     console.log('[QA Agent] start_qa_agent received:', { task: payload.task, parentSessionId: payload.parentSessionId, parentSessionType: payload.parentSessionType, workingDir: payload.workingDir, targetUrl: payload.targetUrl });
     try {
@@ -1920,7 +2255,124 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         }
       }
 
-      const targetUrl = payload.targetUrl || 'http://localhost:5173';
+      // Resolve target URL: explicit payload > parent session's detected URL > live detection > env default
+      let targetUrl = payload.targetUrl;
+      if (!targetUrl) {
+        const parentSessions = getAllClaudeSessions();
+        const parentSession = parentSessions.find((s) => s.id === payload.parentSessionId);
+        targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || undefined;
+      }
+      // If still no URL, run live detection for the working directory
+      if (!targetUrl) {
+        const detected = await detectDevServerUrlDetailed(payload.workingDir);
+        if (detected.url) {
+          targetUrl = detected.url;
+          console.log(`[QA Agent] Auto-detected target URL: ${detected.url} (${detected.detail})`);
+          // Also persist it so future agents pick it up
+          if (payload.parentSessionId) {
+            updateClaudeSessionQaTargetUrl(payload.parentSessionId, detected.url);
+          }
+        } else {
+          console.warn(`[QA Agent] No target URL detected — agent will start without a URL. Detail: ${detected.detail}`);
+        }
+      }
+
+      // ── Flow Resolution ──
+      const resolved = flowRunner.resolve(payload.task, {
+        flowId: payload.flowId,
+        personas: payload.personas,
+      });
+
+      if (resolved) {
+        // ── Structured flow: spawn one agent per persona ──
+        const personaPromises = resolved.personas.map(async (persona) => {
+          const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}-${persona.id}`;
+          const parentSessionId = payload.parentSessionId;
+          const parentSessionType = payload.parentSessionType;
+          const agentName = payload.name
+            ? `${payload.name} (${persona.id})`
+            : `${resolved.flow.name} — ${persona.id}`;
+
+          const session = new ClaudeSession({
+            workingDir: payload.workingDir,
+            permissionMode: 'bypassPermissions',
+            enableQA: true,
+            qaTargetUrl: targetUrl,
+            zeusSessionId: payload.parentSessionId,
+            qaAgentId,
+          });
+
+          const record: QaAgentRecord = {
+            qaAgentId,
+            parentSessionId,
+            parentSessionType,
+            name: agentName,
+            task: `[Flow: ${resolved.flow.id}] ${persona.id}`,
+            targetUrl,
+            workingDir: payload.workingDir,
+            session,
+            startedAt: Date.now(),
+            pendingResponseId: payload.responseId,
+            pendingResponseWs: ws,
+            collectedTextEntries: [],
+          };
+
+          qaAgentSessions.set(qaAgentId, record);
+          console.log(`[QA Agent] Created flow record: qaAgentId=${qaAgentId}, flow=${resolved.flow.id}, persona=${persona.id}`);
+          wireQAAgent(record);
+
+          insertQaAgentSession({
+            id: qaAgentId,
+            parentSessionId,
+            parentSessionType,
+            name: agentName ?? null,
+            task: record.task,
+            targetUrl,
+            status: 'running',
+            startedAt: record.startedAt,
+            endedAt: null,
+            workingDir: payload.workingDir,
+          });
+
+          console.log('[QA Agent] Flow agent started successfully:', qaAgentId);
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: {
+              type: 'qa_agent_started',
+              qaAgentId,
+              parentSessionId,
+              parentSessionType,
+              name: agentName,
+              task: record.task,
+              targetUrl,
+            },
+          });
+
+          const effectiveUrl = targetUrl || 'http://localhost:5173';
+          const flowSection = flowRunner.buildAgentPrompt(resolved.flow, persona, effectiveUrl);
+          const flowPrompt = `${buildQAAgentSystemPrompt(effectiveUrl)}\n\n---\n\n${flowSection}`;
+
+          const initialMsgEntry: NormalizedEntry = {
+            id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: new Date().toISOString(),
+            entryType: { type: 'user_message' },
+            content: flowSection,
+          };
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
+          });
+          insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
+
+          await session.start(flowPrompt);
+        });
+
+        // Spawn all persona agents in parallel
+        await Promise.all(personaPromises);
+        return; // Skip the free-form path below
+      }
+
+      // ── Free-form fallback: no flow matched — existing code below runs unchanged ──
       const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}`;
       const parentSessionId = payload.parentSessionId;
       const parentSessionType = payload.parentSessionType;
@@ -1931,6 +2383,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         enableQA: true,
         qaTargetUrl: targetUrl,
         zeusSessionId: payload.parentSessionId,
+        qaAgentId,
       });
 
       const agentName = payload.name || undefined;
@@ -1950,6 +2403,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       };
 
       qaAgentSessions.set(qaAgentId, record);
+      console.log(`[QA Agent] Created record: qaAgentId=${qaAgentId}, pendingResponseId=${record.pendingResponseId}, pendingResponseWs.readyState=${ws.readyState}`);
       wireQAAgent(record);
 
       // Persist QA agent session to DB
@@ -1997,7 +2451,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
       await session.start(prompt);
 
-      // Response is deferred — sent when the QA agent finishes (see wireQAAgent 'done' handler)
+      // Response is deferred — sent when the QA agent's turn ends (see wireQAAgent 'result' handler)
     } catch (err) {
       console.error('[QA Agent] Failed to start:', (err as Error).message);
       sendEnvelope(ws, {
@@ -2175,13 +2629,14 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       } else {
         // Session is dead — start a new session (with --resume if we have Claude session ID)
         console.log(`[QA] Starting new session for agent ${record.qaAgentId} (resume=${!!record.claudeSessionId})`);
-        const targetUrl = record.targetUrl || 'http://localhost:5173';
+        const targetUrl = record.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
         const sessionOpts: import('./claude-session').SessionOptions = {
           workingDir: record.workingDir,
           permissionMode: 'bypassPermissions',
           enableQA: true,
           qaTargetUrl: targetUrl,
           zeusSessionId: record.parentSessionId,
+          qaAgentId: record.qaAgentId,
         };
         if (record.claudeSessionId) {
           sessionOpts.resumeSessionId = record.claudeSessionId;
@@ -2240,7 +2695,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
     const parentSessionId = payload.parentSessionId || 'external';
     const parentSessionType = payload.parentSessionType || 'claude';
     const task = payload.task || 'External QA test';
-    const targetUrl = payload.targetUrl || 'http://localhost:5173';
+    const targetUrl = payload.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
     const agentName = payload.name || undefined;
 
     insertQaAgentSession({
@@ -2627,7 +3082,7 @@ export function notifyTunnelStatus(): void {
       type: 'status_update',
       powerBlock: isPowerBlocked(),
       websocket: true,
-      tunnel: getTunnelUrl(),
+      tunnel: getAuthenticatedTunnelUrl(),
     },
     auth: '',
   });

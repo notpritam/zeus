@@ -1,4 +1,4 @@
-import { useMemo, Component, type ReactNode } from 'react';
+import { useMemo, useState, useRef, Component, type ReactNode } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,8 @@ import {
   Globe,
   Monitor,
   Loader2,
+  RefreshCw,
+  Check,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -238,6 +240,120 @@ function PinchTabControl() {
   );
 }
 
+// ─── QA Target URL Row ───
+
+function QaTargetUrlRow({ sessionId, qaTargetUrl, onUpdate, onDetect }: {
+  sessionId: string;
+  qaTargetUrl?: string;
+  onUpdate: (sessionId: string, url: string) => void;
+  onDetect: (sessionId: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(qaTargetUrl || '');
+  const [detecting, setDetecting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const detectionResult = useZeusStore((s) => s.qaUrlDetectionResult);
+
+  // Show feedback for this session's detection
+  const feedback = detectionResult && detectionResult.sessionId === sessionId ? detectionResult : null;
+  const feedbackAge = feedback ? Date.now() - feedback.timestamp : Infinity;
+  const showFeedback = feedback && feedbackAge < 8000; // show for 8 seconds
+
+  // Stop spinner when detection result arrives
+  const lastResultTs = useRef(0);
+  if (feedback && feedback.timestamp > lastResultTs.current) {
+    lastResultTs.current = feedback.timestamp;
+    if (detecting) setDetecting(false);
+  }
+
+  const handleEdit = () => {
+    setDraft(qaTargetUrl || '');
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleSave = () => {
+    if (draft.trim()) {
+      onUpdate(sessionId, draft.trim());
+    }
+    setEditing(false);
+  };
+
+  const handleDetect = () => {
+    setDetecting(true);
+    onDetect(sessionId);
+    // Timeout fallback — if no response in 10s, stop spinner
+    setTimeout(() => setDetecting(false), 10_000);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1 px-3 py-1.5">
+        <div className="flex items-center gap-1">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') setEditing(false);
+            }}
+            onBlur={handleSave}
+            className="bg-secondary text-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
+            placeholder="http://localhost:3000"
+          />
+          <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={handleSave}>
+            <Check className="size-3" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5 px-3 py-1.5">
+      <div className="flex items-center gap-1">
+        <Globe className="text-muted-foreground size-3.5 shrink-0" />
+        <span
+          className="text-foreground min-w-0 flex-1 cursor-pointer truncate text-[11px] hover:underline"
+          title={qaTargetUrl ? `${qaTargetUrl} — click to edit` : 'Not detected — click to set'}
+          onClick={handleEdit}
+        >
+          {qaTargetUrl || <span className="text-muted-foreground italic">Not detected</span>}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-5 shrink-0"
+          onClick={handleDetect}
+          disabled={detecting}
+          title="Re-detect dev server URL"
+        >
+          <RefreshCw className={`size-3 ${detecting ? 'animate-spin' : ''}`} />
+        </Button>
+      </div>
+      {/* Detection feedback */}
+      {detecting && (
+        <span className="text-muted-foreground text-[10px] pl-4.5">
+          Scanning ports & config files...
+        </span>
+      )}
+      {showFeedback && !detecting && (
+        <div className="flex flex-col gap-0.5 pl-4.5">
+          <span className={`text-[10px] ${feedback!.qaTargetUrl ? 'text-green-400' : 'text-orange-400'}`}>
+            {feedback!.detail}
+          </span>
+          {feedback!.framework && (
+            <span className="text-muted-foreground text-[9px]">
+              Framework: {feedback!.framework}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Panel ───
 
 function SessionInfoPanel() {
@@ -250,6 +366,8 @@ function SessionInfoPanel() {
   const fileTreeConnected = useZeusStore((s) => activeClaudeId ? s.fileTreeConnected[activeClaudeId] === true : false);
   const qaAgents = useZeusStore((s) => activeClaudeId ? (s.qaAgents[activeClaudeId] ?? EMPTY_QA_AGENTS) : EMPTY_QA_AGENTS);
   const pendingApprovals = useZeusStore(useShallow((s) => s.pendingApprovals.filter((a) => a.sessionId === activeClaudeId)));
+  const updateQaTargetUrl = useZeusStore((s) => s.updateQaTargetUrl);
+  const detectQaTargetUrl = useZeusStore((s) => s.detectQaTargetUrl);
   const queue = useZeusStore((s) => activeClaudeId ? (s.messageQueue[activeClaudeId] ?? EMPTY_QUEUE) : EMPTY_QUEUE);
 
   const stats = useMemo(() => countEntries(entries), [entries]);
@@ -326,6 +444,15 @@ function SessionInfoPanel() {
         <InfoRow icon={session.notificationSound ? Bell : BellOff} label="Sound" value={session.notificationSound !== false ? 'On' : 'Off'} />
         <InfoRow icon={GitBranch} label="Git Watcher" value={session.enableGitWatcher !== false ? 'Enabled' : 'Disabled'} />
         <InfoRow icon={session.enableQA ? Eye : EyeOff} label="QA" value={session.enableQA ? 'Enabled' : 'Disabled'} />
+
+        {/* QA Target URL */}
+        <SectionHeader title="QA Target URL" />
+        <QaTargetUrlRow
+          sessionId={activeClaudeId}
+          qaTargetUrl={session.qaTargetUrl}
+          onUpdate={updateQaTargetUrl}
+          onDetect={detectQaTargetUrl}
+        />
 
         {/* Watchers */}
         <SectionHeader title="Watchers" />

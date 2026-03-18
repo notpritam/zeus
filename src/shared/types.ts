@@ -90,6 +90,13 @@ export interface GitFileChange {
   oldFile?: string;
 }
 
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote?: string;          // e.g. "origin/main"
+  isRemoteOnly?: boolean;   // true if only exists on remote
+}
+
 export interface GitStatusData {
   branch: string;
   staged: GitFileChange[];
@@ -121,7 +128,23 @@ export type GitPayload =
   | { type: 'git_error'; message: string }
   | { type: 'not_a_repo' }
   | { type: 'git_init'; workingDir: string }
-  | { type: 'git_init_result'; success: boolean; error?: string };
+  | { type: 'git_init_result'; success: boolean; error?: string }
+  // Branch operations
+  | { type: 'git_list_branches' }
+  | { type: 'git_branches_result'; branches: GitBranchInfo[] }
+  | { type: 'git_checkout'; branch: string }
+  | { type: 'git_checkout_result'; success: boolean; branch?: string; error?: string }
+  | { type: 'git_create_branch'; branch: string; checkout?: boolean }
+  | { type: 'git_create_branch_result'; success: boolean; branch?: string; error?: string }
+  | { type: 'git_delete_branch'; branch: string; force?: boolean }
+  | { type: 'git_delete_branch_result'; success: boolean; error?: string }
+  // Remote operations
+  | { type: 'git_push'; force?: boolean }
+  | { type: 'git_push_result'; success: boolean; error?: string }
+  | { type: 'git_pull' }
+  | { type: 'git_pull_result'; success: boolean; error?: string }
+  | { type: 'git_fetch' }
+  | { type: 'git_fetch_result'; success: boolean; error?: string };
 
 // ─── Session ───
 
@@ -338,7 +361,7 @@ export type ClaudePayload =
 
 // ─── Claude UI Types (renderer-side) ───
 
-export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived';
+export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived' | 'deleted';
 
 // Fine-grained activity state for a running session
 export type SessionActivity =
@@ -378,10 +401,12 @@ export interface ClaudeSessionInfo {
   enableGitWatcher?: boolean;
   enableQA?: boolean;
   workingDir?: string;
+  qaTargetUrl?: string; // auto-detected or user-set QA target URL
   startedAt: number;
   qaAgentCount?: number;
   permissionMode?: PermissionMode;
   model?: string;
+  deletedAt?: number; // timestamp when soft-deleted (null if active)
 }
 
 export interface ClaudeApprovalInfo {
@@ -545,13 +570,14 @@ export type QaPayload =
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
   // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude' }
+  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; flowId?: string; personas?: string[]; responseId?: string }
   | { type: 'stop_qa_agent'; qaAgentId: string }
   | { type: 'qa_agent_message'; qaAgentId: string; text: string }
   | { type: 'list_qa_agents'; parentSessionId: string }
   | { type: 'get_qa_agent_entries'; qaAgentId: string }
   | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
   | { type: 'clear_qa_agent_entries'; qaAgentId: string }
+  | { type: 'list_qa_flows' }
   // Server → Client (QA Agent)
   | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
   | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
@@ -559,4 +585,5 @@ export type QaPayload =
   | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: NormalizedEntry }
   | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
   | { type: 'qa_agent_entries'; qaAgentId: string; entries: NormalizedEntry[] }
+  | { type: 'qa_flows_list'; flows: import('./qa-flow-types').FlowSummary[] }
   | { type: 'qa_error'; message: string };

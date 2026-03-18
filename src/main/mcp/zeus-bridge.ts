@@ -36,10 +36,14 @@ function connectWs(): Promise<void> {
       try {
         const envelope = JSON.parse(data.toString());
         // Check if this is a response to one of our requests
-        if (envelope.payload?.responseId && pendingResponses.has(envelope.payload.responseId)) {
-          const pending = pendingResponses.get(envelope.payload.responseId)!;
-          pendingResponses.delete(envelope.payload.responseId);
-          pending.resolve(envelope.payload);
+        if (envelope.payload?.responseId) {
+          const hasPending = pendingResponses.has(envelope.payload.responseId);
+          console.error(`[zeus-bridge] Received response: responseId=${envelope.payload.responseId}, hasPending=${hasPending}, type=${envelope.payload?.type}`);
+          if (hasPending) {
+            const pending = pendingResponses.get(envelope.payload.responseId)!;
+            pendingResponses.delete(envelope.payload.responseId);
+            pending.resolve(envelope.payload);
+          }
         }
       } catch {
         // ignore parse errors
@@ -76,9 +80,11 @@ function sendAndWait(channel: string, payload: Record<string, unknown>, timeoutM
   return new Promise((resolve, reject) => {
     const responseId = `bridge-${++messageIdCounter}-${Date.now()}`;
     payload.responseId = responseId;
+    console.error(`[zeus-bridge] sendAndWait: channel=${channel}, type=${payload.type}, responseId=${responseId}, timeoutMs=${timeoutMs}`);
 
     const timer = setTimeout(() => {
       pendingResponses.delete(responseId);
+      console.error(`[zeus-bridge] sendAndWait TIMEOUT: responseId=${responseId}, type=${payload.type}`);
       reject(new Error('Timeout waiting for Zeus response'));
     }, timeoutMs);
 
@@ -286,17 +292,18 @@ server.tool(
   'Register a new QA testing session with Zeus. Call this FIRST before any testing. Returns a qaAgentId that you must pass to all subsequent zeus_qa_* calls.',
   {
     task: z.string().describe('Description of what you are testing'),
-    target_url: z.string().optional().describe('URL being tested (default: http://localhost:5173)'),
+    target_url: z.string().optional().describe('URL being tested (auto-detected from dev server if omitted)'),
     parent_session_id: z.string().optional().describe('Parent claude session ID if known'),
     name: z.string().optional().describe('Display name for this QA session'),
   },
   async ({ task, target_url, parent_session_id, name }) => {
     try {
       await connectWs();
+      const defaultUrl = process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
       const response = await sendAndWait('qa', {
         type: 'register_external_qa',
         task,
-        targetUrl: target_url ?? 'http://localhost:5173',
+        targetUrl: target_url ?? defaultUrl,
         parentSessionId: parent_session_id ?? process.env.ZEUS_SESSION_ID ?? 'external',
         parentSessionType: 'claude',
         name: name ?? undefined,
@@ -438,7 +445,7 @@ server.tool(
   'Spawn a QA testing agent in Zeus. The agent runs server-side with full browser automation. Results appear in the QA panel. Use this instead of doing QA testing yourself.',
   {
     task: z.string().describe('What to test (e.g. "Test login flow with valid and invalid credentials")'),
-    target_url: z.string().optional().describe('URL to test (default: http://localhost:5173)'),
+    target_url: z.string().optional().describe('URL to test (auto-detected from dev server if omitted)'),
     parent_session_id: z.string().optional().describe('Zeus session ID (auto-detected from env if omitted)'),
     name: z.string().optional().describe('Display name for the QA agent'),
     working_dir: z.string().optional().describe('Working directory (default: cwd)'),
@@ -447,13 +454,15 @@ server.tool(
     try {
       await connectWs();
       const sessionId = parent_session_id ?? process.env.ZEUS_SESSION_ID ?? '';
+      const defaultUrl = process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
+      console.error(`[zeus-bridge] zeus_qa_run: starting QA agent (pendingResponses.size=${pendingResponses.size}, wsReady=${wsReady})`);
       // Wait up to 10 minutes — the QA agent runs to completion before responding
       const response = await sendAndWait('qa', {
         type: 'start_qa_agent',
         task,
         name: name ?? undefined,
         workingDir: working_dir ?? process.cwd(),
-        targetUrl: target_url ?? 'http://localhost:5173',
+        targetUrl: target_url ?? defaultUrl,
         parentSessionId: sessionId,
         parentSessionType: 'claude',
       }, 600_000);

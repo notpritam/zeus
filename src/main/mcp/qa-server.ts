@@ -8,10 +8,10 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-
 const PINCHTAB_PORT = parseInt(process.env.ZEUS_PINCHTAB_PORT ?? '9867', 10);
 const PINCHTAB_BASE = `http://127.0.0.1:${PINCHTAB_PORT}`;
 const CDP_STATE_FILE = path.join(os.tmpdir(), 'zeus-qa-cdp-state.json');
+const QA_AGENT_ID = process.env.ZEUS_QA_AGENT_ID ?? '';
 
 // Track read pointers for since_last_call
 let lastConsoleRead = 0;
@@ -815,7 +815,7 @@ server.tool(
   'qa_run_test_flow',
   'Run a complete test check: navigate, wait, snapshot, screenshot, collect console/network/errors. Call this after making UI changes.',
   {
-    url: z.string().describe('URL to test (e.g., http://localhost:5173)'),
+    url: z.string().describe('URL to test (e.g., http://localhost:5199)'),
     wait_for_network_idle: z.boolean().optional().describe('Wait for network idle before capturing (default true)'),
   },
   async ({ url, wait_for_network_idle }) => {
@@ -904,6 +904,42 @@ server.tool(
       return { content };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `Error running test flow: ${(err as Error).message}` }], isError: true };
+    }
+  },
+);
+
+// ═══════════════════════════════════════════
+// ─── QA Finish Tool (file-based IPC to Zeus host) ───
+// ═══════════════════════════════════════════
+
+function getFinishFilePath(): string {
+  if (QA_AGENT_ID) {
+    return path.join(os.tmpdir(), `zeus-qa-finish-${QA_AGENT_ID}.json`);
+  }
+  // Fallback: use parent PID (Claude CLI's PID) as identifier
+  return path.join(os.tmpdir(), `zeus-qa-finish-ppid-${process.ppid}.json`);
+}
+
+server.tool(
+  'qa_finish',
+  'REQUIRED: Call this tool when you are done testing. Sends your findings back to the parent agent that spawned you. You MUST call this before ending your session — without it, the parent agent will timeout waiting for your results.',
+  {
+    summary: z.string().describe('Your complete test findings: what was tested, what passed, what failed, and any bugs found. Be thorough but concise.'),
+    status: z.enum(['pass', 'fail', 'warning']).describe('Overall test result: pass (all good), fail (bugs found), warning (minor issues)'),
+  },
+  async ({ summary, status }) => {
+    try {
+      const finishFile = getFinishFilePath();
+      const data = JSON.stringify({ summary, status, timestamp: Date.now() });
+      fs.writeFileSync(finishFile, data, 'utf-8');
+      console.error(`[zeus-qa] qa_finish: wrote findings to ${finishFile} (agent=${QA_AGENT_ID || 'ppid-' + process.ppid})`);
+      return textResult({
+        success: true,
+        message: 'Findings recorded. The parent agent will receive them when your session ends.',
+      });
+    } catch (err) {
+      console.error(`[zeus-qa] qa_finish: failed to write findings: ${(err as Error).message}`);
+      return errorResult(`Failed to record findings: ${(err as Error).message}`);
     }
   },
 );

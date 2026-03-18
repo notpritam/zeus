@@ -17,6 +17,7 @@ import type {
   ZeusSettings,
   GitStatusData,
   GitPayload,
+  GitBranchInfo,
   FilesPayload,
   FileTreeEntry,
   SessionActivity,
@@ -30,6 +31,7 @@ import type {
   ThemeMeta,
   ThemeFile,
 } from '../../../shared/types';
+import type { FlowSummary } from '../../../shared/qa-flow-types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff';
 
@@ -78,6 +80,9 @@ interface ZeusState {
   gitErrors: Record<string, string>;
   gitWatcherConnected: Record<string, boolean>;
   gitNotARepo: Record<string, boolean>;
+  gitBranches: Record<string, GitBranchInfo[]>;
+  gitPushing: Record<string, boolean>;
+  gitPulling: Record<string, boolean>;
 
   // File tree
   fileTree: Record<string, Record<string, FileTreeEntry[]>>;  // sessionId → dirPath → entries
@@ -116,9 +121,13 @@ interface ZeusState {
   qaNetworkRequests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }>;
   qaJsErrors: Array<{ message: string; stack: string; timestamp: number }>;
 
+  // QA URL detection result (transient — for UI feedback)
+  qaUrlDetectionResult: { sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string; timestamp: number } | null;
+
   // QA Agent — keyed by parentSessionId → multiple agents
   qaAgents: Record<string, QaAgentClient[]>;        // parentSessionId → agents
   activeQaAgentId: Record<string, string | null>;   // parentSessionId → selected qaAgentId
+  qaFlows: FlowSummary[];
 
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
@@ -160,10 +169,16 @@ interface ZeusState {
   removeQueuedMessage: (msgId: string) => void;
   loadMoreEntries: (sessionId: string) => void;
   updateClaudeSession: (id: string, updates: { name?: string; color?: string | null }) => void;
+  updateQaTargetUrl: (sessionId: string, qaTargetUrl: string) => void;
+  detectQaTargetUrl: (sessionId: string) => void;
   deleteClaudeSession: (id: string) => void;
+  restoreClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
+  restoreTerminalSession: (id: string) => void;
   archiveTerminalSession: (id: string) => void;
+  fetchDeletedSessions: () => void;
+  deletedClaudeSessions: ClaudeSessionInfo[];
   setViewMode: (mode: ViewMode) => void;
 
   // Modal actions
@@ -181,6 +196,13 @@ interface ZeusState {
   discardFiles: (sessionId: string, files: string[]) => void;
   commitChanges: (sessionId: string, message: string) => void;
   initGitRepo: (sessionId: string, workingDir: string) => void;
+  listBranches: (sessionId: string) => void;
+  checkoutBranch: (sessionId: string, branch: string) => void;
+  createBranch: (sessionId: string, branch: string, checkout?: boolean) => void;
+  deleteBranch: (sessionId: string, branch: string, force?: boolean) => void;
+  gitPush: (sessionId: string, force?: boolean) => void;
+  gitPull: (sessionId: string) => void;
+  gitFetch: (sessionId: string) => void;
 
   // Diff tab state
   openDiffTabs: DiffTab[];
@@ -220,7 +242,7 @@ interface ZeusState {
   clearQAError: () => void;
 
   // QA Agent actions
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => void;
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => void;
   stopQAAgent: (qaAgentId: string) => void;
   deleteQAAgent: (qaAgentId: string, parentSessionId: string) => void;
   sendQAAgentMessage: (qaAgentId: string, text: string) => void;
@@ -228,6 +250,7 @@ interface ZeusState {
   selectQaAgent: (parentSessionId: string, qaAgentId: string | null) => void;
   fetchQaAgents: (parentSessionId: string) => void;
   fetchQaAgentEntries: (qaAgentId: string) => void;
+  fetchQaFlows: () => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => void;
@@ -351,6 +374,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   activeSessionId: null,
 
   claudeSessions: [],
+  deletedClaudeSessions: [],
   activeClaudeId: null,
   claudeEntries: {},
   claudeEntriesMeta: {},
@@ -363,6 +387,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   gitErrors: {},
   gitWatcherConnected: {},
   gitNotARepo: {},
+  gitBranches: {},
+  gitPushing: {},
+  gitPulling: {},
   openDiffTabs: [],
   activeDiffTabId: null,
   previousViewMode: 'terminal' as const,
@@ -380,13 +407,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaError: null,
   qaLoading: false,
   qaTabs: [],
-  qaCurrentUrl: 'http://localhost:5173',
+  qaCurrentUrl: window.location.origin,
   qaConsoleLogs: [],
   qaNetworkRequests: [],
   qaJsErrors: [],
 
+  qaUrlDetectionResult: null,
+
   qaAgents: {},
   activeQaAgentId: {},
+  qaFlows: [] as FlowSummary[],
 
 
   perfMetrics: null,
@@ -516,6 +546,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           activeSessionId: state.activeSessionId === archivedId ? null : state.activeSessionId,
         }));
       }
+
+      if (payload.type === 'terminal_session_restored') {
+        // Re-fetch sessions to get the restored one
+        zeusWs.send({
+          channel: 'control',
+          sessionId: '',
+          payload: { type: 'list_sessions' },
+          auth: '',
+        });
+      }
     });
 
     // Subscribe to claude channel
@@ -546,13 +586,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           const mostRecent = running ?? sessions.reduce((a, b) => (a.startedAt > b.startedAt ? a : b));
           activeId = mostRecent.id;
           set({ activeClaudeId: activeId, viewMode: 'claude' });
-          // Lazy-load latest page of entries from DB for the auto-selected session
-          zeusWs.send({
-            channel: 'claude',
-            sessionId: activeId,
-            payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
-            auth: '',
-          });
+          // Lazy-load latest page of entries from DB (skip if already loaded from previous connection)
+          const existing = get().claudeEntries[activeId];
+          if (!existing || existing.length === 0) {
+            zeusWs.send({
+              channel: 'claude',
+              sessionId: activeId,
+              payload: { type: 'get_claude_history', limit: ENTRIES_PAGE_SIZE },
+              auth: '',
+            });
+          }
         }
 
         // Only request state for the active session (watchers are already alive on backend)
@@ -598,7 +641,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             const isLoadMore = meta && meta.oldestSeq !== null; // already had entries
             const existingEntries = isLoadMore ? (state.claudeEntries[sid] ?? []) : [];
             // Prepend older entries (loadMore) or set initial page
-            const merged = isLoadMore ? [...entries, ...existingEntries] : entries;
+            // Deduplicate by entry ID to prevent duplicate keys on reconnect
+            const incomingIds = new Set(entries.map((e) => e.id));
+            const deduped = existingEntries.filter((e) => !incomingIds.has(e.id));
+            const merged = isLoadMore ? [...entries, ...deduped] : entries;
             return {
               claudeEntries: { ...state.claudeEntries, [sid]: merged },
               claudeEntriesMeta: {
@@ -747,6 +793,24 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      if (payload.type === 'claude_session_restored') {
+        const { sessionId: restoredId } = envelope.payload as { sessionId: string };
+        set((state) => {
+          const restored = state.deletedClaudeSessions.find((s) => s.id === restoredId);
+          return {
+            deletedClaudeSessions: state.deletedClaudeSessions.filter((s) => s.id !== restoredId),
+            claudeSessions: restored
+              ? [...state.claudeSessions, { ...restored, status: 'completed' as const }]
+              : state.claudeSessions,
+          };
+        });
+      }
+
+      if (payload.type === 'deleted_sessions_list') {
+        const { sessions } = envelope.payload as { sessions: ClaudeSessionInfo[] };
+        set({ deletedClaudeSessions: sessions });
+      }
+
       if (payload.type === 'claude_session_updated') {
         const { sessionId, name, color } = envelope.payload as { sessionId: string; name?: string; color?: string | null };
         set((state) => ({
@@ -759,6 +823,28 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
                 }
               : s,
           ),
+        }));
+      }
+
+      if (payload.type === 'qa_target_url_updated') {
+        const { sessionId, qaTargetUrl } = envelope.payload as { sessionId: string; qaTargetUrl: string | null };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sessionId ? { ...s, qaTargetUrl: qaTargetUrl ?? undefined } : s,
+          ),
+        }));
+      }
+
+      if (payload.type === 'qa_target_url_detected') {
+        const { sessionId, qaTargetUrl, source, detail, framework, verification } = envelope.payload as {
+          sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string;
+        };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sessionId ? { ...s, qaTargetUrl: qaTargetUrl ?? undefined } : s,
+          ),
+          // Store detection result for UI feedback
+          qaUrlDetectionResult: { sessionId, qaTargetUrl, source, detail, framework, verification, timestamp: Date.now() },
         }));
       }
 
@@ -933,6 +1019,62 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           gitErrors: { ...state.gitErrors, [sid]: payload.message },
         }));
       }
+
+      if (payload.type === 'git_branches_result') {
+        set((state) => ({
+          gitBranches: { ...state.gitBranches, [sid]: payload.branches },
+        }));
+      }
+
+      if (payload.type === 'git_checkout_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_create_branch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_delete_branch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_push_result') {
+        set((state) => ({
+          gitPushing: { ...state.gitPushing, [sid]: false },
+          ...(!payload.success && payload.error
+            ? { gitErrors: { ...state.gitErrors, [sid]: payload.error } }
+            : {}),
+        }));
+      }
+
+      if (payload.type === 'git_pull_result') {
+        set((state) => ({
+          gitPulling: { ...state.gitPulling, [sid]: false },
+          ...(!payload.success && payload.error
+            ? { gitErrors: { ...state.gitErrors, [sid]: payload.error } }
+            : {}),
+        }));
+      }
+
+      if (payload.type === 'git_fetch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
     });
 
     // Subscribe to files channel
@@ -1047,7 +1189,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaRunning: false, qaInstances: [], qaTabs: [],
           qaSnapshot: null, qaSnapshotRaw: null, qaScreenshot: null,
           qaText: null, qaLoading: false, qaError: null,
-          qaCurrentUrl: 'http://localhost:5173',
+          qaCurrentUrl: window.location.origin,
           qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
           qaAgents: {}, activeQaAgentId: {},
         });
@@ -1197,6 +1339,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           }
           return { qaAgents: updated };
         });
+      }
+      if (payload.type === 'qa_flows_list') {
+        set({ qaFlows: payload.flows });
       }
     });
 
@@ -1658,11 +1803,38 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  updateQaTargetUrl: (sessionId: string, qaTargetUrl: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'update_qa_target_url', qaTargetUrl },
+      auth: '',
+    });
+  },
+
+  detectQaTargetUrl: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId,
+      payload: { type: 'detect_qa_target_url' },
+      auth: '',
+    });
+  },
+
   deleteClaudeSession: (id: string) => {
     zeusWs.send({
       channel: 'claude',
       sessionId: id,
       payload: { type: 'delete_claude_session' },
+      auth: '',
+    });
+  },
+
+  restoreClaudeSession: (id: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: id,
+      payload: { type: 'restore_claude_session' },
       auth: '',
     });
   },
@@ -1685,11 +1857,29 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  restoreTerminalSession: (id: string) => {
+    zeusWs.send({
+      channel: 'control',
+      sessionId: id,
+      payload: { type: 'restore_terminal_session' },
+      auth: '',
+    });
+  },
+
   archiveTerminalSession: (id: string) => {
     zeusWs.send({
       channel: 'control',
       sessionId: id,
       payload: { type: 'archive_terminal_session' },
+      auth: '',
+    });
+  },
+
+  fetchDeletedSessions: () => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: '',
+      payload: { type: 'list_deleted_sessions' },
       auth: '',
     });
   },
@@ -1956,6 +2146,71 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  listBranches: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_list_branches' },
+      auth: '',
+    });
+  },
+
+  checkoutBranch: (sessionId: string, branch: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_checkout', branch },
+      auth: '',
+    });
+  },
+
+  createBranch: (sessionId: string, branch: string, checkout = true) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_create_branch', branch, checkout },
+      auth: '',
+    });
+  },
+
+  deleteBranch: (sessionId: string, branch: string, force = false) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_delete_branch', branch, force },
+      auth: '',
+    });
+  },
+
+  gitPush: (sessionId: string, force = false) => {
+    set((state) => ({ gitPushing: { ...state.gitPushing, [sessionId]: true } }));
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_push', force },
+      auth: '',
+    });
+  },
+
+  gitPull: (sessionId: string) => {
+    set((state) => ({ gitPulling: { ...state.gitPulling, [sessionId]: true } }));
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_pull' },
+      auth: '',
+    });
+  },
+
+  gitFetch: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_fetch' },
+      auth: '',
+    });
+  },
+
   // --- File tree actions ---
 
   toggleFileTreeDir: (sessionId: string, dirPath: string) => {
@@ -2103,11 +2358,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- QA Agent actions ---
 
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string) => {
+  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => {
     set({ qaError: null });
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType },
+      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType, flowId, personas },
     });
   },
 
@@ -2171,6 +2426,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'get_qa_agent_entries', qaAgentId },
+    });
+  },
+
+  fetchQaFlows: () => {
+    zeusWs.send({
+      channel: 'qa', sessionId: '', auth: '',
+      payload: { type: 'list_qa_flows' },
     });
   },
 

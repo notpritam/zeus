@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo, Component, type ReactNode } from 'react';
+import { X, AlertTriangle, RotateCcw } from 'lucide-react';
 import Header from '@/components/Header';
 import SessionSidebar from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
@@ -19,6 +19,54 @@ import {
 import { useZeusStore } from '@/stores/useZeusStore';
 import { useNotificationSound } from '@/hooks/useNotificationSound';
 import { zeusWs } from '@/lib/ws';
+
+// ─── Error Boundary for DiffView / any panel ───
+
+class PanelErrorBoundary extends Component<
+  { children: ReactNode; name: string; onReset?: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode; name: string; onReset?: () => void }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error) {
+    // Silently swallow ResizeObserver errors — they're harmless
+    if (error.message?.includes('ResizeObserver')) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
+          <AlertTriangle className="text-warn size-6" />
+          <p className="text-foreground text-sm font-medium">{this.props.name} Error</p>
+          <p className="text-muted-foreground max-w-sm text-center text-xs">
+            {this.state.error?.message || 'Something went wrong rendering this panel.'}
+          </p>
+          <button
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              this.props.onReset?.();
+            }}
+            className="border-border text-foreground hover:bg-secondary mt-1 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors"
+          >
+            <RotateCcw className="size-3" />
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function App() {
   const {
@@ -340,7 +388,9 @@ function App() {
 
               <div className="min-h-0 flex-1">
                 {viewMode === 'diff' ? (
-                  <DiffView />
+                  <PanelErrorBoundary name="Diff Viewer" onReset={() => useZeusStore.getState().returnToHome()}>
+                    <DiffView />
+                  </PanelErrorBoundary>
                 ) : viewMode === 'claude' ? (
                   <ClaudeView
                     session={activeClaudeSession}
@@ -368,7 +418,9 @@ function App() {
             <>
               <ResizableHandle />
               <ResizablePanel id="right-panel" defaultSize="25%" minSize="200px" maxSize="40%">
-                <RightPanel />
+                <PanelErrorBoundary name="Right Panel">
+                  <RightPanel />
+                </PanelErrorBoundary>
               </ResizablePanel>
             </>
           ) : (
