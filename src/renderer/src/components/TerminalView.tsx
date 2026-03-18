@@ -24,7 +24,7 @@ function TerminalView({ sessionId }: TerminalViewProps) {
     <div
       ref={containerRef}
       data-testid="terminal-container"
-      className="bg-background h-full w-full overflow-hidden p-1"
+      className="h-full w-full overflow-hidden bg-bg p-1"
     />
   );
 }

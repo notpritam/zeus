@@ -18,20 +18,26 @@ export function useTerminal(
 
     const container = containerRef.current;
 
+    // Read theme colors from CSS custom properties
+    const styles = getComputedStyle(document.documentElement);
+    const bg = styles.getPropertyValue('--color-bg').trim() || '#0a0a0a';
+    const fg = styles.getPropertyValue('--color-foreground').trim() || '#e0e0e0';
+    const accent = styles.getPropertyValue('--color-accent').trim() || '#22c55e';
+
     const term = new Terminal({
-      fontFamily: 'var(--font-mono), "SF Mono", "Fira Code", "Cascadia Code", monospace',
-      fontSize: 13,
-      lineHeight: 1.3,
+      fontFamily: 'var(--font-mono), "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", monospace',
+      fontSize: 12,
+      lineHeight: 1.4,
       theme: {
-        background: '#0a0a0a',
-        foreground: '#e0e0e0',
-        cursor: '#22c55e',
+        background: bg,
+        foreground: fg,
+        cursor: accent,
         selectionBackground: 'rgba(34, 197, 94, 0.25)',
-        black: '#0a0a0a',
+        black: bg,
         brightBlack: '#555555',
-        white: '#e0e0e0',
+        white: fg,
         brightWhite: '#ffffff',
-        green: '#22c55e',
+        green: accent,
         brightGreen: '#4ade80',
         red: '#ef4444',
         brightRed: '#f87171',
@@ -55,10 +61,14 @@ export function useTerminal(
     term.loadAddon(webLinksAddon);
     term.open(container);
 
-    // Initial fit
+    // Initial fit (guard against hidden containers)
     requestAnimationFrame(() => {
-      fitAddon.fit();
-      // Send initial resize to server
+      if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+      try {
+        fitAddon.fit();
+      } catch {
+        return;
+      }
       zeusWs.send({
         channel: 'terminal',
         sessionId,
@@ -95,20 +105,22 @@ export function useTerminal(
       }
     });
 
-    // Resize observer
+    // Resize observer — skip when container is hidden (display:none → zero dimensions)
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => {
-        if (fitAddonRef.current) {
+        if (!fitAddonRef.current || !termRef.current) return;
+        if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+        try {
           fitAddonRef.current.fit();
-          if (termRef.current) {
-            zeusWs.send({
-              channel: 'terminal',
-              sessionId,
-              payload: { type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows },
-              auth: '',
-            });
-          }
+        } catch {
+          return;
         }
+        zeusWs.send({
+          channel: 'terminal',
+          sessionId,
+          payload: { type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows },
+          auth: '',
+        });
       });
     });
     resizeObserver.observe(container);

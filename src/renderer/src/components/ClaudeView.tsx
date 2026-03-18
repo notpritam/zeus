@@ -658,9 +658,9 @@ function ClaudeView({
           </div>
         </div>
 
-        {/* Drag handle + Terminal panel */}
-        {panelVisible && session && (
-          <>
+        {/* Drag handle + Terminal panel — always mounted, hidden via CSS to preserve xterm state */}
+        {session && (
+          <div style={{ display: panelVisible ? 'contents' : 'none' }}>
             <div
               onMouseDown={handleDragStart}
               className="border-border hover:bg-primary/20 h-1 shrink-0 cursor-row-resize border-y transition-colors"
@@ -672,7 +672,7 @@ function ClaudeView({
                 cwd={session.workingDir || '/'}
               />
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

@@ -76,15 +76,15 @@ export default function SessionTerminalPanel({
   const switchTab = useZeusStore((s) => s.switchSessionTerminal);
   const togglePanel = useZeusStore((s) => s.toggleSessionTerminalPanel);
 
-  if (!st || !st.panelVisible) return null;
+  if (!st) return null;
 
   const { tabs, activeTabId } = st;
   const canAddTab = tabs.length < 5;
 
   return (
-    <div className="bg-background flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-bg">
       {/* Tab bar */}
-      <div className="border-border bg-card flex items-center gap-0.5 border-b px-2 py-1">
+      <div className="flex items-center gap-0.5 border-b border-border-dim bg-bg-card px-2 py-1">
         {tabs.map((tab) => (
           <button
             key={tab.tabId}
