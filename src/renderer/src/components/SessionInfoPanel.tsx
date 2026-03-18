@@ -23,7 +23,6 @@ import {
   Monitor,
   Loader2,
   RefreshCw,
-  ExternalLink,
   Check,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -251,7 +250,21 @@ function QaTargetUrlRow({ sessionId, qaTargetUrl, onUpdate, onDetect }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(qaTargetUrl || '');
+  const [detecting, setDetecting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const detectionResult = useZeusStore((s) => s.qaUrlDetectionResult);
+
+  // Show feedback for this session's detection
+  const feedback = detectionResult && detectionResult.sessionId === sessionId ? detectionResult : null;
+  const feedbackAge = feedback ? Date.now() - feedback.timestamp : Infinity;
+  const showFeedback = feedback && feedbackAge < 8000; // show for 8 seconds
+
+  // Stop spinner when detection result arrives
+  const lastResultTs = useRef(0);
+  if (feedback && feedback.timestamp > lastResultTs.current) {
+    lastResultTs.current = feedback.timestamp;
+    if (detecting) setDetecting(false);
+  }
 
   const handleEdit = () => {
     setDraft(qaTargetUrl || '');
@@ -267,44 +280,76 @@ function QaTargetUrlRow({ sessionId, qaTargetUrl, onUpdate, onDetect }: {
   };
 
   const handleDetect = () => {
+    setDetecting(true);
     onDetect(sessionId);
+    // Timeout fallback — if no response in 10s, stop spinner
+    setTimeout(() => setDetecting(false), 10_000);
   };
 
   if (editing) {
     return (
-      <div className="flex items-center gap-1 px-3 py-1.5">
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSave();
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          onBlur={handleSave}
-          className="bg-secondary text-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
-          placeholder="http://localhost:3000"
-        />
-        <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={handleSave}>
-          <Check className="size-3" />
-        </Button>
+      <div className="flex flex-col gap-1 px-3 py-1.5">
+        <div className="flex items-center gap-1">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') setEditing(false);
+            }}
+            onBlur={handleSave}
+            className="bg-secondary text-foreground min-w-0 flex-1 rounded px-2 py-0.5 text-[11px] outline-none"
+            placeholder="http://localhost:3000"
+          />
+          <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={handleSave}>
+            <Check className="size-3" />
+          </Button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-1 px-3 py-1.5">
-      <Globe className="text-muted-foreground size-3.5 shrink-0" />
-      <span
-        className="text-foreground min-w-0 flex-1 cursor-pointer truncate text-[11px] hover:underline"
-        title={qaTargetUrl || 'Not detected — click to set'}
-        onClick={handleEdit}
-      >
-        {qaTargetUrl || <span className="text-muted-foreground italic">Not detected</span>}
-      </span>
-      <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={handleDetect} title="Re-detect dev server URL">
-        <RefreshCw className="size-3" />
-      </Button>
+    <div className="flex flex-col gap-0.5 px-3 py-1.5">
+      <div className="flex items-center gap-1">
+        <Globe className="text-muted-foreground size-3.5 shrink-0" />
+        <span
+          className="text-foreground min-w-0 flex-1 cursor-pointer truncate text-[11px] hover:underline"
+          title={qaTargetUrl ? `${qaTargetUrl} — click to edit` : 'Not detected — click to set'}
+          onClick={handleEdit}
+        >
+          {qaTargetUrl || <span className="text-muted-foreground italic">Not detected</span>}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-5 shrink-0"
+          onClick={handleDetect}
+          disabled={detecting}
+          title="Re-detect dev server URL"
+        >
+          <RefreshCw className={`size-3 ${detecting ? 'animate-spin' : ''}`} />
+        </Button>
+      </div>
+      {/* Detection feedback */}
+      {detecting && (
+        <span className="text-muted-foreground text-[10px] pl-4.5">
+          Scanning ports & config files...
+        </span>
+      )}
+      {showFeedback && !detecting && (
+        <div className="flex flex-col gap-0.5 pl-4.5">
+          <span className={`text-[10px] ${feedback!.qaTargetUrl ? 'text-green-400' : 'text-orange-400'}`}>
+            {feedback!.detail}
+          </span>
+          {feedback!.framework && (
+            <span className="text-muted-foreground text-[9px]">
+              Framework: {feedback!.framework}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

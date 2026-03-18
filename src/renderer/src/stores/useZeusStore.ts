@@ -120,6 +120,9 @@ interface ZeusState {
   qaNetworkRequests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }>;
   qaJsErrors: Array<{ message: string; stack: string; timestamp: number }>;
 
+  // QA URL detection result (transient — for UI feedback)
+  qaUrlDetectionResult: { sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string; timestamp: number } | null;
+
   // QA Agent — keyed by parentSessionId → multiple agents
   qaAgents: Record<string, QaAgentClient[]>;        // parentSessionId → agents
   activeQaAgentId: Record<string, string | null>;   // parentSessionId → selected qaAgentId
@@ -400,6 +403,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaConsoleLogs: [],
   qaNetworkRequests: [],
   qaJsErrors: [],
+
+  qaUrlDetectionResult: null,
 
   qaAgents: {},
   activeQaAgentId: {},
@@ -784,6 +789,19 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           claudeSessions: state.claudeSessions.map((s) =>
             s.id === sessionId ? { ...s, qaTargetUrl: qaTargetUrl ?? undefined } : s,
           ),
+        }));
+      }
+
+      if (payload.type === 'qa_target_url_detected') {
+        const { sessionId, qaTargetUrl, source, detail, framework, verification } = envelope.payload as {
+          sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string;
+        };
+        set((state) => ({
+          claudeSessions: state.claudeSessions.map((s) =>
+            s.id === sessionId ? { ...s, qaTargetUrl: qaTargetUrl ?? undefined } : s,
+          ),
+          // Store detection result for UI feedback
+          qaUrlDetectionResult: { sessionId, qaTargetUrl, source, detail, framework, verification, timestamp: Date.now() },
         }));
       }
 

@@ -74,7 +74,7 @@ import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
-import { detectDevServerUrl } from './detect-dev-server';
+import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
 
 let server: http.Server | null = null;
@@ -627,8 +627,11 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
   });
 }
 
-function buildQAAgentSystemPrompt(targetUrl: string): string {
-  return `You are a QA agent for a web application running at ${targetUrl}.
+function buildQAAgentSystemPrompt(targetUrl: string | undefined): string {
+  const urlLine = targetUrl
+    ? `You are a QA agent for a web application running at ${targetUrl}.`
+    : `You are a QA agent. No target URL was auto-detected — use qa_navigate to the correct URL once you determine it from the project config or ask the task description.`;
+  return `${urlLine}
 
 You have full access to:
 - Navigation & page info: qa_navigate, qa_text, qa_pdf, qa_health
@@ -939,17 +942,29 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       wireClaudeSession(ws, session, envelope);
 
       // Auto-detect QA target URL for this session's working directory
-      detectDevServerUrl(workingDir).then((detectedUrl) => {
-        if (detectedUrl) {
-          updateClaudeSessionQaTargetUrl(envelope.sessionId, detectedUrl);
-          broadcastEnvelope({
-            channel: 'claude',
-            sessionId: envelope.sessionId,
-            payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: detectedUrl },
-            auth: '',
-          });
+      detectDevServerUrlDetailed(workingDir).then((result) => {
+        console.log(`[QA URL] Auto-detect for new session ${envelope.sessionId}:`, result.detail);
+        if (result.url) {
+          updateClaudeSessionQaTargetUrl(envelope.sessionId, result.url);
         }
-      }).catch(() => { /* detection failed silently */ });
+        broadcastEnvelope({
+          channel: 'claude',
+          sessionId: envelope.sessionId,
+          payload: {
+            type: 'qa_target_url_detected',
+            sessionId: envelope.sessionId,
+            qaTargetUrl: result.url,
+            source: result.source,
+            detail: result.detail,
+            port: result.port ?? null,
+            framework: result.framework ?? null,
+            verification: result.verification ?? null,
+          },
+          auth: '',
+        });
+      }).catch((err) => {
+        console.error(`[QA URL] Auto-detect failed for session ${envelope.sessionId}:`, err);
+      });
 
       broadcastEnvelope({
         channel: 'claude',
@@ -1258,26 +1273,47 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
   } else if (payload.type === 'detect_qa_target_url') {
     // Re-detect dev server URL for this session's working directory
     const dbSessions = getAllClaudeSessions();
-    const session = dbSessions.find((s) => s.id === envelope.sessionId);
-    const workDir = session?.workingDir || process.env.HOME || '/';
-    detectDevServerUrl(workDir).then((detectedUrl) => {
-      if (detectedUrl) {
-        updateClaudeSessionQaTargetUrl(envelope.sessionId, detectedUrl);
-        broadcastEnvelope({
-          channel: 'claude',
-          sessionId: envelope.sessionId,
-          payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: detectedUrl },
-          auth: '',
-        });
-      } else {
-        sendEnvelope(ws, {
-          channel: 'claude',
-          sessionId: envelope.sessionId,
-          payload: { type: 'qa_target_url_updated', sessionId: envelope.sessionId, qaTargetUrl: null },
-          auth: '',
-        });
+    const sessionRow = dbSessions.find((s) => s.id === envelope.sessionId);
+    const workDir = sessionRow?.workingDir || process.env.HOME || '/';
+    console.log(`[QA URL] Detecting dev server for session ${envelope.sessionId} in ${workDir}`);
+    detectDevServerUrlDetailed(workDir).then((result) => {
+      console.log(`[QA URL] Detection result:`, result);
+      if (result.url) {
+        updateClaudeSessionQaTargetUrl(envelope.sessionId, result.url);
       }
-    }).catch(() => { /* detection failed silently */ });
+      broadcastEnvelope({
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: {
+          type: 'qa_target_url_detected',
+          sessionId: envelope.sessionId,
+          qaTargetUrl: result.url,
+          source: result.source,
+          detail: result.detail,
+          port: result.port ?? null,
+          framework: result.framework ?? null,
+          verification: result.verification ?? null,
+        },
+        auth: '',
+      });
+    }).catch((err) => {
+      console.error(`[QA URL] Detection failed:`, err);
+      sendEnvelope(ws, {
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: {
+          type: 'qa_target_url_detected',
+          sessionId: envelope.sessionId,
+          qaTargetUrl: null,
+          source: 'none',
+          detail: `Detection failed: ${(err as Error).message}`,
+          port: null,
+          framework: null,
+          verification: null,
+        },
+        auth: '',
+      });
+    });
   } else if (payload.type === 'delete_claude_session') {
     // Kill if still running, stop git watcher, clean up QA agents, then delete from DB
     claudeManager.killSession(envelope.sessionId);
@@ -2071,12 +2107,26 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         }
       }
 
-      // Resolve target URL: explicit payload > parent session's detected URL > env default
+      // Resolve target URL: explicit payload > parent session's detected URL > live detection > env default
       let targetUrl = payload.targetUrl;
       if (!targetUrl) {
         const parentSessions = getAllClaudeSessions();
         const parentSession = parentSessions.find((s) => s.id === payload.parentSessionId);
-        targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
+        targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || undefined;
+      }
+      // If still no URL, run live detection for the working directory
+      if (!targetUrl) {
+        const detected = await detectDevServerUrlDetailed(payload.workingDir);
+        if (detected.url) {
+          targetUrl = detected.url;
+          console.log(`[QA Agent] Auto-detected target URL: ${detected.url} (${detected.detail})`);
+          // Also persist it so future agents pick it up
+          if (payload.parentSessionId) {
+            updateClaudeSessionQaTargetUrl(payload.parentSessionId, detected.url);
+          }
+        } else {
+          console.warn(`[QA Agent] No target URL detected — agent will start without a URL. Detail: ${detected.detail}`);
+        }
       }
       const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}`;
       const parentSessionId = payload.parentSessionId;
