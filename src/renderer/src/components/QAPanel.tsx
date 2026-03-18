@@ -114,6 +114,8 @@ function QAPanel() {
   const selectQaAgent = useZeusStore((s) => s.selectQaAgent);
   const fetchQaAgents = useZeusStore((s) => s.fetchQaAgents);
   const fetchQaAgentEntries = useZeusStore((s) => s.fetchQaAgentEntries);
+  const qaFlows = useZeusStore((s) => s.qaFlows);
+  const fetchQaFlows = useZeusStore((s) => s.fetchQaFlows);
 
   const sessionCtx = useCurrentSessionContext();
 
@@ -133,6 +135,8 @@ function QAPanel() {
   const { lightbox, openLightbox, closeLightbox } = useLightbox();
   const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
   const agentLogRef = useRef<HTMLDivElement>(null);
   const agentUserScrolledUp = useRef(false);
   const [showAgentScrollToBottom, setShowAgentScrollToBottom] = useState(false);
@@ -218,15 +222,58 @@ function QAPanel() {
     }
   }, [selectedAgentId]);
 
+  // Fetch available flows when showing the new agent form
+  useEffect(() => {
+    if (showNewAgentForm || !hasAnyAgent) {
+      fetchQaFlows();
+    }
+  }, [showNewAgentForm, hasAnyAgent]);
+
+  const selectedFlow = qaFlows.find((f) => f.id === selectedFlowId) ?? null;
+
+  const handleFlowSelect = (flowId: string | null) => {
+    setSelectedFlowId(flowId);
+    if (flowId) {
+      const flow = qaFlows.find((f) => f.id === flowId);
+      if (flow) {
+        setSelectedPersonas([...flow.personaIds]);
+        if (!agentTask.trim()) {
+          setAgentTask(flow.name);
+        }
+      }
+    } else {
+      setSelectedPersonas([]);
+    }
+  };
+
+  const handlePersonaToggle = (personaId: string) => {
+    setSelectedPersonas((prev) =>
+      prev.includes(personaId)
+        ? prev.filter((p) => p !== personaId)
+        : [...prev, personaId],
+    );
+  };
+
   const handleStartAgent = () => {
     console.log('[QAPanel] handleStartAgent called', { agentTask, parentSessionId, parentSessionType, sessionCtx });
-    if (!agentTask.trim() || !parentSessionId) {
+    if ((!agentTask.trim() && !selectedFlowId) || !parentSessionId) {
       console.warn('[QAPanel] Blocked: agentTask empty or no parentSessionId', { agentTask: agentTask.trim(), parentSessionId });
       return;
     }
-    startQAAgent(agentTask.trim(), sessionCtx?.workingDir || '/', parentSessionId, parentSessionType, agentTargetUrl, agentName.trim() || undefined);
+    startQAAgent(
+      agentTask.trim(),
+      sessionCtx?.workingDir || '/',
+      parentSessionId,
+      parentSessionType,
+      agentTargetUrl,
+      agentName.trim() || undefined,
+      selectedFlowId ?? undefined,
+      selectedPersonas.length > 0 ? selectedPersonas : undefined,
+    );
     setAgentTask('');
     setAgentName('');
+    setSelectedFlowId(null);
+    setSelectedPersonas([]);
     setShowNewAgentForm(false);
   };
 
@@ -936,22 +983,62 @@ function QAPanel() {
                     className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
                     placeholder="Target URL"
                   />
+                  {/* Flow picker */}
+                  {qaFlows.length > 0 && (
+                    <div className="w-full space-y-1.5">
+                      <label className="text-muted-foreground text-[9px] uppercase tracking-wider">
+                        Test Flow (optional)
+                      </label>
+                      <select
+                        value={selectedFlowId ?? ''}
+                        onChange={(e) => handleFlowSelect(e.target.value || null)}
+                        className="bg-secondary text-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
+                      >
+                        <option value="">None — free-form task</option>
+                        {qaFlows.map((flow) => (
+                          <option key={flow.id} value={flow.id}>
+                            {flow.name} [{flow.tags.join(', ')}] · {flow.stepCount} steps · {flow.personaIds.length} persona{flow.personaIds.length !== 1 ? 's' : ''}
+                          </option>
+                        ))}
+                      </select>
+
+                      {/* Persona checkboxes — shown when a flow is selected */}
+                      {selectedFlow && selectedFlow.personaIds.length > 1 && (
+                        <div className="space-y-1 pt-1">
+                          <label className="text-muted-foreground text-[9px] uppercase tracking-wider">
+                            Personas
+                          </label>
+                          {selectedFlow.personaIds.map((pid) => (
+                            <label key={pid} className="text-foreground flex items-center gap-1.5 text-[10px]">
+                              <input
+                                type="checkbox"
+                                checked={selectedPersonas.includes(pid)}
+                                onChange={() => handlePersonaToggle(pid)}
+                                className="accent-primary size-3"
+                              />
+                              {pid}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <textarea
                     value={agentTask}
                     onChange={(e) => setAgentTask(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && agentTask.trim()) {
+                      if (e.key === 'Enter' && !e.shiftKey && (agentTask.trim() || selectedFlowId)) {
                         e.preventDefault();
                         handleStartAgent();
                       }
                     }}
                     className="bg-secondary text-foreground placeholder:text-muted-foreground h-20 w-full resize-none rounded px-2 py-1.5 text-[10px] outline-none"
-                    placeholder="e.g. Test the login flow with valid and invalid credentials..."
+                    placeholder={selectedFlowId ? "Additional instructions (optional)..." : "e.g. Test the login flow with valid and invalid credentials..."}
                   />
                   <Button
                     size="sm"
                     onClick={handleStartAgent}
-                    disabled={!agentTask.trim()}
+                    disabled={!agentTask.trim() && !selectedFlowId}
                     className="gap-1.5"
                   >
                     <Play className="size-3" />
