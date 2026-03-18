@@ -15,7 +15,7 @@
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
-    "postinstall": "electron-rebuild",
+    "postinstall": "electron-rebuild && bash scripts/patch-electron.sh",
     "dist": "electron-vite build && electron-builder --config electron-builder.yml"
   },
   "keywords": [],
