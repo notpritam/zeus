@@ -424,7 +424,7 @@ function SessionSettingsPanel() {
           <DialogHeader>
             <DialogTitle className="text-sm">Delete Session</DialogTitle>
             <DialogDescription className="text-xs">
-              Are you sure you want to delete &quot;{session.name || session.id.slice(0, 12)}&quot;? This cannot be undone.
+              &quot;{session.name || session.id.slice(0, 12)}&quot; will be moved to trash. You can recover it within 30 days.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -361,7 +361,7 @@ export type ClaudePayload =
 
 // ─── Claude UI Types (renderer-side) ───
 
-export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived';
+export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived' | 'deleted';
 
 // Fine-grained activity state for a running session
 export type SessionActivity =
@@ -406,6 +406,7 @@ export interface ClaudeSessionInfo {
   qaAgentCount?: number;
   permissionMode?: PermissionMode;
   model?: string;
+  deletedAt?: number; // timestamp when soft-deleted (null if active)
 }
 
 export interface ClaudeApprovalInfo {

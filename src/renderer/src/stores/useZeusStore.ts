@@ -170,9 +170,13 @@ interface ZeusState {
   updateQaTargetUrl: (sessionId: string, qaTargetUrl: string) => void;
   detectQaTargetUrl: (sessionId: string) => void;
   deleteClaudeSession: (id: string) => void;
+  restoreClaudeSession: (id: string) => void;
   archiveClaudeSession: (id: string) => void;
   deleteTerminalSession: (id: string) => void;
+  restoreTerminalSession: (id: string) => void;
   archiveTerminalSession: (id: string) => void;
+  fetchDeletedSessions: () => void;
+  deletedClaudeSessions: ClaudeSessionInfo[];
   setViewMode: (mode: ViewMode) => void;
 
   // Modal actions
@@ -367,6 +371,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   activeSessionId: null,
 
   claudeSessions: [],
+  deletedClaudeSessions: [],
   activeClaudeId: null,
   claudeEntries: {},
   claudeEntriesMeta: {},
@@ -536,6 +541,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           sessions: state.sessions.filter((s) => s.id !== archivedId),
           activeSessionId: state.activeSessionId === archivedId ? null : state.activeSessionId,
         }));
+      }
+
+      if (payload.type === 'terminal_session_restored') {
+        // Re-fetch sessions to get the restored one
+        zeusWs.send({
+          channel: 'control',
+          sessionId: '',
+          payload: { type: 'list_sessions' },
+          auth: '',
+        });
       }
     });
 
@@ -772,6 +787,24 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           pendingApprovals: state.pendingApprovals.filter((a) => a.sessionId !== archivedId),
           activeClaudeId: state.activeClaudeId === archivedId ? null : state.activeClaudeId,
         }));
+      }
+
+      if (payload.type === 'claude_session_restored') {
+        const { sessionId: restoredId } = envelope.payload as { sessionId: string };
+        set((state) => {
+          const restored = state.deletedClaudeSessions.find((s) => s.id === restoredId);
+          return {
+            deletedClaudeSessions: state.deletedClaudeSessions.filter((s) => s.id !== restoredId),
+            claudeSessions: restored
+              ? [...state.claudeSessions, { ...restored, status: 'completed' as const }]
+              : state.claudeSessions,
+          };
+        });
+      }
+
+      if (payload.type === 'deleted_sessions_list') {
+        const { sessions } = envelope.payload as { sessions: ClaudeSessionInfo[] };
+        set({ deletedClaudeSessions: sessions });
       }
 
       if (payload.type === 'claude_session_updated') {
@@ -1790,6 +1823,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  restoreClaudeSession: (id: string) => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: id,
+      payload: { type: 'restore_claude_session' },
+      auth: '',
+    });
+  },
+
   archiveClaudeSession: (id: string) => {
     zeusWs.send({
       channel: 'claude',
@@ -1808,11 +1850,29 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     });
   },
 
+  restoreTerminalSession: (id: string) => {
+    zeusWs.send({
+      channel: 'control',
+      sessionId: id,
+      payload: { type: 'restore_terminal_session' },
+      auth: '',
+    });
+  },
+
   archiveTerminalSession: (id: string) => {
     zeusWs.send({
       channel: 'control',
       sessionId: id,
       payload: { type: 'archive_terminal_session' },
+      auth: '',
+    });
+  },
+
+  fetchDeletedSessions: () => {
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: '',
+      payload: { type: 'list_deleted_sessions' },
       auth: '',
     });
   },

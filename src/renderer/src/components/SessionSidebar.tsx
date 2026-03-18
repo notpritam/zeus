@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Settings, Trash2, Eye, Pencil, Check, X,
-  PanelLeftClose, PanelLeftOpen, Zap,
+  PanelLeftClose, PanelLeftOpen, Zap, Undo2, ChevronDown, ChevronRight,
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
   Crown, Diamond, Target, Compass, Anchor, Feather, Ghost,
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName } from '../../../shared/types';
 import { SESSION_ICON_COLORS } from '../../../shared/types';
+import { useZeusStore } from '@/stores/useZeusStore';
 
 // ─── Long press hook ───
 
@@ -483,6 +484,75 @@ function CollapsedSidebar({
 
 // ─── Sidebar ───
 
+// ─── Recently Deleted Section ───
+
+function RecentlyDeletedSection() {
+  const [expanded, setExpanded] = useState(false);
+  const deletedSessions = useZeusStore((s) => s.deletedClaudeSessions);
+  const restoreClaudeSession = useZeusStore((s) => s.restoreClaudeSession);
+  const fetchDeletedSessions = useZeusStore((s) => s.fetchDeletedSessions);
+
+  useEffect(() => {
+    if (expanded) fetchDeletedSessions();
+  }, [expanded, fetchDeletedSessions]);
+
+  return (
+    <div className="mt-1">
+      <button
+        className="flex w-full items-center gap-1.5 px-2 pt-3 pb-1.5 [-webkit-app-region:no-drag]"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? <ChevronDown className="text-muted-foreground size-3" /> : <ChevronRight className="text-muted-foreground size-3" />}
+        <Trash2 className="text-muted-foreground size-3" />
+        <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
+          Recently Deleted
+        </span>
+        {deletedSessions.length > 0 && !expanded && (
+          <span className="text-muted-foreground/60 ml-auto text-[10px]">{deletedSessions.length}</span>
+        )}
+      </button>
+      {expanded && (
+        deletedSessions.length > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            {deletedSessions.map((s) => {
+              const displayName = s.name || (s.prompt ? s.prompt.slice(0, 40) : 'Untitled');
+              const deletedAt = (s as { deletedAt?: number }).deletedAt;
+              const daysAgo = deletedAt ? Math.floor((Date.now() - deletedAt) / (1000 * 60 * 60 * 24)) : null;
+              const timeLabel = daysAgo === 0 ? 'Today' : daysAgo === 1 ? '1 day ago' : daysAgo != null ? `${daysAgo}d ago` : '';
+              return (
+                <div
+                  key={s.id}
+                  className="group mx-1 flex items-center gap-2 rounded-md px-2 py-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                >
+                  <SessionIcon iconName={s.icon} id={s.id} size="size-3.5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-muted-foreground truncate text-[11px]">{displayName}</div>
+                    {timeLabel && <div className="text-muted-foreground/50 text-[9px]">{timeLabel}</div>}
+                  </div>
+                  <button
+                    className="text-muted-foreground hover:text-foreground shrink-0 rounded p-1 opacity-0 transition-all group-hover:opacity-100"
+                    onClick={() => restoreClaudeSession(s.id)}
+                    title="Restore session"
+                  >
+                    <Undo2 className="size-3" />
+                  </button>
+                </div>
+              );
+            })}
+            <p className="text-muted-foreground/40 px-2 py-1 text-center text-[9px]">
+              Auto-deleted after 30 days
+            </p>
+          </div>
+        ) : (
+          <p className="text-muted-foreground/40 px-2 py-2 text-center text-[10px]">
+            No deleted sessions
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
 function SessionSidebar({
   collapsed,
   sessions,
@@ -632,6 +702,9 @@ function SessionSidebar({
               No terminal sessions
             </p>
           )}
+
+          {/* Recently Deleted Section */}
+          <RecentlyDeletedSection />
         </div>
       </ScrollArea>
 
@@ -741,7 +814,7 @@ function SessionSidebar({
           <DialogHeader>
             <DialogTitle className="text-base">Delete Session?</DialogTitle>
           </DialogHeader>
-          <p className="text-muted-foreground text-sm">This action cannot be undone.</p>
+          <p className="text-muted-foreground text-sm">Session will be moved to trash. You can recover it within 30 days.</p>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
             <Button

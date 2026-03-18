@@ -159,6 +159,16 @@ export function pruneOldSessions(maxAgeDays = 30): void {
   if (!db) return;
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
 
+  // Permanently purge soft-deleted sessions older than 30 days
+  db.prepare(
+    `DELETE FROM claude_entries WHERE session_id IN (SELECT id FROM claude_sessions WHERE status = 'deleted' AND deleted_at < ?)`,
+  ).run(cutoff);
+  db.prepare(`DELETE FROM claude_sessions WHERE status = 'deleted' AND deleted_at < ?`).run(cutoff);
+  db.prepare(`DELETE FROM terminal_sessions WHERE status = 'deleted' AND deleted_at < ?`).run(
+    cutoff,
+  );
+
+  // Also prune very old non-deleted sessions
   db.prepare(
     `DELETE FROM claude_entries WHERE session_id IN (SELECT id FROM claude_sessions WHERE started_at < ?)`,
   ).run(cutoff);
@@ -638,6 +648,7 @@ interface TerminalSessionDbRow {
   started_at: number;
   ended_at: number | null;
   exit_code: number | null;
+  deleted_at: number | null;
 }
 
 export function getAllTerminalSessions(): SessionRecord[] {

@@ -48,11 +48,14 @@ import {
   getClaudeEntries,
   getClaudeEntriesPaginated,
   deleteClaudeSession,
+  restoreClaudeSession,
+  getDeletedClaudeSessions,
   archiveClaudeSession,
   insertTerminalSession,
   updateTerminalSession,
   getAllTerminalSessions,
   deleteTerminalSession,
+  restoreTerminalSession,
   archiveTerminalSession,
   insertQaAgentSession,
   updateQaAgentSessionStatus,
@@ -331,7 +334,6 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     destroySession(sid);
     markKilled(sid);
     stopQaAgentsByParent(sid);
-    deleteQaAgentsByParent(sid);
     deleteTerminalSession(sid);
     const owned = clientSessions.get(ws);
     if (owned) owned.delete(sid);
@@ -339,6 +341,15 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
       channel: 'control',
       sessionId: sid,
       payload: { type: 'terminal_session_deleted', deletedId: sid },
+      auth: '',
+    });
+  } else if (payload.type === 'restore_terminal_session') {
+    const sid = envelope.sessionId;
+    restoreTerminalSession(sid);
+    broadcastEnvelope({
+      channel: 'control',
+      sessionId: sid,
+      payload: { type: 'terminal_session_restored', sessionId: sid },
       auth: '',
     });
   } else if (payload.type === 'archive_terminal_session') {
@@ -1412,11 +1423,10 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       });
     });
   } else if (payload.type === 'delete_claude_session') {
-    // Kill if still running, stop git watcher, clean up QA agents, then delete from DB
+    // Kill if still running, stop git watcher, stop QA agents, then soft-delete (recoverable for 30 days)
     claudeManager.killSession(envelope.sessionId);
     gitManager.stopWatching(envelope.sessionId);
     stopQaAgentsByParent(envelope.sessionId);
-    deleteQaAgentsByParent(envelope.sessionId);
     deleteClaudeSession(envelope.sessionId);
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
@@ -1424,6 +1434,36 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       channel: 'claude',
       sessionId: envelope.sessionId,
       payload: { type: 'claude_session_deleted', deletedId: envelope.sessionId },
+      auth: '',
+    });
+  } else if (payload.type === 'restore_claude_session') {
+    restoreClaudeSession(envelope.sessionId);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_session_restored', sessionId: envelope.sessionId },
+      auth: '',
+    });
+  } else if (payload.type === 'list_deleted_sessions') {
+    const deletedRows = getDeletedClaudeSessions();
+    const sessions: ClaudeSessionInfo[] = deletedRows.map((s) => ({
+      id: s.id,
+      claudeSessionId: s.claudeSessionId,
+      status: s.status as ClaudeSessionInfo['status'],
+      prompt: s.prompt,
+      name: s.name ?? undefined,
+      icon: (s.icon as SessionIconName) ?? undefined,
+      color: s.color ?? undefined,
+      notificationSound: s.notificationSound,
+      workingDir: s.workingDir ?? undefined,
+      qaTargetUrl: s.qaTargetUrl ?? undefined,
+      startedAt: s.startedAt,
+      deletedAt: s.deletedAt ?? undefined,
+    }));
+    sendEnvelope(ws, {
+      channel: 'claude',
+      sessionId: '',
+      payload: { type: 'deleted_sessions_list', sessions },
       auth: '',
     });
   } else if (payload.type === 'archive_claude_session') {
