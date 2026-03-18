@@ -4,7 +4,7 @@ import { promisify } from 'util';
 import chokidar from 'chokidar';
 import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import type { GitStatusData, GitFileChange, GitFileStatus } from '../../shared/types';
+import type { GitStatusData, GitFileChange, GitFileStatus, GitBranchInfo } from '../../shared/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -206,6 +206,144 @@ export class GitWatcher extends EventEmitter {
 
     try {
       await writeFile(resolved, content, 'utf-8');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  // ─── Branches ───
+
+  async listBranches(): Promise<GitBranchInfo[]> {
+    const branches: GitBranchInfo[] = [];
+
+    // Local branches
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['branch', '--format=%(HEAD) %(refname:short) %(upstream:short)'],
+        { cwd: this.workingDir },
+      );
+      for (const line of stdout.split('\n').filter(Boolean)) {
+        const current = line[0] === '*';
+        const parts = line.slice(2).trim().split(/\s+/);
+        const name = parts[0];
+        const remote = parts[1] || undefined;
+        branches.push({ name, current, remote });
+      }
+    } catch {
+      // No branches yet (empty repo)
+    }
+
+    // Remote-only branches (not already tracked locally)
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['branch', '-r', '--format=%(refname:short)'],
+        { cwd: this.workingDir },
+      );
+      const localNames = new Set(branches.map((b) => b.name));
+      for (const line of stdout.split('\n').filter(Boolean)) {
+        const remote = line.trim();
+        if (remote.includes('HEAD')) continue;
+        // "origin/feature" → "feature"
+        const shortName = remote.replace(/^[^/]+\//, '');
+        if (!localNames.has(shortName)) {
+          branches.push({ name: shortName, current: false, remote, isRemoteOnly: true });
+        }
+      }
+    } catch {
+      // No remotes
+    }
+
+    return branches;
+  }
+
+  async checkoutBranch(branch: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execFileAsync('git', ['checkout', branch], { cwd: this.workingDir });
+      await this.refresh();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  async createBranch(
+    branch: string,
+    checkout = true,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (checkout) {
+        await execFileAsync('git', ['checkout', '-b', branch], { cwd: this.workingDir });
+      } else {
+        await execFileAsync('git', ['branch', branch], { cwd: this.workingDir });
+      }
+      await this.refresh();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  async deleteBranch(
+    branch: string,
+    force = false,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execFileAsync('git', ['branch', force ? '-D' : '-d', branch], {
+        cwd: this.workingDir,
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  // ─── Remote operations ───
+
+  async push(force = false): Promise<{ success: boolean; error?: string }> {
+    try {
+      const args = ['push'];
+      if (force) args.push('--force-with-lease');
+      // Set upstream if first push
+      try {
+        await execFileAsync('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
+          cwd: this.workingDir,
+        });
+      } catch {
+        // No upstream — set it
+        const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+          cwd: this.workingDir,
+        });
+        const currentBranch = stdout.trim();
+        args.push('-u', 'origin', currentBranch);
+      }
+      await execFileAsync('git', args, { cwd: this.workingDir, timeout: 30_000 });
+      await this.refresh();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  async pull(): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execFileAsync('git', ['pull'], { cwd: this.workingDir, timeout: 30_000 });
+      await this.refresh();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  async fetch(): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execFileAsync('git', ['fetch', '--all', '--prune'], {
+        cwd: this.workingDir,
+        timeout: 30_000,
+      });
+      await this.refresh();
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };

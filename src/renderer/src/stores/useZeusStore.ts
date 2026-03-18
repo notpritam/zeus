@@ -17,6 +17,7 @@ import type {
   ZeusSettings,
   GitStatusData,
   GitPayload,
+  GitBranchInfo,
   FilesPayload,
   FileTreeEntry,
   SessionActivity,
@@ -78,6 +79,9 @@ interface ZeusState {
   gitErrors: Record<string, string>;
   gitWatcherConnected: Record<string, boolean>;
   gitNotARepo: Record<string, boolean>;
+  gitBranches: Record<string, GitBranchInfo[]>;
+  gitPushing: Record<string, boolean>;
+  gitPulling: Record<string, boolean>;
 
   // File tree
   fileTree: Record<string, Record<string, FileTreeEntry[]>>;  // sessionId → dirPath → entries
@@ -181,6 +185,13 @@ interface ZeusState {
   discardFiles: (sessionId: string, files: string[]) => void;
   commitChanges: (sessionId: string, message: string) => void;
   initGitRepo: (sessionId: string, workingDir: string) => void;
+  listBranches: (sessionId: string) => void;
+  checkoutBranch: (sessionId: string, branch: string) => void;
+  createBranch: (sessionId: string, branch: string, checkout?: boolean) => void;
+  deleteBranch: (sessionId: string, branch: string, force?: boolean) => void;
+  gitPush: (sessionId: string, force?: boolean) => void;
+  gitPull: (sessionId: string) => void;
+  gitFetch: (sessionId: string) => void;
 
   // Diff tab state
   openDiffTabs: DiffTab[];
@@ -363,6 +374,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   gitErrors: {},
   gitWatcherConnected: {},
   gitNotARepo: {},
+  gitBranches: {},
+  gitPushing: {},
+  gitPulling: {},
   openDiffTabs: [],
   activeDiffTabId: null,
   previousViewMode: 'terminal' as const,
@@ -932,6 +946,62 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         set((state) => ({
           gitErrors: { ...state.gitErrors, [sid]: payload.message },
         }));
+      }
+
+      if (payload.type === 'git_branches_result') {
+        set((state) => ({
+          gitBranches: { ...state.gitBranches, [sid]: payload.branches },
+        }));
+      }
+
+      if (payload.type === 'git_checkout_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_create_branch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_delete_branch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
+      }
+
+      if (payload.type === 'git_push_result') {
+        set((state) => ({
+          gitPushing: { ...state.gitPushing, [sid]: false },
+          ...(!payload.success && payload.error
+            ? { gitErrors: { ...state.gitErrors, [sid]: payload.error } }
+            : {}),
+        }));
+      }
+
+      if (payload.type === 'git_pull_result') {
+        set((state) => ({
+          gitPulling: { ...state.gitPulling, [sid]: false },
+          ...(!payload.success && payload.error
+            ? { gitErrors: { ...state.gitErrors, [sid]: payload.error } }
+            : {}),
+        }));
+      }
+
+      if (payload.type === 'git_fetch_result') {
+        if (!payload.success && payload.error) {
+          set((state) => ({
+            gitErrors: { ...state.gitErrors, [sid]: payload.error! },
+          }));
+        }
       }
     });
 
@@ -1952,6 +2022,71 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'git',
       sessionId,
       payload: { type: 'git_init', workingDir },
+      auth: '',
+    });
+  },
+
+  listBranches: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_list_branches' },
+      auth: '',
+    });
+  },
+
+  checkoutBranch: (sessionId: string, branch: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_checkout', branch },
+      auth: '',
+    });
+  },
+
+  createBranch: (sessionId: string, branch: string, checkout = true) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_create_branch', branch, checkout },
+      auth: '',
+    });
+  },
+
+  deleteBranch: (sessionId: string, branch: string, force = false) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_delete_branch', branch, force },
+      auth: '',
+    });
+  },
+
+  gitPush: (sessionId: string, force = false) => {
+    set((state) => ({ gitPushing: { ...state.gitPushing, [sessionId]: true } }));
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_push', force },
+      auth: '',
+    });
+  },
+
+  gitPull: (sessionId: string) => {
+    set((state) => ({ gitPulling: { ...state.gitPulling, [sessionId]: true } }));
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_pull' },
+      auth: '',
+    });
+  },
+
+  gitFetch: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'git',
+      sessionId,
+      payload: { type: 'git_fetch' },
       auth: '',
     });
   },

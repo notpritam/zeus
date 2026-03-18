@@ -1565,6 +1565,92 @@ async function handleGit(_ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         auth: '',
       });
     }
+  } else if (payload.type === 'git_list_branches') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      try {
+        const branches = await watcher.listBranches();
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_branches_result', branches },
+          auth: '',
+        });
+      } catch (err) {
+        broadcastEnvelope({
+          channel: 'git',
+          sessionId,
+          payload: { type: 'git_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
+  } else if (payload.type === 'git_checkout') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.checkoutBranch(payload.branch);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_checkout_result', ...result, branch: result.success ? payload.branch : undefined },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_create_branch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.createBranch(payload.branch, payload.checkout ?? true);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_create_branch_result', ...result, branch: result.success ? payload.branch : undefined },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_delete_branch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.deleteBranch(payload.branch, payload.force ?? false);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_delete_branch_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_push') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.push(payload.force ?? false);
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_push_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_pull') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.pull();
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_pull_result', ...result },
+        auth: '',
+      });
+    }
+  } else if (payload.type === 'git_fetch') {
+    const watcher = gitManager.getWatcher(sessionId);
+    if (watcher) {
+      const result = await watcher.fetch();
+      broadcastEnvelope({
+        channel: 'git',
+        sessionId,
+        payload: { type: 'git_fetch_result', ...result },
+        auth: '',
+      });
+    }
   } else if (payload.type === 'git_init') {
     const result = await initGitRepo(payload.workingDir);
     broadcastEnvelope({

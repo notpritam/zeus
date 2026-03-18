@@ -90,6 +90,13 @@ export interface GitFileChange {
   oldFile?: string;
 }
 
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  remote?: string;          // e.g. "origin/main"
+  isRemoteOnly?: boolean;   // true if only exists on remote
+}
+
 export interface GitStatusData {
   branch: string;
   staged: GitFileChange[];
@@ -121,7 +128,23 @@ export type GitPayload =
   | { type: 'git_error'; message: string }
   | { type: 'not_a_repo' }
   | { type: 'git_init'; workingDir: string }
-  | { type: 'git_init_result'; success: boolean; error?: string };
+  | { type: 'git_init_result'; success: boolean; error?: string }
+  // Branch operations
+  | { type: 'git_list_branches' }
+  | { type: 'git_branches_result'; branches: GitBranchInfo[] }
+  | { type: 'git_checkout'; branch: string }
+  | { type: 'git_checkout_result'; success: boolean; branch?: string; error?: string }
+  | { type: 'git_create_branch'; branch: string; checkout?: boolean }
+  | { type: 'git_create_branch_result'; success: boolean; branch?: string; error?: string }
+  | { type: 'git_delete_branch'; branch: string; force?: boolean }
+  | { type: 'git_delete_branch_result'; success: boolean; error?: string }
+  // Remote operations
+  | { type: 'git_push'; force?: boolean }
+  | { type: 'git_push_result'; success: boolean; error?: string }
+  | { type: 'git_pull' }
+  | { type: 'git_pull_result'; success: boolean; error?: string }
+  | { type: 'git_fetch' }
+  | { type: 'git_fetch_result'; success: boolean; error?: string };
 
 // ─── Session ───
 
