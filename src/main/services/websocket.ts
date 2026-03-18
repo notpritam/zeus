@@ -267,9 +267,10 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     const opts = envelope.payload as StartSessionPayload;
     const cols = opts.cols ?? 80;
     const rows = opts.rows ?? 24;
+    const cwd = opts.cwd || process.env.HOME || '/';
 
     const { sessionId, shell } = createSession(
-      { cols, rows },
+      { cols, rows, cwd },
       (sid, data) => {
         // Broadcast terminal output to ALL clients (not just owner)
         broadcastEnvelope({
@@ -295,7 +296,6 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     );
 
     // Register in session registry
-    const cwd = process.env.HOME ?? '/';
     const record = registerSession(sessionId, shell, cols, rows, cwd);
 
     // Persist to DB
@@ -305,11 +305,16 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     if (!clientSessions.has(ws)) clientSessions.set(ws, new Set());
     clientSessions.get(ws)!.add(sessionId);
 
-    // Broadcast session_started to all clients
+    // Broadcast session_started with correlationId echoed back
     broadcastEnvelope({
       channel: 'control',
       sessionId,
-      payload: { type: 'session_started', sessionId, shell },
+      payload: {
+        type: 'session_started',
+        sessionId,
+        shell,
+        correlationId: opts.correlationId,
+      },
       auth: '',
     });
 
