@@ -107,7 +107,7 @@ interface SessionSidebarProps {
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onNewSession: () => void;
@@ -339,7 +339,7 @@ function CollapsedSidebar({
   claudeSessions: ClaudeSessionInfo[];
   activeSessionId: string | null;
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onExpandSidebar?: () => void;

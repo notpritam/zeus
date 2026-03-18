@@ -9,7 +9,7 @@ import DiffTabBar from '@/components/DiffTabBar';
 import DiffView from '@/components/DiffView';
 import NewClaudeSessionModal from '@/components/NewClaudeSessionModal';
 import CommandPalette, { buildCommands } from '@/components/CommandPalette';
-import SettingsModal from '@/components/SettingsModal';
+import SettingsView from '@/components/SettingsView';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -117,13 +117,15 @@ function App() {
     addProject,
     removeProject,
     settingsError,
+    setViewMode,
   } = useZeusStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
+
+  const openSettings = useCallback(() => setViewMode('settings'), [setViewMode]);
 
   useEffect(() => {
     const cleanup = connect();
@@ -154,9 +156,9 @@ function App() {
         startSession,
         openNewClaudeModal,
         toggleRightPanel,
-        openSettings: () => setShowSettings(true),
+        openSettings,
       }),
-    [powerBlock, tunnel, togglePower, startSession, openNewClaudeModal, toggleRightPanel],
+    [powerBlock, tunnel, togglePower, startSession, openNewClaudeModal, toggleRightPanel, openSettings],
   );
 
   // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)
@@ -167,7 +169,12 @@ function App() {
 
       if (e.key === ',') {
         e.preventDefault();
-        setShowSettings((v) => !v);
+        // Toggle settings view — if already on settings, go back to terminal
+        if (viewMode === 'settings') {
+          setViewMode('terminal');
+        } else {
+          setViewMode('settings');
+        }
       } else if (e.key === 't') {
         e.preventDefault();
         startSession();
@@ -179,7 +186,7 @@ function App() {
         toggleRightPanel();
       }
     },
-    [startSession, openNewClaudeModal, toggleRightPanel],
+    [startSession, openNewClaudeModal, toggleRightPanel, viewMode, setViewMode],
   );
 
   useEffect(() => {
@@ -200,7 +207,7 @@ function App() {
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           onToggleRightPanel={toggleRightPanel}
           rightPanelOpen={activeRightTab !== null}
-          onOpenSettings={() => setShowSettings(true)}
+          onOpenSettings={openSettings}
           onOpenCommandPalette={() => setShowCommandPalette(true)}
         />
       </div>
@@ -244,7 +251,7 @@ function App() {
             onArchiveClaudeSession={archiveClaudeSession}
             onDeleteTerminalSession={deleteTerminalSession}
             onArchiveTerminalSession={archiveTerminalSession}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={openSettings}
             onCloseSidebar={() => setSidebarOpen(false)}
           />
         </div>
@@ -257,9 +264,17 @@ function App() {
           />
         )}
 
-        {/* Main Content — Terminal or Claude */}
+        {/* Main Content — Terminal, Claude, or Settings */}
         <div data-testid="main-area" className="min-w-0 flex-1">
-          {viewMode === 'claude' ? (
+          {viewMode === 'settings' ? (
+            <SettingsView
+              powerBlock={powerBlock}
+              websocket={websocket}
+              tunnel={tunnel}
+              onTogglePower={togglePower}
+              onToggleTunnel={toggleTunnel}
+            />
+          ) : viewMode === 'claude' ? (
             <ClaudeView
               session={activeClaudeSession}
               entries={activeEntries}
@@ -275,11 +290,10 @@ function App() {
               onEditQueued={editQueuedMessage}
               onRemoveQueued={removeQueuedMessage}
               onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-              onOpenSettings={() => setShowSettings(true)}
+              onOpenSettings={openSettings}
               onOpenCommandPalette={() => setShowCommandPalette(true)}
               onToggleRightPanel={() => {
                 if (!activeRightTab) {
-                  // Auto-select first tab when opening with no tab active
                   useZeusStore.getState().setActiveRightTab('info');
                 }
                 setMobileRightPanelOpen(true);
@@ -344,7 +358,7 @@ function App() {
                 onArchiveClaudeSession={archiveClaudeSession}
                 onDeleteTerminalSession={deleteTerminalSession}
                 onArchiveTerminalSession={archiveTerminalSession}
-                onOpenSettings={() => setShowSettings(true)}
+                onOpenSettings={openSettings}
                 onCloseSidebar={() => setSidebarCollapsed(true)}
                 onExpandSidebar={() => setSidebarCollapsed(false)}
               />
@@ -370,7 +384,7 @@ function App() {
                   onArchiveClaudeSession={archiveClaudeSession}
                   onDeleteTerminalSession={deleteTerminalSession}
                   onArchiveTerminalSession={archiveTerminalSession}
-                  onOpenSettings={() => setShowSettings(true)}
+                  onOpenSettings={openSettings}
                   onCloseSidebar={() => setSidebarCollapsed(true)}
                 />
               </ResizablePanel>
@@ -387,7 +401,15 @@ function App() {
               {sessionDiffTabs.length > 0 && <DiffTabBar />}
 
               <div className="min-h-0 flex-1">
-                {viewMode === 'diff' ? (
+                {viewMode === 'settings' ? (
+                  <SettingsView
+                    powerBlock={powerBlock}
+                    websocket={websocket}
+                    tunnel={tunnel}
+                    onTogglePower={togglePower}
+                    onToggleTunnel={toggleTunnel}
+                  />
+                ) : viewMode === 'diff' ? (
                   <PanelErrorBoundary name="Diff Viewer" onReset={() => useZeusStore.getState().returnToHome()}>
                     <DiffView />
                   </PanelErrorBoundary>
@@ -436,17 +458,6 @@ function App() {
         open={showCommandPalette}
         onOpenChange={setShowCommandPalette}
         commands={commands}
-      />
-
-      {/* Settings Modal (shadcn Dialog) */}
-      <SettingsModal
-        open={showSettings}
-        onOpenChange={setShowSettings}
-        powerBlock={powerBlock}
-        websocket={websocket}
-        tunnel={tunnel}
-        onTogglePower={togglePower}
-        onToggleTunnel={toggleTunnel}
       />
 
       {/* New Claude Session Modal */}

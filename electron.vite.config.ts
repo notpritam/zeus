@@ -29,6 +29,9 @@ export default defineConfig({
     server: {
       port: 5199,
     },
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     build: {
       modulePreload: { polyfill: false },
     },

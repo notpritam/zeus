@@ -33,7 +33,7 @@ import type {
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings';
 
 interface QaAgentClient {
   info: QaAgentSessionInfo;
