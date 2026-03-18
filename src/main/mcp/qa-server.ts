@@ -8,12 +8,9 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import WebSocket from 'ws';
-
 const PINCHTAB_PORT = parseInt(process.env.ZEUS_PINCHTAB_PORT ?? '9867', 10);
 const PINCHTAB_BASE = `http://127.0.0.1:${PINCHTAB_PORT}`;
 const CDP_STATE_FILE = path.join(os.tmpdir(), 'zeus-qa-cdp-state.json');
-const ZEUS_WS_URL = process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888';
 const QA_AGENT_ID = process.env.ZEUS_QA_AGENT_ID ?? '';
 
 // Track read pointers for since_last_call
@@ -912,52 +909,15 @@ server.tool(
 );
 
 // ═══════════════════════════════════════════
-// ─── QA Finish Tool (sends results to Zeus) ───
+// ─── QA Finish Tool (file-based IPC to Zeus host) ───
 // ═══════════════════════════════════════════
 
-function sendFinishToZeus(summary: string, status: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!QA_AGENT_ID) {
-      console.error('[zeus-qa] No ZEUS_QA_AGENT_ID — cannot send finish signal');
-      resolve(); // Don't block the agent
-      return;
-    }
-
-    const finishWs = new WebSocket(ZEUS_WS_URL);
-    const timer = setTimeout(() => {
-      try { finishWs.close(); } catch { /* ignore */ }
-      console.error('[zeus-qa] Timeout connecting to Zeus for qa_finish');
-      resolve(); // Don't block the agent
-    }, 5000);
-
-    finishWs.on('open', () => {
-      clearTimeout(timer);
-      const envelope = {
-        channel: 'qa',
-        sessionId: '',
-        auth: '',
-        payload: {
-          type: 'qa_agent_finish',
-          qaAgentId: QA_AGENT_ID,
-          summary,
-          status,
-        },
-      };
-      finishWs.send(JSON.stringify(envelope), () => {
-        // Give Zeus a moment to process before closing
-        setTimeout(() => {
-          try { finishWs.close(); } catch { /* ignore */ }
-          resolve();
-        }, 200);
-      });
-    });
-
-    finishWs.on('error', (err) => {
-      clearTimeout(timer);
-      console.error('[zeus-qa] WebSocket error sending finish:', err.message);
-      resolve(); // Don't block the agent
-    });
-  });
+function getFinishFilePath(): string {
+  if (QA_AGENT_ID) {
+    return path.join(os.tmpdir(), `zeus-qa-finish-${QA_AGENT_ID}.json`);
+  }
+  // Fallback: use parent PID (Claude CLI's PID) as identifier
+  return path.join(os.tmpdir(), `zeus-qa-finish-ppid-${process.ppid}.json`);
 }
 
 server.tool(
@@ -969,13 +929,17 @@ server.tool(
   },
   async ({ summary, status }) => {
     try {
-      await sendFinishToZeus(summary, status);
+      const finishFile = getFinishFilePath();
+      const data = JSON.stringify({ summary, status, timestamp: Date.now() });
+      fs.writeFileSync(finishFile, data, 'utf-8');
+      console.error(`[zeus-qa] qa_finish: wrote findings to ${finishFile} (agent=${QA_AGENT_ID || 'ppid-' + process.ppid})`);
       return textResult({
         success: true,
-        message: 'Findings sent to parent agent. You can stop now.',
+        message: 'Findings recorded. The parent agent will receive them when your session ends.',
       });
     } catch (err) {
-      return errorResult(`Failed to send finish signal: ${(err as Error).message}`);
+      console.error(`[zeus-qa] qa_finish: failed to write findings: ${(err as Error).message}`);
+      return errorResult(`Failed to record findings: ${(err as Error).message}`);
     }
   },
 );

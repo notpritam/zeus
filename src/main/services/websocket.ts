@@ -2,6 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import { stat as fsStat } from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
 import { app, Notification as ElectronNotification, shell } from 'electron';
@@ -220,6 +221,8 @@ function requestAttention(title: string, body: string): void {
 function sendEnvelope(ws: WebSocket, envelope: WsEnvelope): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(envelope));
+  } else {
+    console.error(`[Zeus] sendEnvelope DROPPED: ws.readyState=${ws.readyState} (expected ${WebSocket.OPEN}), channel=${envelope.channel}, type=${(envelope.payload as Record<string, unknown>)?.type}`);
   }
 }
 
@@ -675,6 +678,30 @@ Be concise — the user sees a compact action log, not a full chat.
 Never use AskUserQuestion — make your best judgment and proceed.`;
 }
 
+/** Read the qa_finish file written by the QA agent's MCP server */
+function readQaFinishFile(qaAgentId: string, sessionPid?: number): { summary: string; status: string } | null {
+  // Try qaAgentId-based path first, then fallback to PID-based
+  const paths = [
+    path.join(os.tmpdir(), `zeus-qa-finish-${qaAgentId}.json`),
+    ...(sessionPid ? [path.join(os.tmpdir(), `zeus-qa-finish-ppid-${sessionPid}.json`)] : []),
+  ];
+  for (const filePath of paths) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        // Clean up the file
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+        console.log(`[QA Agent] Read finish file: ${filePath}`);
+        return { summary: data.summary ?? '', status: data.status ?? 'done' };
+      }
+    } catch {
+      // ignore read errors
+    }
+  }
+  return null;
+}
+
 function wireQAAgent(record: QaAgentRecord): void {
   const { qaAgentId, parentSessionId } = record;
   const session = record.session!; // guaranteed non-null when wiring
@@ -759,8 +786,9 @@ function wireQAAgent(record: QaAgentRecord): void {
     }
   });
 
-  // Turn ended (process still alive) — broadcast stopped so UI updates
+  // Turn ended (process still alive) — send deferred response and kill
   session.on('result', () => {
+    console.log(`[QA Agent] result event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'}, pid=${session.pid}, isRunning=${session.isRunning})`);
     flushPendingText();
     flushPendingThinking();
 
@@ -775,14 +803,27 @@ function wireQAAgent(record: QaAgentRecord): void {
       payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
     });
 
-    // Fallback: if qa_finish wasn't called but the turn ended, send deferred response
-    // and kill the process so zeus_qa_run doesn't timeout waiting forever
+    // Send deferred response to zeus_qa_run caller.
+    // Read the finish file (written by qa_finish tool) for structured findings.
+    // If no finish file, use collected text entries as fallback summary.
     if (record.pendingResponseId && record.pendingResponseWs) {
-      console.log(`[QA Agent] Fallback: result event sending deferred response for ${qaAgentId} (qa_finish was not called)`);
-      const lastEntries = record.collectedTextEntries;
-      const summary = lastEntries.length > 0
-        ? lastEntries[lastEntries.length - 1]
-        : 'QA agent completed without calling qa_finish.';
+      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      let summary: string;
+      let status: string;
+
+      if (finishData) {
+        summary = finishData.summary;
+        status = finishData.status;
+        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+      } else {
+        const lastEntries = record.collectedTextEntries;
+        summary = lastEntries.length > 0
+          ? lastEntries[lastEntries.length - 1]
+          : 'QA agent completed (no qa_finish called).';
+        status = 'done';
+        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text)`);
+      }
+
       try {
         sendEnvelope(record.pendingResponseWs, {
           channel: 'qa', sessionId: '', auth: '',
@@ -790,12 +831,13 @@ function wireQAAgent(record: QaAgentRecord): void {
             type: 'start_qa_agent_response',
             responseId: record.pendingResponseId,
             qaAgentId,
-            status: 'done',
+            status,
             summary,
           },
         });
-      } catch {
-        // WebSocket may have closed
+        console.log(`[QA Agent] result: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId}, wsState=${record.pendingResponseWs.readyState})`);
+      } catch (err) {
+        console.error(`[QA Agent] result: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
       }
       record.pendingResponseId = undefined;
       record.pendingResponseWs = undefined;
@@ -808,6 +850,7 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('done', () => {
+    console.log(`[QA Agent] done event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'})`);
     flushPendingText();
     flushPendingThinking();
     updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
@@ -820,10 +863,23 @@ function wireQAAgent(record: QaAgentRecord): void {
 
     // Send deferred response to zeus_qa_run caller with the final summary
     if (record.pendingResponseId && record.pendingResponseWs) {
-      const lastEntries = record.collectedTextEntries;
-      const summary = lastEntries.length > 0
-        ? lastEntries[lastEntries.length - 1]
-        : 'QA agent completed without a summary.';
+      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      let summary: string;
+      let status: string;
+
+      if (finishData) {
+        summary = finishData.summary;
+        status = finishData.status;
+        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+      } else {
+        const lastEntries = record.collectedTextEntries;
+        summary = lastEntries.length > 0
+          ? lastEntries[lastEntries.length - 1]
+          : 'QA agent completed without a summary.';
+        status = 'done';
+        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text, entries=${lastEntries.length})`);
+      }
+
       try {
         sendEnvelope(record.pendingResponseWs, {
           channel: 'qa', sessionId: '', auth: '',
@@ -831,13 +887,18 @@ function wireQAAgent(record: QaAgentRecord): void {
             type: 'start_qa_agent_response',
             responseId: record.pendingResponseId,
             qaAgentId,
-            status: 'done',
+            status,
             summary,
           },
         });
-      } catch {
-        // WebSocket may have closed — non-critical
+        console.log(`[QA Agent] done: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId})`);
+      } catch (err) {
+        console.error(`[QA Agent] done: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
       }
+      record.pendingResponseId = undefined;
+      record.pendingResponseWs = undefined;
+    } else {
+      console.log(`[QA Agent] done: no pending response for ${qaAgentId} (already sent or not a zeus_qa_run agent)`);
     }
 
     broadcastEnvelope({
@@ -848,6 +909,7 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('error', (err) => {
+    console.error(`[QA Agent] error event fired for ${qaAgentId}: ${err.message} (pendingResponseId=${record.pendingResponseId ?? 'NONE'})`);
     flushPendingText();
     flushPendingThinking();
     const crashEntry = { kind: 'error' as const, message: `Agent crashed: ${err.message}`, timestamp: Date.now() };
@@ -2193,6 +2255,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       };
 
       qaAgentSessions.set(qaAgentId, record);
+      console.log(`[QA Agent] Created record: qaAgentId=${qaAgentId}, pendingResponseId=${record.pendingResponseId}, pendingResponseWs.readyState=${ws.readyState}`);
       wireQAAgent(record);
 
       // Persist QA agent session to DB
@@ -2240,7 +2303,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
       await session.start(prompt);
 
-      // Response is deferred — sent when the QA agent finishes (see wireQAAgent 'done' handler)
+      // Response is deferred — sent when the QA agent's turn ends (see wireQAAgent 'result' handler)
     } catch (err) {
       console.error('[QA Agent] Failed to start:', (err as Error).message);
       sendEnvelope(ws, {
@@ -2248,37 +2311,6 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         payload: { type: 'qa_error', message: `Failed to start QA agent: ${(err as Error).message}` },
       });
     }
-  } else if (payload.type === 'qa_agent_finish') {
-    // QA agent called qa_finish tool — send deferred response to zeus_qa_run caller
-    const record = qaAgentSessions.get(payload.qaAgentId);
-    if (record && record.pendingResponseId && record.pendingResponseWs) {
-      console.log(`[QA Agent] qa_finish received for ${payload.qaAgentId}: status=${payload.status}`);
-      try {
-        sendEnvelope(record.pendingResponseWs, {
-          channel: 'qa', sessionId: '', auth: '',
-          payload: {
-            type: 'start_qa_agent_response',
-            responseId: record.pendingResponseId,
-            qaAgentId: payload.qaAgentId,
-            status: payload.status ?? 'done',
-            summary: payload.summary ?? 'QA agent completed.',
-          },
-        });
-      } catch {
-        // WebSocket may have closed
-      }
-      // Clear pending so done/result handlers don't double-send
-      record.pendingResponseId = undefined;
-      record.pendingResponseWs = undefined;
-
-      // Kill the Claude CLI process — it's done, no need to keep it alive
-      if (record.session && record.session.isRunning) {
-        record.session.kill();
-      }
-    } else {
-      console.warn(`[QA Agent] qa_finish received for unknown/already-resolved agent: ${payload.qaAgentId}`);
-    }
-
   } else if (payload.type === 'stop_qa_agent') {
     const record = qaAgentSessions.get(payload.qaAgentId);
     if (record && record.session && record.session.isRunning) {
@@ -2456,6 +2488,7 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           enableQA: true,
           qaTargetUrl: targetUrl,
           zeusSessionId: record.parentSessionId,
+          qaAgentId: record.qaAgentId,
         };
         if (record.claudeSessionId) {
           sessionOpts.resumeSessionId = record.claudeSessionId;

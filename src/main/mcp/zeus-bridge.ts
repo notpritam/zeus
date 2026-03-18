@@ -36,10 +36,14 @@ function connectWs(): Promise<void> {
       try {
         const envelope = JSON.parse(data.toString());
         // Check if this is a response to one of our requests
-        if (envelope.payload?.responseId && pendingResponses.has(envelope.payload.responseId)) {
-          const pending = pendingResponses.get(envelope.payload.responseId)!;
-          pendingResponses.delete(envelope.payload.responseId);
-          pending.resolve(envelope.payload);
+        if (envelope.payload?.responseId) {
+          const hasPending = pendingResponses.has(envelope.payload.responseId);
+          console.error(`[zeus-bridge] Received response: responseId=${envelope.payload.responseId}, hasPending=${hasPending}, type=${envelope.payload?.type}`);
+          if (hasPending) {
+            const pending = pendingResponses.get(envelope.payload.responseId)!;
+            pendingResponses.delete(envelope.payload.responseId);
+            pending.resolve(envelope.payload);
+          }
         }
       } catch {
         // ignore parse errors
@@ -76,9 +80,11 @@ function sendAndWait(channel: string, payload: Record<string, unknown>, timeoutM
   return new Promise((resolve, reject) => {
     const responseId = `bridge-${++messageIdCounter}-${Date.now()}`;
     payload.responseId = responseId;
+    console.error(`[zeus-bridge] sendAndWait: channel=${channel}, type=${payload.type}, responseId=${responseId}, timeoutMs=${timeoutMs}`);
 
     const timer = setTimeout(() => {
       pendingResponses.delete(responseId);
+      console.error(`[zeus-bridge] sendAndWait TIMEOUT: responseId=${responseId}, type=${payload.type}`);
       reject(new Error('Timeout waiting for Zeus response'));
     }, timeoutMs);
 
@@ -449,6 +455,7 @@ server.tool(
       await connectWs();
       const sessionId = parent_session_id ?? process.env.ZEUS_SESSION_ID ?? '';
       const defaultUrl = process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
+      console.error(`[zeus-bridge] zeus_qa_run: starting QA agent (pendingResponses.size=${pendingResponses.size}, wsReady=${wsReady})`);
       // Wait up to 10 minutes — the QA agent runs to completion before responding
       const response = await sendAndWait('qa', {
         type: 'start_qa_agent',
