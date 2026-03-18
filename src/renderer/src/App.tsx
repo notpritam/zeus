@@ -114,6 +114,7 @@ function App() {
     openNewClaudeModal,
     closeNewClaudeModal,
     toggleRightPanel,
+    toggleSessionTerminalPanel,
     addProject,
     removeProject,
     settingsError,
@@ -184,9 +185,14 @@ function App() {
       } else if (e.key === 'b') {
         e.preventDefault();
         toggleRightPanel();
+      } else if (e.key === 'j') {
+        e.preventDefault();
+        if (viewMode === 'claude' && activeClaudeId) {
+          toggleSessionTerminalPanel(activeClaudeId);
+        }
       }
     },
-    [startSession, openNewClaudeModal, toggleRightPanel, viewMode, setViewMode],
+    [startSession, openNewClaudeModal, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode],
   );
 
   useEffect(() => {

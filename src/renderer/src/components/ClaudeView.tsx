@@ -182,6 +182,15 @@ function ClaudeView({
     };
   }, [isDragging, setTerminalPanelHeight]);
 
+  // Focus management: terminal panel ↔ claude input
+  useEffect(() => {
+    if (panelVisible) {
+      inputRef.current?.blur();
+    } else {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [panelVisible]);
+
   // Preserve scroll position when older entries are prepended
   const prevScrollHeightRef = useRef<number>(0);
   const firstEntryIdRef = useRef<string | undefined>(entries[0]?.id);
