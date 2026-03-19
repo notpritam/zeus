@@ -72,11 +72,12 @@ import {
   copyClaudeEntriesForResume,
   updateClaudeSessionQaTargetUrl,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName, AndroidPayload } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { AndroidQAService } from './android-qa';
 import { getSubagentType, type SubagentContext } from './subagent-registry';
 import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
@@ -115,6 +116,16 @@ const fileTreeManager = new FileTreeServiceManager();
 
 // QA service (singleton PinchTab server)
 let qaService: QAService | null = null;
+
+// Module-level singleton (mirrors qaService pattern)
+let androidQAService: AndroidQAService | null = null;
+
+function getAndroidQAService(): AndroidQAService {
+  if (!androidQAService) {
+    androidQAService = new AndroidQAService();
+  }
+  return androidQAService;
+}
 
 // Subagent sessions — keyed by subagentId, multiple per parent session
 interface SubagentRecord {
@@ -2204,6 +2215,114 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   }
 }
 
+// Helper to send a response with responseId forwarding (matches handleQA pattern)
+function sendAndroidResponse(ws: WebSocket, envelope: WsEnvelope, responsePayload: Record<string, unknown>): void {
+  const inPayload = envelope.payload as Record<string, unknown>;
+  sendEnvelope(ws, {
+    channel: 'android', sessionId: '', auth: '',
+    payload: { ...responsePayload, responseId: inPayload.responseId },
+  });
+}
+
+async function handleAndroid(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as AndroidPayload;
+  const service = getAndroidQAService();
+
+  switch (payload.type) {
+    case 'start_emulator': {
+      try {
+        const device = await service.start(payload.avdName);
+        service.removeAllListeners('logcat');
+        service.on('logcat', (entries) => {
+          broadcastEnvelope({
+            channel: 'android', sessionId: '', auth: '',
+            payload: { type: 'logcat_entries', entries },
+          });
+        });
+        sendAndroidResponse(ws, envelope, { type: 'emulator_started', device });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'stop_emulator': {
+      try {
+        await service.stop();
+        sendAndroidResponse(ws, envelope, { type: 'emulator_stopped' });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'list_devices': {
+      try {
+        const devices = await service.listDevices();
+        const avds = await service.listAvds();
+        sendAndroidResponse(ws, envelope, { type: 'devices_list', devices, avds });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'get_android_status': {
+      try {
+        const devices = await service.listDevices();
+        sendAndroidResponse(ws, envelope, {
+          type: 'android_status',
+          running: service.isRunning(),
+          devices,
+        });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'screenshot': {
+      try {
+        const dataUrl = await service.screenshot();
+        sendAndroidResponse(ws, envelope, { type: 'screenshot_result', dataUrl });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'view_hierarchy': {
+      try {
+        const nodes = await service.viewHierarchy();
+        sendAndroidResponse(ws, envelope, { type: 'view_hierarchy_result', nodes });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'install_apk': {
+      try {
+        await service.installApk(payload.apkPath);
+        sendAndroidResponse(ws, envelope, { type: 'apk_installed', apkPath: payload.apkPath });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'launch_app': {
+      try {
+        await service.launchApp(payload.appId);
+        sendAndroidResponse(ws, envelope, { type: 'app_launched', appId: payload.appId });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+  }
+}
+
 async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   const payload = envelope.payload as SubagentPayload;
 
@@ -3023,6 +3142,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
         sendEnvelope(ws, {
           channel: 'subagent', sessionId: '', auth: '',
           payload: { type: 'subagent_error', message: `Subagent error: ${(err as Error).message}` },
+        });
+      });
+      break;
+    case 'android':
+      handleAndroid(ws, envelope).catch((err) => {
+        console.error('[Android] Unhandled error in handleAndroid:', err);
+        sendEnvelope(ws, {
+          channel: 'android', sessionId: '', auth: '',
+          payload: { type: 'android_error', message: `Android error: ${(err as Error).message}` },
         });
       });
       break;
