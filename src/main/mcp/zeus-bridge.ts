@@ -636,7 +636,7 @@ server.tool(
   async () => {
     await connectWs();
     const response = await sendAndWait('android', { type: 'stop_emulator' }, 15_000);
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, message: 'Android emulator stopped.' }) }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] };
   }
 );
 

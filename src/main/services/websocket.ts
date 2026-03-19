@@ -77,7 +77,7 @@ import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
-import { AndroidQAService } from './android-qa';
+import { AndroidQAService, findMaestroPath, findAdbPath } from './android-qa';
 import { getSubagentType, type SubagentContext } from './subagent-registry';
 import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
@@ -2578,7 +2578,6 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
 
       // Android QA: clone registry mcpServers and resolve maestro path at spawn time
       if (subagentType === 'android_qa' && definition?.mcpServers?.length) {
-        const { findMaestroPath } = await import('./android-qa');
         const clonedServers = definition.mcpServers.map(s => ({
           ...s,
           args: s.args ? [...s.args] : undefined,
@@ -2594,9 +2593,12 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
         // Inject device ID into extras server env
         const extrasServer = clonedServers.find(s => s.name === 'android-qa-extras');
         if (extrasServer) {
+          let adbPathResolved = 'adb';
+          try { adbPathResolved = findAdbPath(); } catch { /* fallback to bare adb */ }
           extrasServer.env = {
             ...(extrasServer.env ?? {}),
             ZEUS_ANDROID_DEVICE_ID: inputs.deviceId ?? '',
+            ZEUS_ANDROID_ADB_PATH: adbPathResolved,
           };
         }
 

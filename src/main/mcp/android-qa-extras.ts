@@ -7,8 +7,11 @@ import { execFile } from 'child_process';
 const LOGCAT_STATE_PATH = '/tmp/zeus-android-logcat-state.json';
 const LEVEL_ORDER: Record<string, number> = { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5 };
 
-// Cursor tracking for since_last_call
-let lastReadIndex = 0;
+// Cursor tracking for since_last_call (timestamp-based to handle ring buffer wraps)
+let lastReadTimestamp = 0;
+
+// ADB path — injected via env var, falls back to bare 'adb' on PATH
+const adbPath = process.env.ZEUS_ANDROID_ADB_PATH || 'adb';
 
 const server = new McpServer({
   name: 'android-qa-extras',
@@ -32,9 +35,9 @@ server.tool(
       const state = JSON.parse(raw) as { entries: Array<{ timestamp: number; pid: number; tid: number; level: string; tag: string; message: string }>; updatedAt: number };
       let entries = state.entries;
 
-      // Cursor-based filtering
+      // Cursor-based filtering (timestamp-based to survive ring buffer wraps)
       if (since_last_call) {
-        entries = entries.slice(lastReadIndex);
+        entries = entries.filter(e => e.timestamp > lastReadTimestamp);
       }
 
       // Level filtering
@@ -49,8 +52,10 @@ server.tool(
       // Limit
       entries = entries.slice(-limit);
 
-      // Update cursor
-      lastReadIndex = state.entries.length;
+      // Update cursor to latest timestamp
+      if (state.entries.length > 0) {
+        lastReadTimestamp = state.entries[state.entries.length - 1].timestamp;
+      }
 
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ entries, total: entries.length }) }],
@@ -77,7 +82,7 @@ server.tool(
 
     const getprop = (prop: string): Promise<string> => {
       return new Promise((resolve) => {
-        execFile('adb', ['-s', deviceId, 'shell', 'getprop', prop], { timeout: 5000 }, (err, stdout) => {
+        execFile(adbPath, ['-s', deviceId, 'shell', 'getprop', prop], { timeout: 5000 }, (err, stdout) => {
           resolve(err ? '' : stdout.trim());
         });
       });
@@ -92,7 +97,7 @@ server.tool(
 
     // Get screen size via wm size
     const screenSize = await new Promise<string>((resolve) => {
-      execFile('adb', ['-s', deviceId, 'shell', 'wm', 'size'], { timeout: 5000 }, (err, stdout) => {
+      execFile(adbPath, ['-s', deviceId, 'shell', 'wm', 'size'], { timeout: 5000 }, (err, stdout) => {
         resolve(err ? '' : stdout.trim().replace('Physical size: ', ''));
       });
     });
