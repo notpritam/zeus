@@ -8,9 +8,11 @@ import {
   Globe,
   Camera,
   FileText,
+  FileSearch,
   MousePointer,
   Loader2,
   ChevronRight,
+  ChevronLeft,
   Monitor,
   RefreshCw,
   AlertCircle,
@@ -29,8 +31,33 @@ import {
 import { ImageLightbox, useLightbox } from '@/components/ImageLightbox';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
+import type { SubagentType } from '@shared/types';
 
 type QAViewTab = 'snapshot' | 'screenshot' | 'text' | 'console' | 'network' | 'errors';
+
+// Keep in sync with src/main/services/subagent-registry.ts
+const SUBAGENT_TYPES = [
+  {
+    type: 'qa' as SubagentType,
+    name: 'QA Tester',
+    icon: Eye,
+    description: 'Browser-based QA testing with PinchTab automation',
+    inputFields: [
+      { key: 'task', label: 'Task', type: 'textarea' as const, required: true, placeholder: 'What to test...' },
+      { key: 'targetUrl', label: 'Target URL', type: 'text' as const, required: false, placeholder: 'Auto-detected' },
+    ],
+  },
+  {
+    type: 'plan_reviewer' as SubagentType,
+    name: 'Plan Reviewer',
+    icon: FileSearch,
+    description: 'Review implementation plans for completeness and feasibility',
+    inputFields: [
+      { key: 'task', label: 'Review Instructions', type: 'textarea' as const, required: true, placeholder: 'Review this plan for...' },
+      { key: 'filePath', label: 'Plan File', type: 'file' as const, required: true, placeholder: 'docs/superpowers/plans/...' },
+    ],
+  },
+];
 
 function useCurrentSessionContext() {
   const viewMode = useZeusStore((s) => s.viewMode);
@@ -80,7 +107,7 @@ function useCurrentSessionContext() {
   return null;
 }
 
-function QAPanel() {
+function SubagentPanel() {
   const qaRunning = useZeusStore((s) => s.qaRunning);
   const qaInstances = useZeusStore((s) => s.qaInstances);
   const qaSnapshot = useZeusStore((s) => s.qaSnapshot);
@@ -104,16 +131,16 @@ function QAPanel() {
   const extractQAText = useZeusStore((s) => s.extractQAText);
   const clearQAError = useZeusStore((s) => s.clearQAError);
 
-  const qaAgents = useZeusStore((s) => s.qaAgents);
-  const activeQaAgentId = useZeusStore((s) => s.activeQaAgentId);
-  const startQAAgent = useZeusStore((s) => s.startQAAgent);
-  const stopQAAgent = useZeusStore((s) => s.stopQAAgent);
-  const deleteQAAgent = useZeusStore((s) => s.deleteQAAgent);
-  const sendQAAgentMessage = useZeusStore((s) => s.sendQAAgentMessage);
-  const clearQAAgentEntries = useZeusStore((s) => s.clearQAAgentEntries);
-  const selectQaAgent = useZeusStore((s) => s.selectQaAgent);
-  const fetchQaAgents = useZeusStore((s) => s.fetchQaAgents);
-  const fetchQaAgentEntries = useZeusStore((s) => s.fetchQaAgentEntries);
+  const subagents = useZeusStore((s) => s.subagents);
+  const activeSubagentId = useZeusStore((s) => s.activeSubagentId);
+  const startSubagent = useZeusStore((s) => s.startSubagent);
+  const stopSubagent = useZeusStore((s) => s.stopSubagent);
+  const deleteSubagent = useZeusStore((s) => s.deleteSubagent);
+  const sendSubagentMessage = useZeusStore((s) => s.sendSubagentMessage);
+  const clearSubagentEntries = useZeusStore((s) => s.clearSubagentEntries);
+  const selectSubagent = useZeusStore((s) => s.selectSubagent);
+  const fetchSubagents = useZeusStore((s) => s.fetchSubagents);
+  const fetchSubagentEntries = useZeusStore((s) => s.fetchSubagentEntries);
   const qaFlows = useZeusStore((s) => s.qaFlows);
   const fetchQaFlows = useZeusStore((s) => s.fetchQaFlows);
 
@@ -128,23 +155,27 @@ function QAPanel() {
   const [actionValue, setActionValue] = useState('');
 
   const [qaMode, setQaMode] = useState<'browser' | 'agent'>('browser');
-  const [agentTask, setAgentTask] = useState('');
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [compressedLog, setCompressedLog] = useState(true);
-  const [agentTargetUrl, setAgentTargetUrl] = useState(sessionCtx?.qaTargetUrl || window.location.origin);
   const { lightbox, openLightbox, closeLightbox } = useLightbox();
-  const [agentName, setAgentName] = useState('');
   const [showNewAgentForm, setShowNewAgentForm] = useState(false);
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
-  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
   const agentLogRef = useRef<HTMLDivElement>(null);
   const agentUserScrolledUp = useRef(false);
   const [showAgentScrollToBottom, setShowAgentScrollToBottom] = useState(false);
 
+  // Panel view state for type selector / form / agents list
+  const [panelView, setPanelView] = useState<'selector' | 'form' | 'agents'>('agents');
+  const [selectedType, setSelectedType] = useState<SubagentType | null>(null);
+  const [formInputs, setFormInputs] = useState<Record<string, string>>({});
+
   // Sync agent target URL when session's detected URL changes
   useEffect(() => {
     if (sessionCtx?.qaTargetUrl) {
-      setAgentTargetUrl(sessionCtx.qaTargetUrl);
+      // Pre-fill targetUrl in formInputs if not already set
+      setFormInputs((prev) => {
+        if (!prev.targetUrl) return { ...prev, targetUrl: sessionCtx.qaTargetUrl! };
+        return prev;
+      });
     }
   }, [sessionCtx?.qaTargetUrl]);
 
@@ -152,11 +183,12 @@ function QAPanel() {
   const parentSessionId = sessionCtx?.parentSessionId ?? '';
   const parentSessionType = sessionCtx?.parentSessionType ?? 'terminal';
   const sessionAgents = useMemo(
-    () => qaAgents[parentSessionId] ?? [],
-    [qaAgents, parentSessionId],
+    () => subagents[parentSessionId] ?? [],
+    [subagents, parentSessionId],
   );
-  const selectedAgentId = activeQaAgentId[parentSessionId] ?? null;
-  const selectedAgent = sessionAgents.find((a) => a.info.qaAgentId === selectedAgentId) ?? null;
+  const selectedAgentId = activeSubagentId[parentSessionId] ?? null;
+  const selectedAgent = sessionAgents.find((a) => a.info.subagentId === selectedAgentId) ?? null;
+  const isQaAgent = selectedAgent?.info.subagentType === 'qa';
   const hasRunningAgent = sessionAgents.some((a) => a.info.status === 'running');
   const hasAnyAgent = sessionAgents.length > 0;
 
@@ -199,18 +231,18 @@ function QAPanel() {
   // Fetch agents from DB on mount and when parent session changes
   useEffect(() => {
     if (!parentSessionId) return;
-    fetchQaAgents(parentSessionId);
+    fetchSubagents(parentSessionId);
   }, [parentSessionId]);
 
   // Auto-select first running agent when switching sessions
   useEffect(() => {
     if (!parentSessionId) return;
-    if (selectedAgentId && sessionAgents.find((a) => a.info.qaAgentId === selectedAgentId)) return;
+    if (selectedAgentId && sessionAgents.find((a) => a.info.subagentId === selectedAgentId)) return;
     const running = sessionAgents.find((a) => a.info.status === 'running');
     if (running) {
-      selectQaAgent(parentSessionId, running.info.qaAgentId);
+      selectSubagent(parentSessionId, running.info.subagentId);
     } else if (sessionAgents.length > 0) {
-      selectQaAgent(parentSessionId, sessionAgents[sessionAgents.length - 1].info.qaAgentId);
+      selectSubagent(parentSessionId, sessionAgents[sessionAgents.length - 1].info.subagentId);
     }
   }, [parentSessionId, sessionAgents.length]);
 
@@ -218,7 +250,7 @@ function QAPanel() {
   useEffect(() => {
     if (!selectedAgent) return;
     if (selectedAgent.entries.length === 0) {
-      fetchQaAgentEntries(selectedAgent.info.qaAgentId);
+      fetchSubagentEntries(selectedAgent.info.subagentId);
     }
   }, [selectedAgentId]);
 
@@ -229,60 +261,30 @@ function QAPanel() {
     }
   }, [showNewAgentForm, hasAnyAgent]);
 
-  const selectedFlow = qaFlows.find((f) => f.id === selectedFlowId) ?? null;
-
-  const handleFlowSelect = (flowId: string | null) => {
-    setSelectedFlowId(flowId);
-    if (flowId) {
-      const flow = qaFlows.find((f) => f.id === flowId);
-      if (flow) {
-        setSelectedPersonas([...flow.personaIds]);
-        if (!agentTask.trim()) {
-          setAgentTask(flow.name);
-        }
-      }
-    } else {
-      setSelectedPersonas([]);
-    }
-  };
-
-  const handlePersonaToggle = (personaId: string) => {
-    setSelectedPersonas((prev) =>
-      prev.includes(personaId)
-        ? prev.filter((p) => p !== personaId)
-        : [...prev, personaId],
-    );
-  };
-
-  const handleStartAgent = () => {
-    console.log('[QAPanel] handleStartAgent called', { agentTask, parentSessionId, parentSessionType, sessionCtx });
-    if ((!agentTask.trim() && !selectedFlowId) || !parentSessionId) {
-      console.warn('[QAPanel] Blocked: agentTask empty or no parentSessionId', { agentTask: agentTask.trim(), parentSessionId });
-      return;
-    }
-    startQAAgent(
-      agentTask.trim(),
-      sessionCtx?.workingDir || '/',
+  function handleStartSubagent(def: typeof SUBAGENT_TYPES[0]) {
+    if (!parentSessionId) return;
+    const workingDir = sessionCtx?.workingDir || '/';
+    const canSubmit = def.inputFields.filter(f => f.required).every(f => formInputs[f.key]?.trim());
+    if (!canSubmit) return;
+    startSubagent(
+      def.type,
+      'claude',
+      formInputs,
+      workingDir,
       parentSessionId,
-      parentSessionType,
-      agentTargetUrl,
-      agentName.trim() || undefined,
-      selectedFlowId ?? undefined,
-      selectedPersonas.length > 0 ? selectedPersonas : undefined,
+      parentSessionType as 'terminal' | 'claude',
     );
-    setAgentTask('');
-    setAgentName('');
-    setSelectedFlowId(null);
-    setSelectedPersonas([]);
+    setPanelView('agents');
+    setFormInputs({});
     setShowNewAgentForm(false);
-  };
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
         <span className={`size-2 shrink-0 rounded-full ${qaRunning ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
-        <span className="text-primary flex-1 text-sm font-bold">QA Preview</span>
+        <span className="text-primary flex-1 text-sm font-bold">Subagents</span>
         {sessionCtx && (
           <span className="text-muted-foreground truncate text-[9px]">
             {parentSessionType === 'claude' ? 'Claude' : 'Term'}: {parentSessionId.slice(0, 8)}
@@ -780,284 +782,285 @@ function QAPanel() {
           {/* Agent mode */}
           {qaMode === 'agent' && (
             <div className="flex min-h-0 flex-1 flex-col">
-              {/* Agent list bar — shows when there are agents for this session */}
-              {hasAnyAgent && !showNewAgentForm && (
-                <>
-                  <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1">
-                    <Bot className="text-muted-foreground size-3 shrink-0" />
-                    <select
-                      value={selectedAgentId ?? ''}
-                      onChange={(e) => selectQaAgent(parentSessionId, e.target.value || null)}
-                      className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
-                    >
-                      {sessionAgents.map((a) => {
-                        const label = a.info.name || a.info.task;
-                        return (
-                          <option key={a.info.qaAgentId} value={a.info.qaAgentId}>
-                            {a.info.status === 'running' ? '\u25CF ' : '\u25CB '}
-                            {label.slice(0, 50)}{label.length > 50 ? '...' : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
-                    {selectedAgent && selectedAgent.info.status !== 'running' && (
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="text-muted-foreground hover:text-destructive size-5 shrink-0"
-                        onClick={() => {
-                          deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId);
-                        }}
-                        title="Delete agent"
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="size-5 shrink-0"
-                      onClick={() => setShowNewAgentForm(true)}
-                      title="New agent"
-                    >
-                      <Plus className="size-3" />
-                    </Button>
+
+              {/* Type selector view */}
+              {panelView === 'selector' && (
+                <div className="p-3 space-y-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Spawn Subagent</span>
+                    <button onClick={() => setPanelView('agents')} className="text-xs text-muted-foreground hover:text-foreground">
+                      Cancel
+                    </button>
                   </div>
-
-                  {/* Selected agent view */}
-                  {selectedAgent && (
-                    <>
-                      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-                        <span className={`size-2 shrink-0 rounded-full ${
-                          selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
-                        }`} />
-                        <span className="text-foreground flex-1 truncate text-[10px] font-medium">
-                          {selectedAgent.info.name || selectedAgent.info.task.slice(0, 40)}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
-                          onClick={() => setCompressedLog(!compressedLog)}
-                          title={compressedLog ? 'Expand all' : 'Compress view'}
-                        >
-                          {compressedLog ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5"
-                          onClick={() => clearQAAgentEntries(selectedAgent.info.qaAgentId)}
-                          title="Clear log"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
+                  {SUBAGENT_TYPES.map((def) => (
+                    <button
+                      key={def.type}
+                      onClick={() => { setSelectedType(def.type); setFormInputs({}); setPanelView('form'); }}
+                      className="w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-card transition-colors text-left"
+                    >
+                      <def.icon className="size-5 text-primary mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-sm font-medium">{def.name}</div>
+                        <div className="text-xs text-muted-foreground">{def.description}</div>
                       </div>
-                      <div className="relative min-h-0 flex-1">
-                        <div ref={agentLogRef} className="absolute inset-0 overflow-y-auto p-4 space-y-3">
-                          {selectedAgent.entries.length === 0 ? (
-                            <p className="text-muted-foreground py-4 text-center text-xs">
-                              {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
-                            </p>
-                          ) : compressedLog ? (
-                            groupEntriesByUser(selectedAgent.entries).map((group, i, arr) => (
-                              <CompressedGroup
-                                key={group.userEntry?.id ?? `group-${i}`}
-                                group={group}
-                                isLast={i === arr.length - 1}
-                                sessionDone={selectedAgent.info.status !== 'running'}
-                              />
-                            ))
-                          ) : (
-                            selectedAgent.entries.map((entry, i) => (
-                              <EntryItem
-                                key={entry.id}
-                                entry={entry}
-                                sessionDone={selectedAgent.info.status !== 'running'}
-                                isLastEntry={i === selectedAgent.entries.length - 1}
-                              />
-                            ))
-                          )}
-                        </div>
-                        {showAgentScrollToBottom && (
-                          <button
-                            onClick={() => {
-                              agentUserScrolledUp.current = false;
-                              scrollAgentLogToBottom();
-                            }}
-                            className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-20 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
-                          >
-                            <ArrowDown className="size-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Bottom interaction bar */}
-                      <div className="border-border shrink-0 border-t">
-                        {/* Status indicator */}
-                        <div className={`flex items-center gap-2 px-3 py-1.5 ${selectedAgent.info.status === 'running' ? 'bg-primary/5' : 'bg-secondary/30'}`}>
-                          {selectedAgent.info.status === 'running' ? (
-                            <>
-                              <Loader2 className="text-primary size-3 animate-spin" />
-                              <span className="text-primary flex-1 text-[10px] font-medium">Agent is working...</span>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                className="h-6 gap-1 px-2 text-[10px]"
-                                onClick={() => stopQAAgent(selectedAgent.info.qaAgentId)}
-                              >
-                                <Square className="size-2.5" />
-                                Stop
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <span className="bg-muted-foreground/40 size-2 rounded-full" />
-                              <span className="text-muted-foreground flex-1 text-[10px]">
-                                Agent {selectedAgent.info.status === 'stopped' ? 'stopped' : 'errored'} — send a message to resume
-                              </span>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive h-6 gap-1 px-2 text-[10px]"
-                                onClick={() => deleteQAAgent(selectedAgent.info.qaAgentId, parentSessionId)}
-                              >
-                                <Trash2 className="size-2.5" />
-                                Delete
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                        {/* Message input — always visible */}
-                        <div className="flex items-center gap-1.5 px-2 py-2">
-                          <input
-                            type="text"
-                            value={agentFollowUp}
-                            onChange={(e) => setAgentFollowUp(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && agentFollowUp.trim()) {
-                                sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
-                                setAgentFollowUp('');
-                                agentUserScrolledUp.current = false;
-                                scrollAgentLogToBottom();
-                              }
-                            }}
-                            className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded-md border border-transparent px-2.5 py-1.5 text-xs outline-none focus:border-primary/40"
-                            placeholder={selectedAgent.info.status === 'running' ? 'Send a message to the agent...' : 'Send a message to resume the agent...'}
-                          />
-                          <Button
-                            variant="default"
-                            size="icon-xs"
-                            className="size-7 shrink-0"
-                            disabled={!agentFollowUp.trim()}
-                            onClick={() => {
-                              if (agentFollowUp.trim()) {
-                                sendQAAgentMessage(selectedAgent.info.qaAgentId, agentFollowUp.trim());
-                                setAgentFollowUp('');
-                                agentUserScrolledUp.current = false;
-                                scrollAgentLogToBottom();
-                              }
-                            }}
-                            title="Send message"
-                          >
-                            <Send className="size-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </>
+                    </button>
+                  ))}
+                </div>
               )}
 
-              {/* New agent form — shown when no agents exist or user clicked + */}
-              {(!hasAnyAgent || showNewAgentForm) && (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-                  {showNewAgentForm && (
-                    <button
-                      onClick={() => setShowNewAgentForm(false)}
-                      className="text-muted-foreground hover:text-foreground self-start text-[10px]"
-                    >
-                      &larr; Back to agents
+              {/* Form view */}
+              {panelView === 'form' && selectedType && (() => {
+                const def = SUBAGENT_TYPES.find((d) => d.type === selectedType)!;
+                const canSubmit = def.inputFields.filter(f => f.required).every(f => formInputs[f.key]?.trim());
+                return (
+                  <div className="p-3 space-y-3">
+                    <button onClick={() => setPanelView('selector')} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                      <ChevronLeft className="size-3" /> Back
                     </button>
-                  )}
-                  <Bot className="text-muted-foreground/40 size-8" />
-                  <p className="text-muted-foreground text-[10px]">Describe a task for the QA agent</p>
-                  <input
-                    type="text"
-                    value={agentName}
-                    onChange={(e) => setAgentName(e.target.value)}
-                    className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
-                    placeholder="Agent name (optional)"
-                  />
-                  <input
-                    type="text"
-                    value={agentTargetUrl}
-                    onChange={(e) => setAgentTargetUrl(e.target.value)}
-                    className="bg-secondary text-foreground placeholder:text-muted-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
-                    placeholder="Target URL"
-                  />
-                  {/* Flow picker */}
-                  {qaFlows.length > 0 && (
-                    <div className="w-full space-y-1.5">
-                      <label className="text-muted-foreground text-[9px] uppercase tracking-wider">
-                        Test Flow (optional)
-                      </label>
-                      <select
-                        value={selectedFlowId ?? ''}
-                        onChange={(e) => handleFlowSelect(e.target.value || null)}
-                        className="bg-secondary text-foreground w-full rounded px-2 py-1 text-[10px] outline-none"
-                      >
-                        <option value="">None — free-form task</option>
-                        {qaFlows.map((flow) => (
-                          <option key={flow.id} value={flow.id}>
-                            {flow.name} [{flow.tags.join(', ')}] · {flow.stepCount} steps · {flow.personaIds.length} persona{flow.personaIds.length !== 1 ? 's' : ''}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex items-center gap-2">
+                      <def.icon className="size-4 text-primary" />
+                      <span className="text-sm font-medium">{def.name}</span>
+                    </div>
+                    {def.inputFields.map((field) => (
+                      <div key={field.key}>
+                        <label className="text-xs text-muted-foreground block mb-1">{field.label}{field.required && ' *'}</label>
+                        {field.type === 'textarea' ? (
+                          <textarea
+                            className="w-full bg-secondary border border-border rounded px-2 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                            rows={3}
+                            placeholder={field.placeholder}
+                            value={formInputs[field.key] ?? ''}
+                            onChange={(e) => setFormInputs((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            className="w-full bg-secondary border border-border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            placeholder={field.placeholder}
+                            value={formInputs[field.key] ?? ''}
+                            onChange={(e) => setFormInputs((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                          />
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => handleStartSubagent(def)}
+                      disabled={!canSubmit}
+                    >
+                      <Play className="size-3" /> Start Agent
+                    </button>
+                  </div>
+                );
+              })()}
 
-                      {/* Persona checkboxes — shown when a flow is selected */}
-                      {selectedFlow && selectedFlow.personaIds.length > 1 && (
-                        <div className="space-y-1 pt-1">
-                          <label className="text-muted-foreground text-[9px] uppercase tracking-wider">
-                            Personas
-                          </label>
-                          {selectedFlow.personaIds.map((pid) => (
-                            <label key={pid} className="text-foreground flex items-center gap-1.5 text-[10px]">
+              {/* Agent list view */}
+              {panelView === 'agents' && (
+                <>
+                  {/* Agent list bar — shows when there are agents for this session */}
+                  {hasAnyAgent && !showNewAgentForm && (
+                    <>
+                      <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1">
+                        <Bot className="text-muted-foreground size-3 shrink-0" />
+                        <select
+                          value={selectedAgentId ?? ''}
+                          onChange={(e) => selectSubagent(parentSessionId, e.target.value || null)}
+                          className="bg-secondary text-foreground min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                        >
+                          {sessionAgents.map((a) => {
+                            const label = a.info.name || a.info.task;
+                            return (
+                              <option key={a.info.subagentId} value={a.info.subagentId}>
+                                {a.info.status === 'running' ? '\u25CF ' : '\u25CB '}
+                                {label.slice(0, 50)}{label.length > 50 ? '...' : ''}
+                                {' '}[{a.info.subagentType === 'qa' ? 'QA' : 'Review'}]
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {selectedAgent && selectedAgent.info.status !== 'running' && (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground hover:text-destructive size-5 shrink-0"
+                            onClick={() => {
+                              deleteSubagent(selectedAgent.info.subagentId, parentSessionId);
+                            }}
+                            title="Delete agent"
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        )}
+                        <button onClick={() => setPanelView('selector')} title="New subagent" className="text-muted-foreground hover:text-foreground p-0.5">
+                          <Plus className="size-4" />
+                        </button>
+                      </div>
+
+                      {/* Selected agent view */}
+                      {selectedAgent && (
+                        <>
+                          <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+                            <span className={`size-2 shrink-0 rounded-full ${
+                              selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
+                            }`} />
+                            <span className="text-foreground flex-1 truncate text-[10px] font-medium">
+                              {selectedAgent.info.name || selectedAgent.info.task.slice(0, 40)}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
+                              onClick={() => setCompressedLog(!compressedLog)}
+                              title={compressedLog ? 'Expand all' : 'Compress view'}
+                            >
+                              {compressedLog ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-5"
+                              onClick={() => clearSubagentEntries(selectedAgent.info.subagentId)}
+                              title="Clear log"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
+                          <div className="relative min-h-0 flex-1">
+                            <div ref={agentLogRef} className="absolute inset-0 overflow-y-auto p-4 space-y-3">
+                              {selectedAgent.entries.length === 0 ? (
+                                <p className="text-muted-foreground py-4 text-center text-xs">
+                                  {selectedAgent.info.status === 'running' ? 'Waiting for agent output...' : 'No log entries'}
+                                </p>
+                              ) : compressedLog ? (
+                                groupEntriesByUser(selectedAgent.entries).map((group, i, arr) => (
+                                  <CompressedGroup
+                                    key={group.userEntry?.id ?? `group-${i}`}
+                                    group={group}
+                                    isLast={i === arr.length - 1}
+                                    sessionDone={selectedAgent.info.status !== 'running'}
+                                  />
+                                ))
+                              ) : (
+                                selectedAgent.entries.map((entry, i) => (
+                                  <EntryItem
+                                    key={entry.id}
+                                    entry={entry}
+                                    sessionDone={selectedAgent.info.status !== 'running'}
+                                    isLastEntry={i === selectedAgent.entries.length - 1}
+                                  />
+                                ))
+                              )}
+                            </div>
+                            {showAgentScrollToBottom && (
+                              <button
+                                onClick={() => {
+                                  agentUserScrolledUp.current = false;
+                                  scrollAgentLogToBottom();
+                                }}
+                                className="bg-primary text-primary-foreground absolute bottom-3 left-1/2 z-20 flex size-8 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-opacity hover:opacity-90"
+                              >
+                                <ArrowDown className="size-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Bottom interaction bar */}
+                          <div className="border-border shrink-0 border-t">
+                            {/* Status indicator */}
+                            <div className={`flex items-center gap-2 px-3 py-1.5 ${selectedAgent.info.status === 'running' ? 'bg-primary/5' : 'bg-secondary/30'}`}>
+                              {selectedAgent.info.status === 'running' ? (
+                                <>
+                                  <Loader2 className="text-primary size-3 animate-spin" />
+                                  <span className="text-primary flex-1 text-[10px] font-medium">Agent is working...</span>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="h-6 gap-1 px-2 text-[10px]"
+                                    onClick={() => stopSubagent(selectedAgent.info.subagentId)}
+                                  >
+                                    <Square className="size-2.5" />
+                                    Stop
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="bg-muted-foreground/40 size-2 rounded-full" />
+                                  <span className="text-muted-foreground flex-1 text-[10px]">
+                                    Agent {selectedAgent.info.status === 'stopped' ? 'stopped' : 'errored'} — send a message to resume
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive h-6 gap-1 px-2 text-[10px]"
+                                    onClick={() => deleteSubagent(selectedAgent.info.subagentId, parentSessionId)}
+                                  >
+                                    <Trash2 className="size-2.5" />
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                            {/* Message input — always visible */}
+                            <div className="flex items-center gap-1.5 px-2 py-2">
                               <input
-                                type="checkbox"
-                                checked={selectedPersonas.includes(pid)}
-                                onChange={() => handlePersonaToggle(pid)}
-                                className="accent-primary size-3"
+                                type="text"
+                                value={agentFollowUp}
+                                onChange={(e) => setAgentFollowUp(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && agentFollowUp.trim()) {
+                                    sendSubagentMessage(selectedAgent.info.subagentId, agentFollowUp.trim());
+                                    setAgentFollowUp('');
+                                    agentUserScrolledUp.current = false;
+                                    scrollAgentLogToBottom();
+                                  }
+                                }}
+                                className="bg-secondary text-foreground placeholder:text-muted-foreground min-w-0 flex-1 rounded-md border border-transparent px-2.5 py-1.5 text-xs outline-none focus:border-primary/40"
+                                placeholder={selectedAgent.info.status === 'running' ? 'Send a message to the agent...' : 'Send a message to resume the agent...'}
                               />
-                              {pid}
-                            </label>
-                          ))}
-                        </div>
+                              <Button
+                                variant="default"
+                                size="icon-xs"
+                                className="size-7 shrink-0"
+                                disabled={!agentFollowUp.trim()}
+                                onClick={() => {
+                                  if (agentFollowUp.trim()) {
+                                    sendSubagentMessage(selectedAgent.info.subagentId, agentFollowUp.trim());
+                                    setAgentFollowUp('');
+                                    agentUserScrolledUp.current = false;
+                                    scrollAgentLogToBottom();
+                                  }
+                                }}
+                                title="Send message"
+                              >
+                                <Send className="size-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </>
                       )}
+                    </>
+                  )}
+
+                  {/* No agents — show type selector directly */}
+                  {!hasAnyAgent && !showNewAgentForm && (
+                    <div className="p-3 space-y-2">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Spawn Subagent</span>
+                      {SUBAGENT_TYPES.map((def) => (
+                        <button
+                          key={def.type}
+                          onClick={() => { setSelectedType(def.type); setFormInputs({}); setPanelView('form'); }}
+                          className="w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-card transition-colors text-left"
+                        >
+                          <def.icon className="size-5 text-primary mt-0.5 shrink-0" />
+                          <div>
+                            <div className="text-sm font-medium">{def.name}</div>
+                            <div className="text-xs text-muted-foreground">{def.description}</div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   )}
-                  <textarea
-                    value={agentTask}
-                    onChange={(e) => setAgentTask(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && (agentTask.trim() || selectedFlowId)) {
-                        e.preventDefault();
-                        handleStartAgent();
-                      }
-                    }}
-                    className="bg-secondary text-foreground placeholder:text-muted-foreground h-20 w-full resize-none rounded px-2 py-1.5 text-[10px] outline-none"
-                    placeholder={selectedFlowId ? "Additional instructions (optional)..." : "e.g. Test the login flow with valid and invalid credentials..."}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={handleStartAgent}
-                    disabled={!agentTask.trim() && !selectedFlowId}
-                    className="gap-1.5"
-                  >
-                    <Play className="size-3" />
-                    Start Agent
-                  </Button>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -1067,4 +1070,4 @@ function QAPanel() {
   );
 }
 
-export default QAPanel;
+export default SubagentPanel;

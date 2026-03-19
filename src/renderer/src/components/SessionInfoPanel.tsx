@@ -364,7 +364,7 @@ function SessionInfoPanel() {
   const gitStatus = useZeusStore((s) => activeClaudeId ? s.gitStatus[activeClaudeId] : undefined);
   const gitConnected = useZeusStore((s) => activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false);
   const fileTreeConnected = useZeusStore((s) => activeClaudeId ? s.fileTreeConnected[activeClaudeId] === true : false);
-  const qaAgents = useZeusStore((s) => activeClaudeId ? (s.qaAgents[activeClaudeId] ?? EMPTY_QA_AGENTS) : EMPTY_QA_AGENTS);
+  const qaAgents = useZeusStore((s) => activeClaudeId ? (s.subagents[activeClaudeId] ?? EMPTY_QA_AGENTS) : EMPTY_QA_AGENTS);
   const pendingApprovals = useZeusStore(useShallow((s) => s.pendingApprovals.filter((a) => a.sessionId === activeClaudeId)));
   const updateQaTargetUrl = useZeusStore((s) => s.updateQaTargetUrl);
   const detectQaTargetUrl = useZeusStore((s) => s.detectQaTargetUrl);
@@ -501,7 +501,7 @@ function SessionInfoPanel() {
             <InfoRow icon={Eye} label="Total" value={qaAgents.length} />
             {runningQaAgents > 0 && <StatRow label="Running" value={runningQaAgents} color="text-green-400" />}
             {qaAgents.map((a) => (
-              <div key={a.info?.qaAgentId ?? Math.random()} className="flex items-center justify-between px-3 py-0.5">
+              <div key={a.info?.subagentId ?? Math.random()} className="flex items-center justify-between px-3 py-0.5">
                 <span className="text-muted-foreground truncate text-[11px] max-w-[140px]">{a.info?.name || a.info?.task?.slice(0, 30) || '—'}</span>
                 <Badge variant={a.info?.status === 'running' ? 'default' : 'secondary'} className="text-[9px]">{a.info?.status ?? '—'}</Badge>
               </div>

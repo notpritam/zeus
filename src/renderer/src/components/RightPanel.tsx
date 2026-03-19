@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
-import QAPanel from '@/components/QAPanel';
+import SubagentPanel from '@/components/SubagentPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
 import SessionSettingsPanel from '@/components/SessionSettingsPanel';
 import {
@@ -81,7 +81,7 @@ function ActivityBarIcon({
   pulse,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings';
+  tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings';
   tooltip: string;
   badge?: number;   // red error badge (top-right)
   count?: number;   // themed count badge (top-right, lower priority than badge)
@@ -158,8 +158,8 @@ function RightPanel() {
     : 0;
 
   // QA running agents count (across all parent sessions)
-  const qaAgents = useZeusStore((s) => s.qaAgents);
-  const runningQaAgentCount = Object.values(qaAgents)
+  const subagents = useZeusStore((s) => s.subagents);
+  const runningQaAgentCount = Object.values(subagents)
     .flat()
     .filter((a) => a.info.status === 'running')
     .length;
@@ -186,7 +186,7 @@ function RightPanel() {
               className="min-w-0 flex-1 flex flex-col overflow-hidden"
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <QAPanel />}
+                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <SubagentPanel />}
               </div>
               <WatcherStatusBar />
             </motion.div>
@@ -217,7 +217,7 @@ function RightPanel() {
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
           <ActivityBarIcon
             icon={Eye}
-            tab="qa"
+            tab="subagents"
             tooltip={
               runningQaAgentCount > 0 && qaJsErrorCount > 0
                 ? `QA Preview (${runningQaAgentCount} running, ${qaJsErrorCount} errors)`
