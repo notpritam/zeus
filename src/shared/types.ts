@@ -169,7 +169,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp' | 'task';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -715,6 +715,47 @@ export type McpPayload =
   | { type: 'session_mcps'; sessionId: string; mcps: SessionMcpRecord[] }
   | { type: 'session_mcp_status'; sessionId: string; serverId: string; status: 'attached' | 'active' | 'failed' }
   | { type: 'mcp_error'; message: string; serverId?: string };
+
+// ─── Task / Worktree Types ───
+
+export type TaskStatus = 'creating' | 'running' | 'completed' | 'merged' | 'pr_created' | 'archived' | 'discarded' | 'error';
+
+export interface TaskRecord {
+  id: string;
+  name: string;
+  prompt: string;
+  branch: string;           // e.g. "zeus/a1b2-add-dark-mode"
+  baseBranch: string;       // e.g. "main"
+  worktreeDir: string;      // absolute: "/Users/foo/myapp/.worktrees/a1b2-add-dark-mode"
+  projectPath: string;      // absolute: "/Users/foo/myapp"
+  status: TaskStatus;
+  sessionId: string | null; // linked Claude session envelope ID
+  prUrl: string | null;
+  diffSummary: string | null;  // "3 files, +120 -15"
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
+export type TaskPayload =
+  // Client → Server
+  | { type: 'create_task'; name: string; prompt: string; projectPath: string; baseBranch?: string; permissionMode?: PermissionMode; model?: string }
+  | { type: 'list_tasks' }
+  | { type: 'get_task'; taskId: string }
+  | { type: 'continue_task'; taskId: string; prompt: string }
+  | { type: 'merge_task'; taskId: string }
+  | { type: 'create_pr'; taskId: string; title?: string; body?: string }
+  | { type: 'archive_task'; taskId: string }
+  | { type: 'unarchive_task'; taskId: string }
+  | { type: 'discard_task'; taskId: string }
+  | { type: 'get_task_diff'; taskId: string }
+  // Server → Client
+  | { type: 'task_created'; task: TaskRecord }
+  | { type: 'task_updated'; task: TaskRecord }
+  | { type: 'task_list'; tasks: TaskRecord[] }
+  | { type: 'task_deleted'; taskId: string }
+  | { type: 'task_diff'; taskId: string; diff: string; summary: string }
+  | { type: 'task_error'; message: string; taskId?: string };
 
 export type SubagentPayload =
   // Client → Server
