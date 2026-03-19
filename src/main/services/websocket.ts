@@ -57,27 +57,26 @@ import {
   deleteTerminalSession,
   restoreTerminalSession,
   archiveTerminalSession,
-  insertQaAgentSession,
-  updateQaAgentSessionStatus,
-  getQaAgentSessionsByParent,
-  deleteQaAgentSession,
-  deleteQaAgentsByParent,
-  countQaAgentsByParent,
-  insertQaAgentEntry,
-  getQaAgentEntries,
-  clearQaAgentEntries,
-  updateQaAgentResumeData,
-  getQaAgentSession,
-  markStaleQaAgentsErrored,
+  insertSubagentSession,
+  updateSubagentSessionStatus,
+  getSubagentSessionsByParent,
+  deleteSubagentSession,
+  countSubagentsByParent,
+  insertSubagentEntry,
+  getSubagentEntries,
+  clearSubagentEntries,
+  updateSubagentResumeData,
+  getSubagentSession,
   finalizeCreatedToolEntries,
   copyClaudeEntriesForResume,
   updateClaudeSessionQaTargetUrl,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaPayload, SessionIconName } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { getSubagentType, type SubagentContext } from './subagent-registry';
 import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
 import { FlowRunner } from './flow-runner';
@@ -116,9 +115,11 @@ const fileTreeManager = new FileTreeServiceManager();
 // QA service (singleton PinchTab server)
 let qaService: QAService | null = null;
 
-// QA agent sessions — keyed by qaAgentId, multiple per parent session
-interface QaAgentRecord {
-  qaAgentId: string;
+// Subagent sessions — keyed by subagentId, multiple per parent session
+interface SubagentRecord {
+  subagentId: string;
+  subagentType: SubagentType;
+  cli: SubagentCli;
   parentSessionId: string;
   parentSessionType: 'terminal' | 'claude';
   name?: string;
@@ -138,21 +139,21 @@ interface QaAgentRecord {
   /** Accumulate text entries for final summary */
   collectedTextEntries: string[];
 }
-const qaAgentSessions = new Map<string, QaAgentRecord>();
+const subagentSessions = new Map<string, SubagentRecord>();
 
-// Track parentSessionId for external QA agents (registered via zeus-bridge MCP)
-const externalQaParentMap = new Map<string, string>();
-let qaAgentIdCounter = 0;
+// Track parentSessionId for external subagents (registered via zeus-bridge MCP)
+const externalSubagentParentMap = new Map<string, string>();
+let subagentIdCounter = 0;
 
 // QA flow runner — loads structured flow definitions from qa-flows/
 const flowRunner = new FlowRunner(path.join(app.getAppPath(), 'qa-flows'));
 
-/** Kill all running QA agents that belong to a given parent session. */
-function stopQaAgentsByParent(parentSessionId: string): void {
-  for (const [id, record] of qaAgentSessions) {
+/** Kill all running subagents that belong to a given parent session. */
+function stopSubagentsByParent(parentSessionId: string): void {
+  for (const [id, record] of subagentSessions) {
     if (record.parentSessionId === parentSessionId) {
       try { if (record.session) record.session.kill(); } catch { /* already dead */ }
-      qaAgentSessions.delete(id);
+      subagentSessions.delete(id);
     }
   }
 }
@@ -342,7 +343,7 @@ function handleControl(ws: WebSocket, envelope: WsEnvelope): void {
     const sid = envelope.sessionId;
     destroySession(sid);
     markKilled(sid);
-    stopQaAgentsByParent(sid);
+    stopSubagentsByParent(sid);
     deleteTerminalSession(sid);
     const owned = clientSessions.get(ws);
     if (owned) owned.delete(sid);
@@ -650,54 +651,6 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
   });
 }
 
-function buildQAAgentSystemPrompt(targetUrl: string | undefined): string {
-  const urlLine = targetUrl
-    ? `You are a QA agent for a web application running at ${targetUrl}.`
-    : `You are a QA agent. No target URL was auto-detected — use qa_navigate to the correct URL once you determine it from the project config or ask the task description.`;
-  return `${urlLine}
-
-You have full access to:
-- Navigation & page info: qa_navigate, qa_text, qa_pdf, qa_health
-- Element interaction: qa_click, qa_click_selector, qa_hover, qa_focus, qa_select_text, qa_type, qa_fill, qa_press, qa_scroll
-- DOM inspection: qa_snapshot (supports CSS selector scoping and compact format), qa_screenshot (supports full_page)
-- JavaScript execution: qa_evaluate (run JS in page context — read app state, dispatch events, assert DOM)
-- Tab management: qa_list_tabs, qa_lock_tab, qa_unlock_tab
-- Browser state: qa_cookies (get/set), qa_storage (localStorage/sessionStorage)
-- Observability: qa_console_logs (filter by level), qa_network_requests (filter by URL pattern, failed_only), qa_js_errors
-- Smart waiting: qa_wait_for_element (poll until selector matches), qa_wait_for_network_idle
-- Assertions: qa_assert_element (assert exists/not-exists with optional text match)
-- Batch: qa_batch_actions (run multiple actions in one call — much faster)
-- Compound: qa_run_test_flow (navigate + wait + snapshot + screenshot + errors in one call)
-- Instance info: qa_list_instances, qa_list_profiles
-- Completion: qa_finish (REQUIRED — call when done to send results to parent agent)
-- File editing: Read, Edit, Write tools
-- Shell commands: Bash tool
-
-Tips for speed:
-- Use qa_batch_actions to chain clicks/types/presses instead of calling each tool individually.
-- Use qa_snapshot with a CSS selector param to scope to a section — avoids huge accessibility trees.
-- Use qa_click_selector for table rows, cards, and other non-focusable clickable elements.
-- Use qa_wait_for_element instead of fixed delays — it polls and returns as soon as the element appears.
-- Use qa_assert_element for pass/fail checks — it auto-retries with timeout.
-- For React controlled inputs, use qa_click on the field then qa_type (not qa_fill which may miss onChange).
-- Use qa_evaluate to read Redux/Zustand store state or dispatch synthetic events.
-
-Your workflow:
-1. Navigate to the target URL
-2. Test the requested functionality using the fastest tools available
-3. Use qa_assert_element and qa_wait_for_element to verify state changes
-4. Check qa_console_logs, qa_network_requests, and qa_js_errors
-5. If you find bugs: fix the code, then re-test to confirm the fix
-6. Call qa_finish with your complete findings — this is MANDATORY
-
-CRITICAL: You MUST call qa_finish when you are done. This sends your results back to the parent agent.
-Without it, the parent agent will timeout waiting for your response. Always call qa_finish as your LAST action.
-
-Always use qa_run_test_flow after making code changes to verify the fix.
-Be concise — the user sees a compact action log, not a full chat.
-Never use AskUserQuestion — make your best judgment and proceed.`;
-}
-
 /** Read the qa_finish file written by the QA agent's MCP server */
 function readQaFinishFile(qaAgentId: string, sessionPid?: number): { summary: string; status: string } | null {
   // Try qaAgentId-based path first, then fallback to PID-based
@@ -722,8 +675,8 @@ function readQaFinishFile(qaAgentId: string, sessionPid?: number): { summary: st
   return null;
 }
 
-function wireQAAgent(record: QaAgentRecord): void {
-  const { qaAgentId, parentSessionId } = record;
+function wireSubagent(record: SubagentRecord): void {
+  const { subagentId, parentSessionId } = record;
   const session = record.session!; // guaranteed non-null when wiring
 
   // Accumulate streaming text/thinking — only emit once finalized
@@ -734,10 +687,10 @@ function wireQAAgent(record: QaAgentRecord): void {
 
   const emit = (entry: NormalizedEntry): void => {
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_entry', subagentId, parentSessionId, entry },
     });
-    insertQaAgentEntry(qaAgentId, entry.entryType.type, JSON.stringify(entry), Date.now());
+    insertSubagentEntry(subagentId, entry.entryType.type, JSON.stringify(entry), Date.now());
   };
 
   const flushPendingText = (): void => {
@@ -808,56 +761,56 @@ function wireQAAgent(record: QaAgentRecord): void {
 
   // Turn ended (process still alive) — send deferred response and kill
   session.on('result', () => {
-    console.log(`[QA Agent] result event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'}, pid=${session.pid}, isRunning=${session.isRunning})`);
+    console.log(`[Subagent] result event fired for ${subagentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'}, pid=${session.pid}, isRunning=${session.isRunning})`);
     flushPendingText();
     flushPendingThinking();
 
     // Save Claude session data for resume support
     record.claudeSessionId = session.sessionId ?? undefined;
     record.lastMessageId = session.lastMessageId ?? undefined;
-    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
+    updateSubagentResumeData(subagentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
 
-    updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
+    updateSubagentSessionStatus(subagentId, 'stopped', Date.now());
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_stopped', subagentId, parentSessionId },
     });
 
     // Send deferred response to zeus_qa_run caller.
     // Read the finish file (written by qa_finish tool) for structured findings.
     // If no finish file, use collected text entries as fallback summary.
     if (record.pendingResponseId && record.pendingResponseWs) {
-      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      const finishData = readQaFinishFile(subagentId, session.pid);
       let summary: string;
       let status: string;
 
       if (finishData) {
         summary = finishData.summary;
         status = finishData.status;
-        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+        console.log(`[Subagent] result: sending deferred response for ${subagentId} (qa_finish file found, status=${status})`);
       } else {
         const lastEntries = record.collectedTextEntries;
         summary = lastEntries.length > 0
           ? lastEntries[lastEntries.length - 1]
-          : 'QA agent completed (no qa_finish called).';
+          : 'Subagent completed (no qa_finish called).';
         status = 'done';
-        console.log(`[QA Agent] result: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text)`);
+        console.log(`[Subagent] result: sending deferred response for ${subagentId} (no qa_finish file, using collected text)`);
       }
 
       try {
         sendEnvelope(record.pendingResponseWs, {
-          channel: 'qa', sessionId: '', auth: '',
+          channel: 'subagent', sessionId: '', auth: '',
           payload: {
-            type: 'start_qa_agent_response',
+            type: 'start_subagent_response',
             responseId: record.pendingResponseId,
-            qaAgentId,
+            subagentId,
             status,
             summary,
           },
         });
-        console.log(`[QA Agent] result: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId}, wsState=${record.pendingResponseWs.readyState})`);
+        console.log(`[Subagent] result: deferred response SENT for ${subagentId} (responseId=${record.pendingResponseId}, wsState=${record.pendingResponseWs.readyState})`);
       } catch (err) {
-        console.error(`[QA Agent] result: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
+        console.error(`[Subagent] result: failed to send deferred response for ${subagentId}:`, (err as Error).message);
       }
       record.pendingResponseId = undefined;
       record.pendingResponseWs = undefined;
@@ -870,87 +823,87 @@ function wireQAAgent(record: QaAgentRecord): void {
   });
 
   session.on('done', () => {
-    console.log(`[QA Agent] done event fired for ${qaAgentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'})`);
+    console.log(`[Subagent] done event fired for ${subagentId} (pendingResponseId=${record.pendingResponseId ?? 'NONE'}, wsState=${record.pendingResponseWs?.readyState ?? 'NO_WS'})`);
     flushPendingText();
     flushPendingThinking();
-    updateQaAgentSessionStatus(qaAgentId, 'stopped', Date.now());
+    updateSubagentSessionStatus(subagentId, 'stopped', Date.now());
 
     // Save Claude session data for --resume support (in-memory + DB)
     record.claudeSessionId = session.sessionId ?? undefined;
     record.lastMessageId = session.lastMessageId ?? undefined;
     record.session = null; // process is dead but record stays for resume
-    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
+    updateSubagentResumeData(subagentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
 
-    // Send deferred response to zeus_qa_run caller with the final summary
+    // Send deferred response to caller with the final summary
     if (record.pendingResponseId && record.pendingResponseWs) {
-      const finishData = readQaFinishFile(qaAgentId, session.pid);
+      const finishData = readQaFinishFile(subagentId, session.pid);
       let summary: string;
       let status: string;
 
       if (finishData) {
         summary = finishData.summary;
         status = finishData.status;
-        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (qa_finish file found, status=${status})`);
+        console.log(`[Subagent] done: sending deferred response for ${subagentId} (qa_finish file found, status=${status})`);
       } else {
         const lastEntries = record.collectedTextEntries;
         summary = lastEntries.length > 0
           ? lastEntries[lastEntries.length - 1]
-          : 'QA agent completed without a summary.';
+          : 'Subagent completed without a summary.';
         status = 'done';
-        console.log(`[QA Agent] done: sending deferred response for ${qaAgentId} (no qa_finish file, using collected text, entries=${lastEntries.length})`);
+        console.log(`[Subagent] done: sending deferred response for ${subagentId} (no qa_finish file, using collected text, entries=${lastEntries.length})`);
       }
 
       try {
         sendEnvelope(record.pendingResponseWs, {
-          channel: 'qa', sessionId: '', auth: '',
+          channel: 'subagent', sessionId: '', auth: '',
           payload: {
-            type: 'start_qa_agent_response',
+            type: 'start_subagent_response',
             responseId: record.pendingResponseId,
-            qaAgentId,
+            subagentId,
             status,
             summary,
           },
         });
-        console.log(`[QA Agent] done: deferred response SENT for ${qaAgentId} (responseId=${record.pendingResponseId})`);
+        console.log(`[Subagent] done: deferred response SENT for ${subagentId} (responseId=${record.pendingResponseId})`);
       } catch (err) {
-        console.error(`[QA Agent] done: failed to send deferred response for ${qaAgentId}:`, (err as Error).message);
+        console.error(`[Subagent] done: failed to send deferred response for ${subagentId}:`, (err as Error).message);
       }
       record.pendingResponseId = undefined;
       record.pendingResponseWs = undefined;
     } else {
-      console.log(`[QA Agent] done: no pending response for ${qaAgentId} (already sent or not a zeus_qa_run agent)`);
+      console.log(`[Subagent] done: no pending response for ${subagentId} (already sent or not a subagent run)`);
     }
 
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_stopped', subagentId, parentSessionId },
     });
-    // Don't delete from qaAgentSessions — keep record for resume
+    // Don't delete from subagentSessions — keep record for resume
   });
 
   session.on('error', (err) => {
-    console.error(`[QA Agent] error event fired for ${qaAgentId}: ${err.message} (pendingResponseId=${record.pendingResponseId ?? 'NONE'})`);
+    console.error(`[Subagent] error event fired for ${subagentId}: ${err.message} (pendingResponseId=${record.pendingResponseId ?? 'NONE'})`);
     flushPendingText();
     flushPendingThinking();
     const crashEntry = { kind: 'error' as const, message: `Agent crashed: ${err.message}`, timestamp: Date.now() };
-    insertQaAgentEntry(qaAgentId, crashEntry.kind, JSON.stringify(crashEntry), crashEntry.timestamp);
-    updateQaAgentSessionStatus(qaAgentId, 'error', Date.now());
+    insertSubagentEntry(subagentId, crashEntry.kind, JSON.stringify(crashEntry), crashEntry.timestamp);
+    updateSubagentSessionStatus(subagentId, 'error', Date.now());
 
     // Save Claude session data for --resume support (in-memory + DB)
     record.claudeSessionId = session.sessionId ?? undefined;
     record.lastMessageId = session.lastMessageId ?? undefined;
     record.session = null;
-    updateQaAgentResumeData(qaAgentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
+    updateSubagentResumeData(subagentId, record.claudeSessionId ?? null, record.lastMessageId ?? null);
 
-    // Send deferred error response to zeus_qa_run caller
+    // Send deferred error response to caller
     if (record.pendingResponseId && record.pendingResponseWs) {
       try {
         sendEnvelope(record.pendingResponseWs, {
-          channel: 'qa', sessionId: '', auth: '',
+          channel: 'subagent', sessionId: '', auth: '',
           payload: {
-            type: 'start_qa_agent_response',
+            type: 'start_subagent_response',
             responseId: record.pendingResponseId,
-            qaAgentId,
+            subagentId,
             status: 'error',
             summary: `Agent crashed: ${err.message}`,
           },
@@ -961,17 +914,17 @@ function wireQAAgent(record: QaAgentRecord): void {
     }
 
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
+      channel: 'subagent', sessionId: '', auth: '',
       payload: {
-        type: 'qa_agent_entry',
-        qaAgentId,
+        type: 'subagent_entry',
+        subagentId,
         parentSessionId,
         entry: crashEntry,
       },
     });
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_stopped', subagentId, parentSessionId },
     });
     // Don't delete — keep record for resume
   });
@@ -1306,7 +1259,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
   } else if (payload.type === 'stop_claude') {
     adoptClaudeSession(ws, envelope.sessionId);
     claudeManager.killSession(envelope.sessionId);
-    stopQaAgentsByParent(envelope.sessionId);
+    stopSubagentsByParent(envelope.sessionId);
     updateClaudeSessionStatus(envelope.sessionId, 'done', Date.now());
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
@@ -1328,7 +1281,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         workingDir: s.workingDir ?? undefined,
         qaTargetUrl: s.qaTargetUrl ?? undefined,
         startedAt: s.startedAt,
-        qaAgentCount: countQaAgentsByParent(s.id),
+        subagentCount: countSubagentsByParent(s.id),
       };
     });
     sendEnvelope(ws, {
@@ -1435,7 +1388,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     // Kill if still running, stop git watcher, stop QA agents, then soft-delete (recoverable for 30 days)
     claudeManager.killSession(envelope.sessionId);
     gitManager.stopWatching(envelope.sessionId);
-    stopQaAgentsByParent(envelope.sessionId);
+    stopSubagentsByParent(envelope.sessionId);
     deleteClaudeSession(envelope.sessionId);
     const owned = clientClaudeSessions.get(ws);
     if (owned) owned.delete(envelope.sessionId);
@@ -2093,7 +2046,7 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 }
 
 async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
-  const payload = envelope.payload as QaPayload;
+  const payload = envelope.payload as QaBrowserPayload;
 
   if (payload.type === 'start_qa') {
     try {
@@ -2110,9 +2063,9 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       });
     }
   } else if (payload.type === 'stop_qa') {
-    // Kill all QA agents (they depend on PinchTab)
-    for (const [id, record] of qaAgentSessions) {
-      record.session.kill();
+    // Kill all subagents that use PinchTab (they depend on it)
+    for (const [id, record] of subagentSessions) {
+      if (record.subagentType === 'qa' && record.session) record.session.kill();
     }
 
     if (qaService) {
@@ -2225,181 +2178,234 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'qa_flows_list', flows: flowRunner.listFlows() },
     });
-  } else if (payload.type === 'start_qa_agent') {
-    console.log('[QA Agent] start_qa_agent received:', { task: payload.task, parentSessionId: payload.parentSessionId, parentSessionType: payload.parentSessionType, workingDir: payload.workingDir, targetUrl: payload.targetUrl });
+  } else {
+    sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
+  }
+}
+
+async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as SubagentPayload;
+
+  if (payload.type === 'start_subagent') {
+    const subagentType: SubagentType = payload.subagentType ?? 'qa';
+    const cli: SubagentCli = payload.cli ?? 'claude';
+    const inputs = payload.inputs ?? {};
+    const task = inputs.task ?? '';
+    const workingDir = payload.workingDir;
+    const parentSessionId = payload.parentSessionId;
+    const parentSessionType = payload.parentSessionType;
+    const definition = getSubagentType(subagentType);
+
+    console.log(`[Subagent] start_subagent received:`, { subagentType, cli, task, parentSessionId, parentSessionType, workingDir });
+
     try {
-      if (!qaService?.isRunning()) {
-        qaService = new QAService();
-        await qaService.start();
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: { type: 'qa_started' },
-        });
-      }
-      const instances = await qaService.listInstances();
-      if (instances.length === 0) {
-        const instance = await qaService.launchInstance(true);
-        broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
-          payload: { type: 'instance_launched', instance },
-        });
-        const cdp = qaService.getCdpClient();
-        if (cdp) {
-          cdp.on('console', (entry) => {
-            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_console', logs: [entry] } });
-          });
-          cdp.on('network', (entry) => {
-            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_network', requests: [entry] } });
-          });
-          cdp.on('js_error', (entry) => {
-            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_error', errors: [entry] } });
-          });
-          cdp.on('navigated', ({ url, title }: { url: string; title: string }) => {
-            broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'navigate_result', url, title } });
-          });
-        }
-      }
-
-      // Resolve target URL: explicit payload > parent session's detected URL > live detection > env default
-      let targetUrl = payload.targetUrl;
-      if (!targetUrl) {
-        const parentSessions = getAllClaudeSessions();
-        const parentSession = parentSessions.find((s) => s.id === payload.parentSessionId);
-        targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || undefined;
-      }
-      // If still no URL, run live detection for the working directory
-      if (!targetUrl) {
-        const detected = await detectDevServerUrlDetailed(payload.workingDir);
-        if (detected.url) {
-          targetUrl = detected.url;
-          console.log(`[QA Agent] Auto-detected target URL: ${detected.url} (${detected.detail})`);
-          // Also persist it so future agents pick it up
-          if (payload.parentSessionId) {
-            updateClaudeSessionQaTargetUrl(payload.parentSessionId, detected.url);
-          }
-        } else {
-          console.warn(`[QA Agent] No target URL detected — agent will start without a URL. Detail: ${detected.detail}`);
-        }
-      }
-
-      // ── Flow Resolution ──
-      const resolved = flowRunner.resolve(payload.task, {
-        flowId: payload.flowId,
-        personas: payload.personas,
-      });
-
-      if (resolved) {
-        // ── Structured flow: spawn one agent per persona ──
-        const personaPromises = resolved.personas.map(async (persona) => {
-          const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}-${persona.id}`;
-          const parentSessionId = payload.parentSessionId;
-          const parentSessionType = payload.parentSessionType;
-          const agentName = payload.name
-            ? `${payload.name} (${persona.id})`
-            : `${resolved.flow.name} — ${persona.id}`;
-
-          const session = new ClaudeSession({
-            workingDir: payload.workingDir,
-            permissionMode: 'bypassPermissions',
-            enableQA: true,
-            qaTargetUrl: targetUrl,
-            zeusSessionId: payload.parentSessionId,
-            qaAgentId,
-          });
-
-          const record: QaAgentRecord = {
-            qaAgentId,
-            parentSessionId,
-            parentSessionType,
-            name: agentName,
-            task: `[Flow: ${resolved.flow.id}] ${persona.id}`,
-            targetUrl,
-            workingDir: payload.workingDir,
-            session,
-            startedAt: Date.now(),
-            pendingResponseId: payload.responseId,
-            pendingResponseWs: ws,
-            collectedTextEntries: [],
-          };
-
-          qaAgentSessions.set(qaAgentId, record);
-          console.log(`[QA Agent] Created flow record: qaAgentId=${qaAgentId}, flow=${resolved.flow.id}, persona=${persona.id}`);
-          wireQAAgent(record);
-
-          insertQaAgentSession({
-            id: qaAgentId,
-            parentSessionId,
-            parentSessionType,
-            name: agentName ?? null,
-            task: record.task,
-            targetUrl,
-            status: 'running',
-            startedAt: record.startedAt,
-            endedAt: null,
-            workingDir: payload.workingDir,
-          });
-
-          console.log('[QA Agent] Flow agent started successfully:', qaAgentId);
+      // QA-specific setup: ensure PinchTab is running
+      if (subagentType === 'qa') {
+        if (!qaService?.isRunning()) {
+          qaService = new QAService();
+          await qaService.start();
           broadcastEnvelope({
             channel: 'qa', sessionId: '', auth: '',
-            payload: {
-              type: 'qa_agent_started',
-              qaAgentId,
+            payload: { type: 'qa_started' },
+          });
+        }
+        const instances = await qaService.listInstances();
+        if (instances.length === 0) {
+          const instance = await qaService.launchInstance(true);
+          broadcastEnvelope({
+            channel: 'qa', sessionId: '', auth: '',
+            payload: { type: 'instance_launched', instance },
+          });
+          const cdp = qaService.getCdpClient();
+          if (cdp) {
+            cdp.on('console', (entry) => {
+              broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_console', logs: [entry] } });
+            });
+            cdp.on('network', (entry) => {
+              broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_network', requests: [entry] } });
+            });
+            cdp.on('js_error', (entry) => {
+              broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'cdp_error', errors: [entry] } });
+            });
+            cdp.on('navigated', ({ url, title }: { url: string; title: string }) => {
+              broadcastEnvelope({ channel: 'qa', sessionId: '', auth: '', payload: { type: 'navigate_result', url, title } });
+            });
+          }
+        }
+      }
+
+      // Resolve target URL (QA-specific): explicit input > parent session's detected URL > live detection > env default
+      let targetUrl: string | undefined = inputs.targetUrl;
+      if (subagentType === 'qa') {
+        if (!targetUrl) {
+          const parentSessions = getAllClaudeSessions();
+          const parentSession = parentSessions.find((s) => s.id === parentSessionId);
+          targetUrl = parentSession?.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || undefined;
+        }
+        // If still no URL, run live detection for the working directory
+        if (!targetUrl) {
+          const detected = await detectDevServerUrlDetailed(workingDir);
+          if (detected.url) {
+            targetUrl = detected.url;
+            console.log(`[Subagent] Auto-detected target URL: ${detected.url} (${detected.detail})`);
+            if (parentSessionId) {
+              updateClaudeSessionQaTargetUrl(parentSessionId, detected.url);
+            }
+          } else {
+            console.warn(`[Subagent] No target URL detected — agent will start without a URL. Detail: ${detected.detail}`);
+          }
+        }
+      }
+
+      // Build context for prompt generation
+      const context: SubagentContext = {
+        workingDir,
+        parentSessionId,
+        parentSessionType,
+        targetUrl,
+      };
+
+      // For non-QA types: read file if inputs.filePath exists
+      if (subagentType !== 'qa' && inputs.filePath) {
+        try { context.fileContent = fs.readFileSync(path.resolve(workingDir, inputs.filePath), 'utf-8'); } catch { /* ignore */ }
+      }
+
+      // ── Flow Resolution (QA-specific) ──
+      if (subagentType === 'qa') {
+        const resolved = flowRunner.resolve(task, {
+          flowId: inputs.flowId,
+          personas: inputs.personas ? inputs.personas.split(',').map((p: string) => p.trim()) : undefined,
+        });
+
+        if (resolved) {
+          context.resolvedFlow = resolved;
+
+          // ── Structured flow: spawn one agent per persona ──
+          const personaPromises = resolved.personas.map(async (persona) => {
+            const subagentId = `subagent-${++subagentIdCounter}-${Date.now()}-${persona.id}`;
+            const agentName = payload.name
+              ? `${payload.name} (${persona.id})`
+              : `${resolved.flow.name} — ${persona.id}`;
+
+            const sessionOpts: import('./claude-session').SessionOptions = {
+              workingDir,
+              permissionMode: definition?.permissionMode ?? 'bypassPermissions',
+              enableQA: true,
+              qaTargetUrl: targetUrl,
+              zeusSessionId: parentSessionId,
+              subagentId,
+            };
+            if (definition?.mcpServers?.length) {
+              sessionOpts.mcpServers = definition.mcpServers;
+            }
+            const session = new ClaudeSession(sessionOpts);
+
+            const record: SubagentRecord = {
+              subagentId,
+              subagentType,
+              cli,
               parentSessionId,
               parentSessionType,
               name: agentName,
-              task: record.task,
+              task: `[Flow: ${resolved.flow.id}] ${persona.id}`,
               targetUrl,
-            },
+              workingDir,
+              session,
+              startedAt: Date.now(),
+              pendingResponseId: payload.responseId,
+              pendingResponseWs: ws,
+              collectedTextEntries: [],
+            };
+
+            subagentSessions.set(subagentId, record);
+            console.log(`[Subagent] Created flow record: subagentId=${subagentId}, flow=${resolved.flow.id}, persona=${persona.id}`);
+            wireSubagent(record);
+
+            insertSubagentSession({
+              id: subagentId,
+              parentSessionId,
+              parentSessionType,
+              name: agentName ?? null,
+              task: record.task,
+              targetUrl: targetUrl ?? null,
+              status: 'running',
+              startedAt: record.startedAt,
+              endedAt: null,
+              workingDir,
+              subagentType,
+              cli,
+            });
+
+            console.log('[Subagent] Flow agent started successfully:', subagentId);
+            broadcastEnvelope({
+              channel: 'subagent', sessionId: '', auth: '',
+              payload: {
+                type: 'subagent_started',
+                subagentId,
+                subagentType,
+                cli,
+                parentSessionId,
+                parentSessionType,
+                name: agentName,
+                task: record.task,
+                targetUrl,
+              },
+            });
+
+            const effectiveUrl = targetUrl || 'http://localhost:5173';
+            const flowSection = flowRunner.buildAgentPrompt(resolved.flow, persona, effectiveUrl);
+            const flowPrompt = definition
+              ? definition.buildPrompt({ ...inputs, task: flowSection }, { ...context, targetUrl: effectiveUrl })
+              : flowSection;
+
+            const initialMsgEntry: NormalizedEntry = {
+              id: `subagent-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              timestamp: new Date().toISOString(),
+              entryType: { type: 'user_message' },
+              content: flowSection,
+            };
+            broadcastEnvelope({
+              channel: 'subagent', sessionId: '', auth: '',
+              payload: { type: 'subagent_entry', subagentId, parentSessionId, entry: initialMsgEntry },
+            });
+            insertSubagentEntry(subagentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
+
+            await session.start(flowPrompt);
           });
 
-          const effectiveUrl = targetUrl || 'http://localhost:5173';
-          const flowSection = flowRunner.buildAgentPrompt(resolved.flow, persona, effectiveUrl);
-          const flowPrompt = `${buildQAAgentSystemPrompt(effectiveUrl)}\n\n---\n\n${flowSection}`;
-
-          const initialMsgEntry: NormalizedEntry = {
-            id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            timestamp: new Date().toISOString(),
-            entryType: { type: 'user_message' },
-            content: flowSection,
-          };
-          broadcastEnvelope({
-            channel: 'qa', sessionId: '', auth: '',
-            payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
-          });
-          insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
-
-          await session.start(flowPrompt);
-        });
-
-        // Spawn all persona agents in parallel
-        await Promise.all(personaPromises);
-        return; // Skip the free-form path below
+          // Spawn all persona agents in parallel
+          await Promise.all(personaPromises);
+          return; // Skip the free-form path below
+        }
       }
 
-      // ── Free-form fallback: no flow matched — existing code below runs unchanged ──
-      const qaAgentId = `qa-agent-${++qaAgentIdCounter}-${Date.now()}`;
-      const parentSessionId = payload.parentSessionId;
-      const parentSessionType = payload.parentSessionType;
+      // ── Free-form / non-QA fallback ──
+      const subagentId = `subagent-${++subagentIdCounter}-${Date.now()}`;
 
-      const session = new ClaudeSession({
-        workingDir: payload.workingDir,
-        permissionMode: 'bypassPermissions',
-        enableQA: true,
+      const sessionOpts: import('./claude-session').SessionOptions = {
+        workingDir,
+        permissionMode: definition?.permissionMode ?? 'bypassPermissions',
+        enableQA: subagentType === 'qa',
         qaTargetUrl: targetUrl,
-        zeusSessionId: payload.parentSessionId,
-        qaAgentId,
-      });
+        zeusSessionId: parentSessionId,
+        subagentId,
+      };
+      if (definition?.mcpServers?.length) {
+        sessionOpts.mcpServers = definition.mcpServers;
+      }
+      const session = new ClaudeSession(sessionOpts);
 
       const agentName = payload.name || undefined;
-      const record: QaAgentRecord = {
-        qaAgentId,
+      const record: SubagentRecord = {
+        subagentId,
+        subagentType,
+        cli,
         parentSessionId,
         parentSessionType,
         name: agentName,
-        task: payload.task,
+        task,
         targetUrl,
-        workingDir: payload.workingDir,
+        workingDir,
         session,
         startedAt: Date.now(),
         pendingResponseId: payload.responseId,
@@ -2407,131 +2413,139 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         collectedTextEntries: [],
       };
 
-      qaAgentSessions.set(qaAgentId, record);
-      console.log(`[QA Agent] Created record: qaAgentId=${qaAgentId}, pendingResponseId=${record.pendingResponseId}, pendingResponseWs.readyState=${ws.readyState}`);
-      wireQAAgent(record);
+      subagentSessions.set(subagentId, record);
+      console.log(`[Subagent] Created record: subagentId=${subagentId}, pendingResponseId=${record.pendingResponseId}, pendingResponseWs.readyState=${ws.readyState}`);
+      wireSubagent(record);
 
-      // Persist QA agent session to DB
-      insertQaAgentSession({
-        id: qaAgentId,
+      // Persist subagent session to DB
+      insertSubagentSession({
+        id: subagentId,
         parentSessionId,
         parentSessionType,
         name: agentName ?? null,
-        task: payload.task,
-        targetUrl,
+        task,
+        targetUrl: targetUrl ?? null,
         status: 'running',
         startedAt: record.startedAt,
         endedAt: null,
-        workingDir: payload.workingDir,
+        workingDir,
+        subagentType,
+        cli,
       });
 
-      // Broadcast qa_agent_started FIRST so the store creates the agent entry
-      console.log('[QA Agent] Agent started successfully:', qaAgentId);
+      // Broadcast subagent_started FIRST so the store creates the agent entry
+      console.log('[Subagent] Agent started successfully:', subagentId);
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
+        channel: 'subagent', sessionId: '', auth: '',
         payload: {
-          type: 'qa_agent_started',
-          qaAgentId,
+          type: 'subagent_started',
+          subagentId,
+          subagentType,
+          cli,
           parentSessionId,
           parentSessionType,
           name: agentName,
-          task: payload.task,
+          task,
           targetUrl,
         },
       });
 
       // Then broadcast initial user message so it shows in the panel
       const initialMsgEntry: NormalizedEntry = {
-        id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `subagent-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         timestamp: new Date().toISOString(),
         entryType: { type: 'user_message' },
-        content: payload.task,
+        content: task,
       };
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_entry', qaAgentId, parentSessionId, entry: initialMsgEntry },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_entry', subagentId, parentSessionId, entry: initialMsgEntry },
       });
-      insertQaAgentEntry(qaAgentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
+      insertSubagentEntry(subagentId, 'user_message', JSON.stringify(initialMsgEntry), Date.now());
 
-      const prompt = `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.task}`;
+      const prompt = definition
+        ? definition.buildPrompt(inputs, context)
+        : task;
       await session.start(prompt);
 
-      // Response is deferred — sent when the QA agent's turn ends (see wireQAAgent 'result' handler)
+      // Response is deferred — sent when the subagent's turn ends (see wireSubagent 'result' handler)
     } catch (err) {
-      console.error('[QA Agent] Failed to start:', (err as Error).message);
+      console.error('[Subagent] Failed to start:', (err as Error).message);
       sendEnvelope(ws, {
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_error', message: `Failed to start QA agent: ${(err as Error).message}` },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_error', message: `Failed to start subagent: ${(err as Error).message}` },
       });
     }
-  } else if (payload.type === 'stop_qa_agent') {
-    const record = qaAgentSessions.get(payload.qaAgentId);
+  } else if (payload.type === 'stop_subagent') {
+    const record = subagentSessions.get(payload.subagentId);
     if (record && record.session && record.session.isRunning) {
       // Interrupt (not kill) — keeps the session alive so the user can send follow-up messages
       try {
         await record.session.interrupt();
         // Broadcast a status entry so the user sees the interrupt happened
         const interruptEntry: NormalizedEntry = {
-          id: `qa-interrupt-${Date.now()}`,
+          id: `subagent-interrupt-${Date.now()}`,
           timestamp: new Date().toISOString(),
           entryType: { type: 'system_message' },
           content: 'Agent interrupted — you can send a new message.',
         };
         broadcastEnvelope({
-          channel: 'qa', sessionId: '', auth: '',
+          channel: 'subagent', sessionId: '', auth: '',
           payload: {
-            type: 'qa_agent_entry',
-            qaAgentId: payload.qaAgentId,
+            type: 'subagent_entry',
+            subagentId: payload.subagentId,
             parentSessionId: record.parentSessionId,
             entry: interruptEntry,
           },
         });
-        insertQaAgentEntry(payload.qaAgentId, 'system_message', JSON.stringify(interruptEntry), Date.now());
+        insertSubagentEntry(payload.subagentId, 'system_message', JSON.stringify(interruptEntry), Date.now());
       } catch {
         // interrupt() failed — process is likely already dead
       }
       // Always update status to stopped immediately so the UI reflects it
-      updateQaAgentSessionStatus(payload.qaAgentId, 'stopped');
+      updateSubagentSessionStatus(payload.subagentId, 'stopped');
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_stopped', subagentId: payload.subagentId, parentSessionId: record.parentSessionId },
       });
     } else if (record) {
       // Already stopped — broadcast to sync UI
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: record.parentSessionId },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_stopped', subagentId: payload.subagentId, parentSessionId: record.parentSessionId },
       });
     } else {
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_stopped', qaAgentId: payload.qaAgentId, parentSessionId: '' },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_stopped', subagentId: payload.subagentId, parentSessionId: '' },
       });
     }
-  } else if (payload.type === 'delete_qa_agent') {
+  } else if (payload.type === 'delete_subagent') {
     // Stop if running, then delete from DB and notify clients
-    const record = qaAgentSessions.get(payload.qaAgentId);
+    const record = subagentSessions.get(payload.subagentId);
     if (record) {
       if (record.session && record.session.isRunning) {
         record.session.kill();
       }
-      qaAgentSessions.delete(payload.qaAgentId);
+      subagentSessions.delete(payload.subagentId);
     }
-    deleteQaAgentSession(payload.qaAgentId);
+    deleteSubagentSession(payload.subagentId);
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_deleted', qaAgentId: payload.qaAgentId, parentSessionId: payload.parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_deleted', subagentId: payload.subagentId, parentSessionId: payload.parentSessionId },
     });
-  } else if (payload.type === 'list_qa_agents') {
+  } else if (payload.type === 'list_subagents') {
     // Merge in-memory agents (running or stopped-but-resumable) with completed agents from DB
     const inMemoryIds = new Set<string>();
-    const inMemoryAgents = Array.from(qaAgentSessions.values())
+    const inMemoryAgents = Array.from(subagentSessions.values())
       .filter((r) => r.parentSessionId === payload.parentSessionId)
       .map((r) => {
-        inMemoryIds.add(r.qaAgentId);
+        inMemoryIds.add(r.subagentId);
         const isAlive = r.session !== null && r.session.isRunning;
         return {
-          qaAgentId: r.qaAgentId,
+          subagentId: r.subagentId,
+          subagentType: r.subagentType,
+          cli: r.cli,
           parentSessionId: r.parentSessionId,
           parentSessionType: r.parentSessionType,
           name: r.name,
@@ -2543,10 +2557,12 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       });
 
     // Get completed/errored agents from DB (skip ones already in memory)
-    const dbAgents = getQaAgentSessionsByParent(payload.parentSessionId)
+    const dbAgents = getSubagentSessionsByParent(payload.parentSessionId)
       .filter((r) => !inMemoryIds.has(r.id))
       .map((r) => ({
-        qaAgentId: r.id,
+        subagentId: r.id,
+        subagentType: (r.subagentType ?? 'qa') as SubagentType,
+        cli: (r.cli ?? 'claude') as SubagentCli,
         parentSessionId: r.parentSessionId,
         parentSessionType: r.parentSessionType,
         name: r.name ?? undefined,
@@ -2558,18 +2574,20 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
     const agents = [...inMemoryAgents, ...dbAgents];
     sendEnvelope(ws, {
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_list', parentSessionId: payload.parentSessionId, agents },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_list', parentSessionId: payload.parentSessionId, agents },
     });
-  } else if (payload.type === 'qa_agent_message') {
-    let record = qaAgentSessions.get(payload.qaAgentId);
+  } else if (payload.type === 'subagent_message') {
+    let record = subagentSessions.get(payload.subagentId);
 
     // If not in memory, try to restore from DB (e.g. after app restart)
     if (!record) {
-      const dbRow = getQaAgentSession(payload.qaAgentId);
+      const dbRow = getSubagentSession(payload.subagentId);
       if (dbRow) {
         record = {
-          qaAgentId: dbRow.id,
+          subagentId: dbRow.id,
+          subagentType: (dbRow.subagentType ?? 'qa') as SubagentType,
+          cli: (dbRow.cli ?? 'claude') as SubagentCli,
           parentSessionId: dbRow.parentSessionId,
           parentSessionType: dbRow.parentSessionType,
           name: dbRow.name ?? undefined,
@@ -2582,43 +2600,45 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           startedAt: dbRow.startedAt,
           collectedTextEntries: [],
         };
-        qaAgentSessions.set(dbRow.id, record);
+        subagentSessions.set(dbRow.id, record);
       }
     }
 
     if (!record) {
       sendEnvelope(ws, {
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_error', message: 'No QA agent found with that ID' },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_error', message: 'No subagent found with that ID' },
       });
       return;
     }
 
     const userMsgEntry: NormalizedEntry = {
-      id: `qa-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `subagent-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date().toISOString(),
       entryType: { type: 'user_message' },
       content: payload.text,
     };
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
+      channel: 'subagent', sessionId: '', auth: '',
       payload: {
-        type: 'qa_agent_entry',
-        qaAgentId: payload.qaAgentId,
+        type: 'subagent_entry',
+        subagentId: payload.subagentId,
         parentSessionId: record.parentSessionId,
         entry: userMsgEntry,
       },
     });
-    insertQaAgentEntry(payload.qaAgentId, 'user_message', JSON.stringify(userMsgEntry), Date.now());
+    insertSubagentEntry(payload.subagentId, 'user_message', JSON.stringify(userMsgEntry), Date.now());
 
     try {
       // Broadcast that the agent is running again
-      updateQaAgentSessionStatus(record.qaAgentId, 'running');
+      updateSubagentSessionStatus(record.subagentId, 'running');
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
+        channel: 'subagent', sessionId: '', auth: '',
         payload: {
-          type: 'qa_agent_started',
-          qaAgentId: record.qaAgentId,
+          type: 'subagent_started',
+          subagentId: record.subagentId,
+          subagentType: record.subagentType,
+          cli: record.cli,
           parentSessionId: record.parentSessionId,
           parentSessionType: record.parentSessionType,
           name: record.name,
@@ -2629,20 +2649,24 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 
       if (record.session && record.session.isRunning) {
         // Session is alive (e.g. interrupted but process still running) — send message directly
-        console.log(`[QA] Sending follow-up to alive session ${record.qaAgentId}`);
+        console.log(`[Subagent] Sending follow-up to alive session ${record.subagentId}`);
         await record.session.sendMessage(payload.text);
       } else {
         // Session is dead — start a new session (with --resume if we have Claude session ID)
-        console.log(`[QA] Starting new session for agent ${record.qaAgentId} (resume=${!!record.claudeSessionId})`);
+        console.log(`[Subagent] Starting new session for agent ${record.subagentId} (resume=${!!record.claudeSessionId})`);
+        const definition = getSubagentType(record.subagentType);
         const targetUrl = record.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
         const sessionOpts: import('./claude-session').SessionOptions = {
           workingDir: record.workingDir,
-          permissionMode: 'bypassPermissions',
-          enableQA: true,
+          permissionMode: definition?.permissionMode ?? 'bypassPermissions',
+          enableQA: record.subagentType === 'qa',
           qaTargetUrl: targetUrl,
           zeusSessionId: record.parentSessionId,
-          qaAgentId: record.qaAgentId,
+          subagentId: record.subagentId,
         };
+        if (definition?.mcpServers?.length) {
+          sessionOpts.mcpServers = definition.mcpServers;
+        }
         if (record.claudeSessionId) {
           sessionOpts.resumeSessionId = record.claudeSessionId;
           sessionOpts.resumeAtMessageId = record.lastMessageId ?? undefined;
@@ -2650,61 +2674,64 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         const newSession = new ClaudeSession(sessionOpts);
         record.session = newSession;
         record.collectedTextEntries = [];
-        wireQAAgent(record);
+        wireSubagent(record);
 
         const prompt = record.claudeSessionId
           ? payload.text  // resuming — just send the follow-up text
-          : `${buildQAAgentSystemPrompt(targetUrl)}\n\n---\n\nTask: ${payload.text}`;
+          : (definition
+              ? definition.buildPrompt({ task: payload.text }, { workingDir: record.workingDir, parentSessionId: record.parentSessionId, parentSessionType: record.parentSessionType, targetUrl })
+              : payload.text);
         await newSession.start(prompt);
       }
     } catch (err) {
-      console.error(`[QA] Failed to send message to agent ${record.qaAgentId}:`, (err as Error).message);
+      console.error(`[Subagent] Failed to send message to agent ${record.subagentId}:`, (err as Error).message);
       // Revert status back to stopped so the UI isn't stuck on "running"
-      updateQaAgentSessionStatus(record.qaAgentId, 'stopped');
+      updateSubagentSessionStatus(record.subagentId, 'stopped');
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_stopped', qaAgentId: record.qaAgentId, parentSessionId: record.parentSessionId },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_stopped', subagentId: record.subagentId, parentSessionId: record.parentSessionId },
       });
       const errorEntry: NormalizedEntry = {
-        id: `qa-error-${Date.now()}`,
+        id: `subagent-error-${Date.now()}`,
         timestamp: new Date().toISOString(),
         entryType: { type: 'error_message', errorType: 'other' },
         content: `Failed to send message: ${(err as Error).message}`,
       };
       broadcastEnvelope({
-        channel: 'qa', sessionId: '', auth: '',
-        payload: { type: 'qa_agent_entry', qaAgentId: record.qaAgentId, parentSessionId: record.parentSessionId, entry: errorEntry },
+        channel: 'subagent', sessionId: '', auth: '',
+        payload: { type: 'subagent_entry', subagentId: record.subagentId, parentSessionId: record.parentSessionId, entry: errorEntry },
       });
-      insertQaAgentEntry(record.qaAgentId, 'error_message', JSON.stringify(errorEntry), Date.now());
+      insertSubagentEntry(record.subagentId, 'error_message', JSON.stringify(errorEntry), Date.now());
     }
-  } else if (payload.type === 'clear_qa_agent_entries') {
-    clearQaAgentEntries(payload.qaAgentId);
+  } else if (payload.type === 'clear_subagent_entries') {
+    clearSubagentEntries(payload.subagentId);
     // Also clear in-memory collected text
-    const record = qaAgentSessions.get(payload.qaAgentId);
+    const record = subagentSessions.get(payload.subagentId);
     if (record) {
       record.collectedTextEntries = [];
     }
-  } else if (payload.type === 'get_qa_agent_entries') {
+  } else if (payload.type === 'get_subagent_entries') {
     // Load persisted entries from DB for a specific agent
-    const dbEntries = getQaAgentEntries(payload.qaAgentId);
+    const dbEntries = getSubagentEntries(payload.subagentId);
     const entries = dbEntries
       .map((row) => JSON.parse(row.data) as NormalizedEntry)
       .filter((e) => e.entryType);
     sendEnvelope(ws, {
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_entries', qaAgentId: payload.qaAgentId, entries },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_entries', subagentId: payload.subagentId, entries },
     });
-  } else if (payload.type === 'register_external_qa') {
-    // External QA agent registration (from zeus-bridge MCP)
-    const qaAgentId = `qa-ext-${++qaAgentIdCounter}-${Date.now()}`;
+  } else if (payload.type === 'register_external_subagent') {
+    // External subagent registration (from zeus-bridge MCP)
+    const subagentId = `subagent-ext-${++subagentIdCounter}-${Date.now()}`;
     const parentSessionId = payload.parentSessionId || 'external';
     const parentSessionType = payload.parentSessionType || 'claude';
-    const task = payload.task || 'External QA test';
+    const subagentType: SubagentType = payload.subagentType ?? 'qa';
+    const task = payload.task || 'External subagent task';
     const targetUrl = payload.targetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
     const agentName = payload.name || undefined;
 
-    insertQaAgentSession({
-      id: qaAgentId,
+    insertSubagentSession({
+      id: subagentId,
       parentSessionId,
       parentSessionType,
       name: agentName ?? null,
@@ -2713,13 +2740,17 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       status: 'running',
       startedAt: Date.now(),
       endedAt: null,
+      subagentType,
+      cli: 'claude',
     });
 
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
+      channel: 'subagent', sessionId: '', auth: '',
       payload: {
-        type: 'qa_agent_started',
-        qaAgentId,
+        type: 'subagent_started',
+        subagentId,
+        subagentType,
+        cli: 'claude' as SubagentCli,
         parentSessionId,
         parentSessionType,
         name: agentName,
@@ -2728,52 +2759,52 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       },
     });
 
-    // Send response back with the qaAgentId
+    // Send response back with the subagentId
     sendEnvelope(ws, {
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'register_external_qa_response', responseId: payload.responseId, qaAgentId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'register_external_subagent_response', subagentId, responseId: payload.responseId },
     });
 
-    externalQaParentMap.set(qaAgentId, parentSessionId);
+    externalSubagentParentMap.set(subagentId, parentSessionId);
 
-    console.log(`[QA Agent] External agent registered: ${qaAgentId} (parent: ${parentSessionId})`);
+    console.log(`[Subagent] External agent registered: ${subagentId} (parent: ${parentSessionId})`);
 
-  } else if (payload.type === 'external_qa_entry') {
-    // External QA agent log entry (from zeus-bridge MCP)
-    const { qaAgentId, entry: rawEntry } = payload as { qaAgentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
-    if (!qaAgentId || !rawEntry) return;
+  } else if (payload.type === 'external_subagent_entry') {
+    // External subagent log entry (from zeus-bridge MCP)
+    const { subagentId, entry: rawEntry } = payload as { subagentId: string; entry: { kind: string; timestamp: number; [key: string]: unknown } };
+    if (!subagentId || !rawEntry) return;
 
     const normalizedEntry = rawEntry as unknown as NormalizedEntry;
 
-    insertQaAgentEntry(qaAgentId, normalizedEntry.entryType.type, JSON.stringify(normalizedEntry), Date.now());
-    const parentSessionId = externalQaParentMap.get(qaAgentId) ?? 'external';
+    insertSubagentEntry(subagentId, normalizedEntry.entryType.type, JSON.stringify(normalizedEntry), Date.now());
+    const parentSessionId = externalSubagentParentMap.get(subagentId) ?? 'external';
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
+      channel: 'subagent', sessionId: '', auth: '',
       payload: {
-        type: 'qa_agent_entry',
-        qaAgentId,
+        type: 'subagent_entry',
+        subagentId,
         parentSessionId,
         entry: normalizedEntry,
       },
     });
 
-  } else if (payload.type === 'external_qa_done') {
-    // External QA agent completion (from zeus-bridge MCP)
-    const { qaAgentId, status } = payload as { qaAgentId: string; status: string };
-    if (!qaAgentId) return;
+  } else if (payload.type === 'external_subagent_done') {
+    // External subagent completion (from zeus-bridge MCP)
+    const { subagentId, status } = payload as { subagentId: string; status: string };
+    if (!subagentId) return;
 
-    updateQaAgentSessionStatus(qaAgentId, status || 'stopped', Date.now());
-    const parentSessionId = externalQaParentMap.get(qaAgentId) ?? 'external';
+    updateSubagentSessionStatus(subagentId, status || 'stopped', Date.now());
+    const parentSessionId = externalSubagentParentMap.get(subagentId) ?? 'external';
     broadcastEnvelope({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_stopped', qaAgentId, parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_stopped', subagentId, parentSessionId },
     });
-    externalQaParentMap.delete(qaAgentId);
+    externalSubagentParentMap.delete(subagentId);
 
-    console.log(`[QA Agent] External agent stopped: ${qaAgentId} (${status})`);
+    console.log(`[Subagent] External agent stopped: ${subagentId} (${status})`);
 
   } else {
-    sendEnvelope(ws, { channel: 'qa', sessionId: '', payload: { type: 'qa_error', message: `Unknown QA type: ${(payload as { type: string }).type}` }, auth: '' });
+    sendEnvelope(ws, { channel: 'subagent', sessionId: '', payload: { type: 'subagent_error', message: `Unknown subagent type: ${(payload as { type: string }).type}` }, auth: '' });
   }
 }
 
@@ -2956,6 +2987,9 @@ function handleMessage(ws: WebSocket, raw: string): void {
       break;
     case 'qa':
       handleQA(ws, envelope);
+      break;
+    case 'subagent':
+      handleSubagent(ws, envelope);
       break;
     case 'perf':
       handlePerf(ws, envelope);
