@@ -749,15 +749,29 @@ function wireSubagent(record: SubagentRecord): void {
     if (entry.entryType.type === 'tool_use') {
       const { toolName, status } = entry.entryType;
       const isScreenshot = /screenshot/i.test(toolName);
-      if (isScreenshot && status === 'success' && qaService?.isRunning()) {
-        try {
-          const imageData = await qaService.screenshot();
-          if (imageData) {
-            const meta = (entry.metadata ?? {}) as Record<string, unknown>;
-            meta.images = [imageData];
-            entry = { ...entry, metadata: meta };
-          }
-        } catch { /* non-critical */ }
+      if (isScreenshot && status === 'success') {
+        // PinchTab QA screenshot (existing behavior, unchanged)
+        if (qaService?.isRunning()) {
+          try {
+            const imageData = await qaService.screenshot();
+            if (imageData) {
+              const meta = (entry.metadata ?? {}) as Record<string, unknown>;
+              meta.images = [imageData];
+              entry = { ...entry, metadata: meta };
+            }
+          } catch { /* non-critical */ }
+        }
+        // Android QA screenshot
+        else if (record.subagentType === 'android_qa' && androidQAService?.isRunning()) {
+          try {
+            const imageData = await androidQAService.screenshot();
+            if (imageData) {
+              const meta = (entry.metadata ?? {}) as Record<string, unknown>;
+              meta.images = [imageData];
+              entry = { ...entry, metadata: meta };
+            }
+          } catch { /* non-critical */ }
+        }
       }
     }
 
@@ -2374,6 +2388,34 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
         }
       }
 
+      // Android QA-specific setup: ensure emulator is running
+      if (subagentType === 'android_qa') {
+        const androidService = getAndroidQAService();
+
+        // 1. Ensure emulator is running (detect existing or boot new)
+        let device = await androidService.detectRunning();
+        if (!device) {
+          device = await androidService.start(inputs.avdName);
+        }
+
+        // 2. Wire logcat streaming
+        androidService.removeAllListeners('logcat');
+        androidService.on('logcat', (entries) => {
+          broadcastEnvelope({
+            channel: 'android', sessionId: '', auth: '',
+            payload: { type: 'logcat_entries', entries },
+          });
+        });
+
+        // 3. Launch app if appId provided
+        if (inputs.appId) {
+          await androidService.launchApp(inputs.appId);
+        }
+
+        // 4. Inject deviceId into inputs so buildPrompt can reference it
+        inputs.deviceId = device.deviceId;
+      }
+
       // Resolve target URL (QA-specific): explicit input > parent session's detected URL > live detection > env default
       let targetUrl: string | undefined = inputs.targetUrl;
       if (subagentType === 'qa') {
@@ -2533,6 +2575,34 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
       if (definition?.mcpServers?.length) {
         sessionOpts.mcpServers = definition.mcpServers;
       }
+
+      // Android QA: clone registry mcpServers and resolve maestro path at spawn time
+      if (subagentType === 'android_qa' && definition?.mcpServers?.length) {
+        const { findMaestroPath } = await import('./android-qa');
+        const clonedServers = definition.mcpServers.map(s => ({
+          ...s,
+          args: s.args ? [...s.args] : undefined,
+          env: s.env ? { ...s.env } : undefined,
+        }));
+
+        // Resolve maestro binary path (deferred from module load)
+        const maestroServer = clonedServers.find(s => s.name === 'maestro');
+        if (maestroServer) {
+          maestroServer.command = findMaestroPath();
+        }
+
+        // Inject device ID into extras server env
+        const extrasServer = clonedServers.find(s => s.name === 'android-qa-extras');
+        if (extrasServer) {
+          extrasServer.env = {
+            ...(extrasServer.env ?? {}),
+            ZEUS_ANDROID_DEVICE_ID: inputs.deviceId ?? '',
+          };
+        }
+
+        sessionOpts.mcpServers = clonedServers;
+      }
+
       const session = new ClaudeSession(sessionOpts);
 
       const agentName = payload.name || undefined;
