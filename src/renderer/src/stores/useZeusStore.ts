@@ -36,6 +36,11 @@ import type {
   LogcatEntry,
   AndroidViewNode,
   AndroidPayload,
+  McpServerRecord,
+  McpProfileRecord,
+  McpHealthResult,
+  SessionMcpRecord,
+  McpPayload,
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
@@ -147,6 +152,13 @@ interface ZeusState {
   launchAndroidApp: (appId: string) => void;
   clearAndroidLogcat: () => void;
 
+  // MCP Management
+  mcpServers: McpServerRecord[];
+  mcpProfiles: McpProfileRecord[];
+  mcpHealthResults: Record<string, McpHealthResult>;
+  sessionMcps: Record<string, SessionMcpRecord[]>;
+  mcpImportResult: { imported: string[]; skipped: string[] } | null;
+
   // Subagents — keyed by parentSessionId → multiple agents
   subagents: Record<string, SubagentClient[]>;        // parentSessionId → agents
   activeSubagentId: Record<string, string | null>;   // parentSessionId → selected subagentId
@@ -158,7 +170,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | null;
 
   // Session terminal panel (per-Claude-session terminals)
   sessionTerminals: Record<string, {
@@ -196,6 +208,9 @@ interface ZeusState {
     enableGitWatcher?: boolean;
     enableQA?: boolean;
     qaTargetUrl?: string;
+    mcpProfileId?: string;
+    mcpServerIds?: string[];
+    mcpExcludeIds?: string[];
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
@@ -289,8 +304,24 @@ interface ZeusState {
   fetchQaFlows: () => void;
   fetchMarkdownFiles: (sessionId: string) => void;
 
+  // MCP actions
+  fetchMcpServers: () => void;
+  addMcpServer: (name: string, command: string, args?: string[], env?: Record<string, string>) => void;
+  updateMcpServer: (id: string, updates: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) => void;
+  removeMcpServer: (id: string) => void;
+  toggleMcpServer: (id: string, enabled: boolean) => void;
+  healthCheckMcp: (id?: string) => void;
+  importMcpFromClaude: () => void;
+  fetchMcpProfiles: () => void;
+  createMcpProfile: (name: string, description: string, serverIds: string[]) => void;
+  updateMcpProfile: (id: string, updates: { name?: string; description?: string; serverIds?: string[] }) => void;
+  deleteMcpProfile: (id: string) => void;
+  setDefaultMcpProfile: (id: string) => void;
+  fetchSessionMcps: (sessionId: string) => void;
+  clearMcpImportResult: () => void;
+
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'mcp' | null) => void;
   toggleRightPanel: () => void;
 
   // Session terminal actions
@@ -485,6 +516,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   androidScreenshot: null,
   androidViewHierarchy: null,
   androidLogcat: [],
+
+  mcpServers: [],
+  mcpProfiles: [],
+  mcpHealthResults: {},
+  sessionMcps: {},
+  mcpImportResult: null,
 
   subagents: {},
   activeSubagentId: {},
@@ -1536,6 +1573,69 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to mcp channel
+    const unsubMcp = zeusWs.on('mcp', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as McpPayload;
+      switch (payload.type) {
+        case 'servers_list':
+          set({ mcpServers: payload.servers });
+          break;
+        case 'server_added':
+          set({ mcpServers: [...get().mcpServers, payload.server] });
+          break;
+        case 'server_updated':
+          set({ mcpServers: get().mcpServers.map((s) => s.id === payload.server.id ? payload.server : s) });
+          break;
+        case 'server_removed':
+          set({ mcpServers: get().mcpServers.filter((s) => s.id !== payload.id) });
+          break;
+        case 'health_result':
+          set({
+            mcpHealthResults: {
+              ...get().mcpHealthResults,
+              [payload.id]: { healthy: payload.healthy, error: payload.error, latencyMs: payload.latencyMs },
+            },
+          });
+          break;
+        case 'health_results':
+          set({ mcpHealthResults: { ...get().mcpHealthResults, ...payload.results } });
+          break;
+        case 'import_result':
+          set({ mcpImportResult: { imported: payload.imported, skipped: payload.skipped } });
+          break;
+        case 'profiles_list':
+          set({ mcpProfiles: payload.profiles });
+          break;
+        case 'profile_created':
+          set({ mcpProfiles: [...get().mcpProfiles, payload.profile] });
+          break;
+        case 'profile_updated':
+          set({ mcpProfiles: get().mcpProfiles.map((p) => p.id === payload.profile.id ? payload.profile : p) });
+          break;
+        case 'profile_deleted':
+          set({ mcpProfiles: get().mcpProfiles.filter((p) => p.id !== payload.id) });
+          break;
+        case 'session_mcps':
+          set({ sessionMcps: { ...get().sessionMcps, [payload.sessionId]: payload.mcps } });
+          break;
+        case 'session_mcp_status': {
+          const existing = get().sessionMcps[payload.sessionId] ?? [];
+          set({
+            sessionMcps: {
+              ...get().sessionMcps,
+              [payload.sessionId]: existing.map((m) =>
+                m.serverId === payload.serverId ? { ...m, status: payload.status } : m,
+              ),
+            },
+          });
+          break;
+        }
+        case 'mcp_error':
+          console.error('[MCP]', payload.message);
+          break;
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -1550,6 +1650,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubSubagent();
       unsubPerf();
       unsubAndroid();
+      unsubMcp();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -1633,6 +1734,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       enableGitWatcher,
       enableQA,
       qaTargetUrl,
+      mcpProfileId,
+      mcpServerIds,
+      mcpExcludeIds,
     } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
@@ -1682,6 +1786,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         enableGitWatcher,
         enableQA,
         qaTargetUrl,
+        mcpProfileId,
+        mcpServerIds,
+        mcpExcludeIds,
       },
       auth: '',
     });
@@ -3000,5 +3107,63 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: { type: 'open_themes_folder' },
       auth: '',
     });
+  },
+
+  // --- MCP actions ---
+
+  fetchMcpServers: () => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'get_servers' }, auth: '' });
+  },
+
+  addMcpServer: (name, command, args, env) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'add_server', name, command, args, env }, auth: '' });
+  },
+
+  updateMcpServer: (id, updates) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'update_server', id, ...updates }, auth: '' });
+  },
+
+  removeMcpServer: (id) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'remove_server', id }, auth: '' });
+  },
+
+  toggleMcpServer: (id, enabled) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'toggle_server', id, enabled }, auth: '' });
+  },
+
+  healthCheckMcp: (id) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'health_check', id }, auth: '' });
+  },
+
+  importMcpFromClaude: () => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'import_claude' }, auth: '' });
+  },
+
+  fetchMcpProfiles: () => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'get_profiles' }, auth: '' });
+  },
+
+  createMcpProfile: (name, description, serverIds) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'create_profile', name, description, serverIds }, auth: '' });
+  },
+
+  updateMcpProfile: (id, updates) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'update_profile', id, ...updates }, auth: '' });
+  },
+
+  deleteMcpProfile: (id) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'delete_profile', id }, auth: '' });
+  },
+
+  setDefaultMcpProfile: (id) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'set_default_profile', id }, auth: '' });
+  },
+
+  fetchSessionMcps: (sessionId) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'get_session_mcps', sessionId }, auth: '' });
+  },
+
+  clearMcpImportResult: () => {
+    set({ mcpImportResult: null });
   },
 }));

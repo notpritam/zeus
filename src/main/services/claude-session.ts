@@ -265,6 +265,13 @@ export class ClaudeSession extends EventEmitter {
         'The QA agent has full browser automation. Review its summary before claiming work is complete.',
       ].join(' ');
       args.push('--append-system-prompt', bridgePrompt);
+
+      // Merge external MCPs from registry (resolved via profile + overrides)
+      if (this.options.mcpServers) {
+        for (const mcp of this.options.mcpServers) {
+          mcpServers[mcp.name] = { command: mcp.command, args: mcp.args, env: mcp.env };
+        }
+      }
     }
 
     args.push('--mcp-config', JSON.stringify({ mcpServers }));

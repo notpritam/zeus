@@ -25,3 +25,6 @@ yarn-debug.log*
 yarn-error.log*
 .superpowers/
 .worktrees/
+
+# Reference repos
+ref-vibe-kanban/

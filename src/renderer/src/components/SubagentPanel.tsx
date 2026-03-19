@@ -258,17 +258,75 @@ function SubagentPanel() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-border bg-card sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b px-3 py-3">
-        <Bot className="text-primary size-4" />
-        <span className="text-primary flex-1 text-sm font-bold">Subagents</span>
-        {sessionCtx && (
-          <span className="text-muted-foreground truncate text-[9px]">
-            {parentSessionType === 'claude' ? 'Claude' : 'Term'}: {parentSessionId.slice(0, 8)}
-          </span>
-        )}
-        {hasRunningAgent && (
-          <span className="size-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
+      {/* Combined header */}
+      <div className="border-border bg-card sticky top-0 z-10 shrink-0 border-b">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <Bot className="text-primary size-4" />
+          <span className="text-primary text-sm font-bold">Subagents</span>
+          {hasRunningAgent && (
+            <span className="size-2 shrink-0 rounded-full bg-green-500 animate-pulse" />
+          )}
+          <div className="flex-1" />
+          {panelView === 'agents' && selectedAgent && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
+                onClick={() => setCompressedLog(!compressedLog)}
+                title={compressedLog ? 'Expand all' : 'Compress view'}
+              >
+                {compressedLog ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-5"
+                onClick={() => clearSubagentEntries(selectedAgent.info.subagentId)}
+                title="Clear log"
+              >
+                <Trash2 className="size-3" />
+              </Button>
+            </>
+          )}
+          {sessionCtx && panelView === 'agents' && (
+            <button onClick={() => setPanelView('selector')} title="New subagent" className="text-muted-foreground hover:text-foreground p-0.5">
+              <Plus className="size-3.5" />
+            </button>
+          )}
+        </div>
+        {/* Agent tabs — compact horizontal row */}
+        {sessionCtx && panelView === 'agents' && hasAnyAgent && (
+          <div className="flex items-center gap-1 overflow-x-auto px-2 pb-1.5 scrollbar-none">
+            {sessionAgents.map((a) => {
+              const isSelected = a.info.subagentId === selectedAgentId;
+              const isRunning = a.info.status === 'running';
+              const label = a.info.name || a.info.task;
+              return (
+                <button
+                  key={a.info.subagentId}
+                  onClick={() => selectSubagent(parentSessionId, a.info.subagentId)}
+                  className={`group relative flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] transition-colors ${
+                    isSelected
+                      ? 'bg-primary/10 text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                  }`}
+                >
+                  <span className={`size-1.5 shrink-0 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
+                  <span className="max-w-[100px] truncate">{label}</span>
+                  {!isRunning && (
+                    <button
+                      className="text-muted-foreground hover:text-destructive ml-0.5 rounded opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => { e.stopPropagation(); deleteSubagent(a.info.subagentId, parentSessionId); }}
+                      title="Delete"
+                    >
+                      <Trash2 className="size-2.5" />
+                    </button>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -319,7 +377,7 @@ function SubagentPanel() {
             const canSubmit = def.inputFields.filter(f => f.required).every(f => formInputs[f.key]?.trim());
             return (
               <div className="p-3 space-y-3">
-                <button onClick={() => setPanelView('selector')} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                <button onClick={() => setPanelView(hasAnyAgent ? 'agents' : 'selector')} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                   <ChevronLeft className="size-3" /> Back
                 </button>
                 <div className="flex items-center gap-2">
@@ -463,79 +521,9 @@ function SubagentPanel() {
           {/* Agent list view */}
           {panelView === 'agents' && (
             <>
-              {/* Agent list — shows when there are agents for this session */}
-              {hasAnyAgent && (
+              {/* Selected agent log */}
+              {hasAnyAgent && selectedAgent && (
                 <>
-                  {/* Agent list */}
-                  <div className="border-border shrink-0 overflow-y-auto border-b" style={{ maxHeight: '35%' }}>
-                    <div className="flex flex-col gap-0.5 p-1">
-                      {sessionAgents.map((a) => {
-                        const isSelected = a.info.subagentId === selectedAgentId;
-                        const isRunning = a.info.status === 'running';
-                        const label = a.info.name || a.info.task;
-                        return (
-                          <button
-                            key={a.info.subagentId}
-                            onClick={() => selectSubagent(parentSessionId, a.info.subagentId)}
-                            className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                              isSelected
-                                ? 'bg-primary/10 text-foreground'
-                                : 'text-foreground/80 hover:bg-secondary/60'
-                            }`}
-                          >
-                            <span className={`size-1.5 shrink-0 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
-                            <span className={`min-w-0 flex-1 truncate text-xs ${isSelected ? 'font-medium' : ''}`}>
-                              {label.length > 50 ? label.slice(0, 50) + '...' : label}
-                            </span>
-                            {!isRunning && (
-                              <button
-                                className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-                                onClick={(e) => { e.stopPropagation(); deleteSubagent(a.info.subagentId, parentSessionId); }}
-                                title="Delete"
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex justify-end px-2 py-1 border-t border-border">
-                      <button onClick={() => setPanelView('selector')} title="New subagent" className="text-muted-foreground hover:text-foreground p-0.5">
-                        <Plus className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Selected agent view */}
-                  {selectedAgent && (
-                    <>
-                      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-                        <span className={`size-2 shrink-0 rounded-full ${
-                          selectedAgent.info.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
-                        }`} />
-                        <span className="text-foreground flex-1 truncate text-[10px] font-medium">
-                          {selectedAgent.info.name || selectedAgent.info.task.slice(0, 40)}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className={`size-5 ${compressedLog ? 'text-primary' : 'text-muted-foreground'}`}
-                          onClick={() => setCompressedLog(!compressedLog)}
-                          title={compressedLog ? 'Expand all' : 'Compress view'}
-                        >
-                          {compressedLog ? <Maximize2 className="size-3" /> : <Minimize2 className="size-3" />}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5"
-                          onClick={() => clearSubagentEntries(selectedAgent.info.subagentId)}
-                          title="Clear log"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
-                      </div>
                       <div className="relative min-h-0 flex-1">
                         <div ref={agentLogRef} className="absolute inset-0 overflow-y-auto p-4 space-y-3">
                           {selectedAgent.entries.length === 0 ? (
@@ -648,8 +636,6 @@ function SubagentPanel() {
                         </div>
                       </div>
                     </>
-                  )}
-                </>
               )}
 
               {/* No agents — show type list */}
