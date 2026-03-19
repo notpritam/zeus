@@ -2470,7 +2470,7 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
 
       // Response is deferred — sent when the subagent's turn ends (see wireSubagent 'result' handler)
     } catch (err) {
-      console.error('[Subagent] Failed to start:', (err as Error).message);
+      console.error('[Subagent] Failed to start:', (err as Error).message, (err as Error).stack);
       sendEnvelope(ws, {
         channel: 'subagent', sessionId: '', auth: '',
         payload: { type: 'subagent_error', message: `Failed to start subagent: ${(err as Error).message}` },
@@ -2989,7 +2989,13 @@ function handleMessage(ws: WebSocket, raw: string): void {
       handleQA(ws, envelope);
       break;
     case 'subagent':
-      handleSubagent(ws, envelope);
+      handleSubagent(ws, envelope).catch((err) => {
+        console.error('[Subagent] Unhandled error in handleSubagent:', err);
+        sendEnvelope(ws, {
+          channel: 'subagent', sessionId: '', auth: '',
+          payload: { type: 'subagent_error', message: `Subagent error: ${(err as Error).message}` },
+        });
+      });
       break;
     case 'perf':
       handlePerf(ws, envelope);

@@ -53,6 +53,8 @@ class ZeusWebSocket {
   send(envelope: WsEnvelope): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(envelope));
+    } else {
+      console.warn('[ZeusWS] send() called but WebSocket is not open. State:', this.ws?.readyState, 'Channel:', envelope.channel, 'Type:', (envelope.payload as { type?: string })?.type);
     }
   }
 

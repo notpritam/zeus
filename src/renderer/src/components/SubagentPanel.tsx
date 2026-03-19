@@ -262,10 +262,12 @@ function SubagentPanel() {
   }, [showNewAgentForm, hasAnyAgent]);
 
   function handleStartSubagent(def: typeof SUBAGENT_TYPES[0]) {
-    if (!parentSessionId) return;
+    console.log('[SubagentPanel] handleStartSubagent called', { parentSessionId, parentSessionType, formInputs, defType: def.type });
+    if (!parentSessionId) { console.warn('[SubagentPanel] No parentSessionId — aborting'); return; }
     const workingDir = sessionCtx?.workingDir || '/';
     const canSubmit = def.inputFields.filter(f => f.required).every(f => formInputs[f.key]?.trim());
-    if (!canSubmit) return;
+    if (!canSubmit) { console.warn('[SubagentPanel] Required fields not filled — aborting'); return; }
+    console.log('[SubagentPanel] Calling startSubagent', { type: def.type, workingDir, parentSessionId, parentSessionType });
     startSubagent(
       def.type,
       'claude',

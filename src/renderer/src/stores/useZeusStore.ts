@@ -1407,6 +1407,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           return { subagents: updated };
         });
       }
+      if (payload.type === 'subagent_error') {
+        const { message } = payload as { type: string; message: string };
+        console.error('[ZeusStore] subagent_error:', message);
+        set({ qaError: message });
+      }
     });
 
     // Subscribe to perf channel
@@ -2424,10 +2429,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   // --- Subagent actions ---
 
   startSubagent: (subagentType: SubagentType, cli: SubagentCli, inputs: Record<string, string>, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', name?: string) => {
-    zeusWs.send({
-      channel: 'subagent', sessionId: parentSessionId, auth: '',
+    const envelope = {
+      channel: 'subagent' as const, sessionId: parentSessionId, auth: '',
       payload: { type: 'start_subagent', subagentType, cli, inputs, workingDir, parentSessionId, parentSessionType, name },
-    });
+    };
+    console.log('[ZeusStore] startSubagent sending WS message:', envelope);
+    zeusWs.send(envelope);
   },
 
   stopSubagent: (subagentId: string) => {
