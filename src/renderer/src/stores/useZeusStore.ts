@@ -41,6 +41,8 @@ import type {
   McpHealthResult,
   SessionMcpRecord,
   McpPayload,
+  TaskRecord,
+  TaskPayload,
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
@@ -168,6 +170,11 @@ interface ZeusState {
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
   perfMonitoring: boolean;
+
+  // Tasks
+  tasks: TaskRecord[];
+  activeTaskId: string | null;
+  taskError: string | null;
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | null;
@@ -348,6 +355,18 @@ interface ZeusState {
   setTheme: (themeId: string) => void;
   refreshThemes: () => void;
   openThemesFolder: () => void;
+
+  // Task actions
+  createTask: (name: string, prompt: string, projectPath: string, opts?: { baseBranch?: string; permissionMode?: PermissionMode; model?: string }) => void;
+  listTasks: () => void;
+  selectTask: (taskId: string | null) => void;
+  continueTask: (taskId: string, prompt: string) => void;
+  mergeTask: (taskId: string) => void;
+  createTaskPR: (taskId: string, title?: string, body?: string) => void;
+  archiveTask: (taskId: string) => void;
+  unarchiveTask: (taskId: string) => void;
+  discardTask: (taskId: string) => void;
+  getTaskDiff: (taskId: string) => void;
 }
 
 const ENTRIES_PAGE_SIZE = 50;
@@ -532,6 +551,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   perfMetrics: null,
   perfMonitoring: false,
 
+  tasks: [],
+  activeTaskId: null,
+  taskError: null,
+
   savedProjects: [],
   claudeDefaults: {
     permissionMode: 'bypassPermissions',
@@ -583,6 +606,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           sessionId: '',
           payload: { type: 'list_claude_sessions' },
           auth: '',
+        });
+        zeusWs.send({
+          channel: 'task', sessionId: '', auth: '', payload: { type: 'list_tasks' },
         });
         return;
       }
@@ -1636,6 +1662,36 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to task channel
+    const unsubTask = zeusWs.on('task', (envelope: WsEnvelope) => {
+      const p = envelope.payload as TaskPayload;
+      if (p.type === 'task_created') {
+        set((s) => ({ tasks: [p.task, ...s.tasks], taskError: null }));
+      } else if (p.type === 'task_updated') {
+        set((s) => ({
+          tasks: s.tasks.map((t) => (t.id === p.task.id ? p.task : t)),
+          taskError: null,
+        }));
+      } else if (p.type === 'task_list') {
+        set({ tasks: p.tasks, taskError: null });
+      } else if (p.type === 'task_deleted') {
+        set((s) => ({
+          tasks: s.tasks.filter((t) => t.id !== p.taskId),
+          activeTaskId: s.activeTaskId === p.taskId ? null : s.activeTaskId,
+          taskError: null,
+        }));
+      } else if (p.type === 'task_diff') {
+        set((s) => ({
+          tasks: s.tasks.map((t) =>
+            t.id === p.taskId ? { ...t, diffSummary: p.summary } : t,
+          ),
+        }));
+      } else if (p.type === 'task_error') {
+        set({ taskError: p.message });
+        setTimeout(() => set({ taskError: null }), 5000);
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -1651,6 +1707,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubPerf();
       unsubAndroid();
       unsubMcp();
+      unsubTask();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -3165,5 +3222,63 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   clearMcpImportResult: () => {
     set({ mcpImportResult: null });
+  },
+
+  // --- Task actions ---
+
+  createTask: (name, prompt, projectPath, opts) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'create_task', name, prompt, projectPath, ...opts },
+    });
+  },
+  listTasks: () => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'list_tasks' },
+    });
+  },
+  selectTask: (taskId) => set({ activeTaskId: taskId }),
+  continueTask: (taskId, prompt) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'continue_task', taskId, prompt },
+    });
+  },
+  mergeTask: (taskId) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'merge_task', taskId },
+    });
+  },
+  createTaskPR: (taskId, title, body) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'create_pr', taskId, title, body },
+    });
+  },
+  archiveTask: (taskId) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'archive_task', taskId },
+    });
+  },
+  unarchiveTask: (taskId) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'unarchive_task', taskId },
+    });
+  },
+  discardTask: (taskId) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'discard_task', taskId },
+    });
+  },
+  getTaskDiff: (taskId) => {
+    zeusWs.send({
+      channel: 'task', sessionId: '', auth: '',
+      payload: { type: 'get_task_diff', taskId },
+    });
   },
 }));
