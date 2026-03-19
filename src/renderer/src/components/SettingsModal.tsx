@@ -21,8 +21,10 @@ interface SettingsModalProps {
   powerBlock: boolean;
   websocket: boolean;
   tunnel: string | null;
+  autoTunnel: boolean;
   onTogglePower: () => void;
   onToggleTunnel: () => void;
+  onSetAutoTunnel: (enabled: boolean) => void;
 }
 
 const shortcuts = [
@@ -48,8 +50,10 @@ function SettingsModal({
   powerBlock,
   websocket,
   tunnel,
+  autoTunnel,
   onTogglePower,
   onToggleTunnel,
+  onSetAutoTunnel,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
@@ -195,6 +199,22 @@ function SettingsModal({
                             <RefreshCw className="size-3" />
                           </Button>
                         </div>
+                      </div>
+
+                      {/* Auto Tunnel */}
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-8 items-center justify-center rounded-md bg-secondary">
+                            <Link className="size-4 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <Label htmlFor="auto-tunnel-modal" className="text-sm font-medium">
+                              Auto Tunnel
+                            </Label>
+                            <p className="text-muted-foreground text-[11px]">Start tunnel automatically on launch</p>
+                          </div>
+                        </div>
+                        <Switch id="auto-tunnel-modal" checked={autoTunnel} onCheckedChange={onSetAutoTunnel} />
                       </div>
                     </div>
                   </div>

@@ -38,6 +38,7 @@ export interface ZeusSettings {
   claudeDefaults: ClaudeDefaults;
   lastUsedProjectId: string | null;
   activeThemeId: string;
+  autoTunnel: boolean;
   themes: ThemeMeta[];
 }
 
@@ -53,7 +54,8 @@ export type SettingsPayload =
   | { type: 'get_theme_colors'; themeId: string }
   | { type: 'theme_colors'; theme: ThemeFile }
   | { type: 'refresh_themes' }
-  | { type: 'open_themes_folder' };
+  | { type: 'open_themes_folder' }
+  | { type: 'set_auto_tunnel'; enabled: boolean };
 
 // ─── File Tree Types ───
 

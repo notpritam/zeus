@@ -36,6 +36,7 @@ import {
   updateDefaults,
   setLastUsedProject,
   setActiveTheme,
+  setAutoTunnel,
 } from './settings';
 import { getThemeById, refreshThemes, getThemesDir } from './themes';
 import {
@@ -2929,6 +2930,14 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
     });
   } else if (payload.type === 'open_themes_folder') {
     shell.openPath(getThemesDir());
+  } else if (payload.type === 'set_auto_tunnel') {
+    setAutoTunnel(payload.enabled);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'settings_update', settings: getSettings() },
+      auth: '',
+    });
   } else {
     sendError(ws, '', `Unknown settings type: ${(payload as { type: string }).type}`);
   }

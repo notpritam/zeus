@@ -13,6 +13,7 @@ interface SettingsOnDisk {
   claudeDefaults: ClaudeDefaults;
   lastUsedProjectId: string | null;
   activeThemeId: string;
+  autoTunnel: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsOnDisk = {
@@ -23,6 +24,7 @@ const DEFAULT_SETTINGS: SettingsOnDisk = {
   },
   lastUsedProjectId: null,
   activeThemeId: 'zeus-dark',
+  autoTunnel: !zeusEnv.isDev, // default: enabled in prod, disabled in dev
 };
 
 let settings: SettingsOnDisk = { ...DEFAULT_SETTINGS };
@@ -61,6 +63,7 @@ export function initSettings(): void {
         },
         lastUsedProjectId: parsed.lastUsedProjectId ?? DEFAULT_SETTINGS.lastUsedProjectId,
         activeThemeId: (parsed as Partial<SettingsOnDisk>).activeThemeId ?? DEFAULT_SETTINGS.activeThemeId,
+        autoTunnel: (parsed as Partial<SettingsOnDisk>).autoTunnel ?? DEFAULT_SETTINGS.autoTunnel,
       };
       // Re-write without savedProjects to complete migration
       writeToDisk();
@@ -83,8 +86,18 @@ export function getSettings(): ZeusSettings {
     claudeDefaults: settings.claudeDefaults,
     lastUsedProjectId: settings.lastUsedProjectId,
     activeThemeId: settings.activeThemeId,
+    autoTunnel: settings.autoTunnel,
     themes: getThemeMeta(),
   };
+}
+
+export function getAutoTunnel(): boolean {
+  return settings.autoTunnel;
+}
+
+export function setAutoTunnel(enabled: boolean): void {
+  settings.autoTunnel = enabled;
+  writeToDisk();
 }
 
 export function setActiveTheme(themeId: string): void {

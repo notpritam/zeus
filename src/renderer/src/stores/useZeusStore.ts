@@ -100,6 +100,7 @@ interface ZeusState {
   // Themes
   themes: ThemeMeta[];
   activeThemeId: string;
+  autoTunnel: boolean;
   activeThemeColors: Record<string, string> | null;
 
   // View mode
@@ -154,6 +155,7 @@ interface ZeusState {
   connect: () => () => void;
   togglePower: () => void;
   toggleTunnel: () => void;
+  setAutoTunnel: (enabled: boolean) => void;
   fetchSessions: () => void;
   startSession: (cols?: number, rows?: number) => void;
   stopSession: (sessionId: string) => void;
@@ -455,6 +457,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   settingsError: null,
   themes: [],
   activeThemeId: 'zeus-dark',
+  autoTunnel: false,
   activeThemeColors: null,
 
   viewMode: 'terminal',
@@ -916,6 +919,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           claudeDefaults: s.claudeDefaults,
           lastUsedProjectId: s.lastUsedProjectId,
           activeThemeId: s.activeThemeId,
+          autoTunnel: s.autoTunnel,
           themes: s.themes,
           settingsError: null,
         });
@@ -1454,6 +1458,15 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'status',
       sessionId: '',
       payload: { type: 'toggle_tunnel' },
+      auth: '',
+    });
+  },
+
+  setAutoTunnel: (enabled: boolean) => {
+    zeusWs.send({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'set_auto_tunnel', enabled },
       auth: '',
     });
   },

@@ -11,7 +11,7 @@ import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from '.
 import { destroyAllSessions } from './services/terminal';
 import { getActiveSessions, markKilled } from './services/sessions';
 import { initAuthToken } from './services/auth';
-import { initSettings } from './services/settings';
+import { initSettings, getAutoTunnel } from './services/settings';
 import { loadAllThemes } from './services/themes';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
@@ -121,7 +121,7 @@ function createWindow(): void {
 app.setName('Zeus');
 
 app.whenReady().then(async () => {
-  const { isDev, wsPort, shouldTunnel, label } = zeusEnv;
+  const { wsPort, label } = zeusEnv;
   console.log(`[Zeus ${label}] Starting on port ${wsPort}...`);
 
   // Expose WS port so child processes (MCP bridges) connect to the right server
@@ -142,11 +142,12 @@ app.whenReady().then(async () => {
   pruneOldSessions(30);
   await startWebSocketServer(wsPort);
 
-  if (shouldTunnel) {
+  const autoTunnel = getAutoTunnel();
+  if (autoTunnel) {
     const tunnelUrl = await startTunnel(wsPort);
     if (tunnelUrl) notifyTunnelStatus();
   } else {
-    console.log(`[Zeus ${label}] Tunnel disabled, WS on port ${wsPort}`);
+    console.log(`[Zeus ${label}] Auto-tunnel disabled, WS on port ${wsPort}`);
   }
 
   createWindow();
