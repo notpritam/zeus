@@ -33,7 +33,7 @@ import type {
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
 
 interface QaAgentClient {
   info: QaAgentSessionInfo;
@@ -99,9 +99,6 @@ interface ZeusState {
   themes: ThemeMeta[];
   activeThemeId: string;
   activeThemeColors: Record<string, string> | null;
-
-  // New Claude session modal
-  showNewClaudeModal: boolean;
 
   // View mode
   viewMode: ViewMode;
@@ -196,10 +193,6 @@ interface ZeusState {
   deletedClaudeSessions: ClaudeSessionInfo[];
   setViewMode: (mode: ViewMode) => void;
 
-  // Modal actions
-  openNewClaudeModal: () => void;
-  closeNewClaudeModal: () => void;
-
   // Git actions
   startGitWatching: (sessionId: string, workingDir: string) => void;
   stopGitWatching: (sessionId: string) => void;
@@ -222,7 +215,7 @@ interface ZeusState {
   // Diff tab state
   openDiffTabs: DiffTab[];
   activeDiffTabId: string | null;
-  previousViewMode: 'terminal' | 'claude';
+  previousViewMode: ViewMode;
 
   // Diff tab actions
   openDiffTab: (sessionId: string, file: string, staged: boolean) => void;
@@ -420,7 +413,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   gitPulling: {},
   openDiffTabs: [],
   activeDiffTabId: null,
-  previousViewMode: 'terminal' as const,
+  previousViewMode: 'terminal',
 
   fileTree: {},
   fileTreeExpanded: {},
@@ -461,7 +454,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   themes: [],
   activeThemeId: 'zeus-dark',
   activeThemeColors: null,
-  showNewClaudeModal: false,
 
   viewMode: 'terminal',
 
@@ -1041,7 +1033,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             viewMode: 'diff' as ViewMode,
             previousViewMode:
               state.viewMode !== 'diff'
-                ? (state.viewMode as 'terminal' | 'claude')
+                ? state.viewMode
                 : state.previousViewMode,
           }));
         }
@@ -1213,7 +1205,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             viewMode: 'diff' as ViewMode,
             previousViewMode:
               state.viewMode !== 'diff'
-                ? (state.viewMode as 'terminal' | 'claude')
+                ? state.viewMode
                 : state.previousViewMode,
           }));
         }
@@ -1949,13 +1941,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   setViewMode: (mode: ViewMode) => {
-    set({ viewMode: mode });
+    set((state) => ({
+      viewMode: mode,
+      previousViewMode: state.viewMode !== 'diff' ? state.viewMode : state.previousViewMode,
+    }));
   },
-
-  // --- Modal actions ---
-
-  openNewClaudeModal: () => set({ showNewClaudeModal: true }),
-  closeNewClaudeModal: () => set({ showNewClaudeModal: false }),
 
   // --- Git actions ---
 
@@ -2040,7 +2030,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
@@ -2066,7 +2056,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
@@ -2098,7 +2088,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       viewMode: 'diff' as ViewMode,
       previousViewMode:
         state.viewMode !== 'diff'
-          ? (state.viewMode as 'terminal' | 'claude')
+          ? state.viewMode
           : state.previousViewMode,
     }));
   },
@@ -2151,7 +2141,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       viewMode: 'diff' as ViewMode,
       previousViewMode:
         state.viewMode !== 'diff'
-          ? (state.viewMode as 'terminal' | 'claude')
+          ? state.viewMode
           : state.previousViewMode,
     }));
   },
@@ -2316,7 +2306,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
