@@ -21,7 +21,7 @@ import type {
   FilesPayload,
   FileTreeEntry,
   SessionActivity,
-  QaPayload,
+  QaBrowserPayload,
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
@@ -1235,7 +1235,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
     // Subscribe to QA channel
     const unsubQA = zeusWs.on('qa', (envelope: WsEnvelope) => {
-      const payload = envelope.payload as QaPayload;
+      const payload = envelope.payload as QaBrowserPayload;
 
       if (payload.type === 'qa_started') {
         set({ qaRunning: true, qaLoading: false, qaError: null });

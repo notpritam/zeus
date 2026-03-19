@@ -15,7 +15,7 @@ import { initSettings } from './services/settings';
 import { loadAllThemes } from './services/themes';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
-import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleQaAgentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
+import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleSubagentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
 import { zeusEnv } from './services/env';
 
 let mainWindow: BrowserWindow | null = null;
@@ -137,7 +137,7 @@ app.whenReady().then(async () => {
   initSettings();
   loadAllThemes();
   markStaleSessionsErrored();
-  markStaleQaAgentsErrored();
+  markStaleSubagentsErrored();
   finalizeAllCompletedSessions();
   pruneOldSessions(30);
   await startWebSocketServer(wsPort);
