@@ -165,7 +165,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -406,7 +406,7 @@ export interface ClaudeSessionInfo {
   workingDir?: string;
   qaTargetUrl?: string; // auto-detected or user-set QA target URL
   startedAt: number;
-  qaAgentCount?: number;
+  subagentCount?: number;
   permissionMode?: PermissionMode;
   model?: string;
   deletedAt?: number; // timestamp when soft-deleted (null if active)
@@ -526,24 +526,31 @@ export interface QaSnapshotNode {
   children?: QaSnapshotNode[];
 }
 
+// ─── Subagent Types ───
+
+export type SubagentType = 'qa' | 'plan_reviewer';
+export type SubagentCli = 'claude';
+
 // ─── QA Agent ───
 
 // QA agents use NormalizedEntry directly — no separate entry type needed.
 
-export type QaAgentStatus = 'running' | 'stopped' | 'error';
+export type SubagentStatus = 'running' | 'stopped' | 'error';
 
-export interface QaAgentSessionInfo {
-  qaAgentId: string;
-  parentSessionId: string;        // terminal or claude session id
+export interface SubagentSessionInfo {
+  subagentId: string;
+  subagentType: SubagentType;
+  cli: SubagentCli;
+  parentSessionId: string;
   parentSessionType: 'terminal' | 'claude';
   name?: string;
   task: string;
   targetUrl?: string;
-  status: QaAgentStatus;
+  status: SubagentStatus;
   startedAt: number;
 }
 
-export type QaPayload =
+export type QaBrowserPayload =
   // Client → Server
   | { type: 'start_qa' }
   | { type: 'stop_qa' }
@@ -572,21 +579,31 @@ export type QaPayload =
   | { type: 'cdp_console'; logs: Array<{ level: string; message: string; timestamp: number }> }
   | { type: 'cdp_network'; requests: Array<{ url: string; method: string; status: number; duration: number; failed: boolean; error?: string }> }
   | { type: 'cdp_error'; errors: Array<{ message: string; stack: string; timestamp: number }> }
-  // Client → Server (QA Agent)
-  | { type: 'start_qa_agent'; task: string; name?: string; workingDir: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; flowId?: string; personas?: string[]; responseId?: string }
-  | { type: 'stop_qa_agent'; qaAgentId: string }
-  | { type: 'qa_agent_message'; qaAgentId: string; text: string }
-  | { type: 'list_qa_agents'; parentSessionId: string }
-  | { type: 'get_qa_agent_entries'; qaAgentId: string }
-  | { type: 'delete_qa_agent'; qaAgentId: string; parentSessionId: string }
-  | { type: 'clear_qa_agent_entries'; qaAgentId: string }
+  // QA flows (browser-domain)
   | { type: 'list_qa_flows' }
-  // Server → Client (QA Agent)
-  | { type: 'qa_agent_started'; qaAgentId: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
-  | { type: 'qa_agent_stopped'; qaAgentId: string; parentSessionId: string }
-  | { type: 'qa_agent_deleted'; qaAgentId: string; parentSessionId: string }
-  | { type: 'qa_agent_entry'; qaAgentId: string; parentSessionId: string; entry: NormalizedEntry }
-  | { type: 'qa_agent_list'; parentSessionId: string; agents: QaAgentSessionInfo[] }
-  | { type: 'qa_agent_entries'; qaAgentId: string; entries: NormalizedEntry[] }
   | { type: 'qa_flows_list'; flows: import('./qa-flow-types').FlowSummary[] }
   | { type: 'qa_error'; message: string };
+
+export type SubagentPayload =
+  // Client → Server
+  | { type: 'start_subagent'; subagentType: SubagentType; cli: SubagentCli; inputs: Record<string, string>; workingDir: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; responseId?: string }
+  | { type: 'stop_subagent'; subagentId: string }
+  | { type: 'subagent_message'; subagentId: string; text: string }
+  | { type: 'list_subagents'; parentSessionId: string }
+  | { type: 'get_subagent_entries'; subagentId: string }
+  | { type: 'delete_subagent'; subagentId: string; parentSessionId: string }
+  | { type: 'clear_subagent_entries'; subagentId: string }
+  // Server → Client
+  | { type: 'subagent_started'; subagentId: string; subagentType: SubagentType; cli: SubagentCli; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string }
+  | { type: 'subagent_stopped'; subagentId: string; parentSessionId: string }
+  | { type: 'subagent_deleted'; subagentId: string; parentSessionId: string }
+  | { type: 'subagent_entry'; subagentId: string; parentSessionId: string; entry: NormalizedEntry }
+  | { type: 'subagent_list'; parentSessionId: string; agents: SubagentSessionInfo[] }
+  | { type: 'subagent_entries'; subagentId: string; entries: NormalizedEntry[] }
+  | { type: 'subagent_error'; message: string }
+  // External subagent registration
+  | { type: 'register_external_subagent'; subagentType: SubagentType; task: string; targetUrl?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; responseId?: string }
+  | { type: 'register_external_subagent_response'; subagentId: string; responseId?: string }
+  | { type: 'external_subagent_entry'; subagentId: string; entry: unknown }
+  | { type: 'external_subagent_done'; subagentId: string; status?: string }
+  | { type: 'start_subagent_response'; responseId?: string; subagentId: string; status: string; summary: string };
