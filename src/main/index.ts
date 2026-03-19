@@ -17,6 +17,7 @@ import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
 import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleSubagentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
 import { zeusEnv } from './services/env';
+import { TaskManager } from './services/task-manager';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -138,6 +139,10 @@ app.whenReady().then(async () => {
   loadAllThemes();
   markStaleSessionsErrored();
   markStaleSubagentsErrored();
+  // Recover tasks — ensure worktrees exist for active tasks
+  TaskManager.recoverTasks().catch((err) => {
+    console.error('[Zeus] Task recovery failed:', err);
+  });
   finalizeAllCompletedSessions();
   pruneOldSessions(30);
   await startWebSocketServer(wsPort);
