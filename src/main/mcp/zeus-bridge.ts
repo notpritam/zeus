@@ -563,6 +563,94 @@ server.tool(
   },
 );
 
+// ═══════════════════════════════════════════
+// ─── Android QA Tools ───
+// ═══════════════════════════════════════════
+
+server.tool(
+  'zeus_android_qa_run',
+  'Spawn an Android QA testing agent. The agent controls an Android emulator via Maestro with full device automation. Results appear in the QA panel.',
+  {
+    task: z.string().describe('What to test on the Android device'),
+    app_id: z.string().optional().describe('Android app package ID to test (e.g. "com.example.app")'),
+    avd_name: z.string().optional().describe('AVD name to boot (auto-detected if omitted)'),
+    parent_session_id: z.string().optional(),
+    name: z.string().optional().describe('Display name for the QA agent'),
+    working_dir: z.string().optional(),
+  },
+  async ({ task, app_id, avd_name, parent_session_id, name, working_dir }) => {
+    await connectWs();
+    const sessionId = parent_session_id ?? process.env.ZEUS_SESSION_ID ?? '';
+    const response = await sendAndWait('subagent', {
+      type: 'start_subagent',
+      subagentType: 'android_qa',
+      cli: 'claude',
+      inputs: {
+        task,
+        appId: app_id ?? '',
+        avdName: avd_name ?? '',
+      },
+      name: name ?? undefined,
+      workingDir: working_dir ?? process.cwd(),
+      parentSessionId: sessionId,
+      parentSessionType: 'claude',
+    }, 600_000);
+
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(response) }],
+    };
+  }
+);
+
+server.tool(
+  'zeus_android_devices',
+  'List available Android AVDs and running emulator instances.',
+  {},
+  async () => {
+    await connectWs();
+    const response = await sendAndWait('android', { type: 'list_devices' }, 15_000);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] };
+  }
+);
+
+server.tool(
+  'zeus_android_start',
+  'Start a headless Android emulator.',
+  {
+    avd_name: z.string().optional().describe('AVD name (e.g. "Pixel_9"). Auto-picks if omitted.'),
+  },
+  async ({ avd_name }) => {
+    await connectWs();
+    const response = await sendAndWait('android', {
+      type: 'start_emulator',
+      avdName: avd_name,
+    }, 120_000);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] };
+  }
+);
+
+server.tool(
+  'zeus_android_stop',
+  'Stop the running Android emulator.',
+  {},
+  async () => {
+    await connectWs();
+    const response = await sendAndWait('android', { type: 'stop_emulator' }, 15_000);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, message: 'Android emulator stopped.' }) }] };
+  }
+);
+
+server.tool(
+  'zeus_android_screenshot',
+  'Take a screenshot of the running Android emulator.',
+  {},
+  async () => {
+    await connectWs();
+    const response = await sendAndWait('android', { type: 'screenshot' }, 15_000);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(response) }] };
+  }
+);
+
 // ─── Helpers ───
 
 function buildActionType(action: string, detail: string): Record<string, unknown> {
