@@ -96,7 +96,7 @@ export function buildCommands({
   tunnel,
   togglePower,
   startSession,
-  openNewClaudeModal,
+  openNewSession,
   toggleRightPanel,
   openSettings,
 }: {
@@ -104,7 +104,7 @@ export function buildCommands({
   tunnel: string | null;
   togglePower: () => void;
   startSession: () => void;
-  openNewClaudeModal: () => void;
+  openNewSession: () => void;
   toggleRightPanel: () => void;
   openSettings: () => void;
 }): PaletteCommand[] {
@@ -122,7 +122,7 @@ export function buildCommands({
       label: 'New Claude Session',
       shortcut: '⌘N',
       icon: <Sparkles />,
-      action: openNewClaudeModal,
+      action: openNewSession,
       group: 'Sessions',
     },
     {
