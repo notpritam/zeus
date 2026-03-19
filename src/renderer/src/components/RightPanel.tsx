@@ -1,9 +1,10 @@
-import { GitBranch, FolderOpen, Bot, RefreshCw, Info, Settings } from 'lucide-react';
+import { GitBranch, FolderOpen, Bot, Globe, RefreshCw, Info, Settings } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
 import SubagentPanel from '@/components/SubagentPanel';
+import BrowserPanel from '@/components/BrowserPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
 import SessionSettingsPanel from '@/components/SessionSettingsPanel';
 import {
@@ -81,7 +82,7 @@ function ActivityBarIcon({
   pulse,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings';
+  tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings';
   tooltip: string;
   badge?: number;   // red error badge (top-right)
   count?: number;   // themed count badge (top-right, lower priority than badge)
@@ -186,7 +187,7 @@ function RightPanel() {
               className="min-w-0 flex-1 flex flex-col overflow-hidden"
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : <SubagentPanel />}
+                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : activeRightTab === 'browser' ? <BrowserPanel /> : <SubagentPanel />}
               </div>
               <WatcherStatusBar />
             </motion.div>
@@ -219,16 +220,22 @@ function RightPanel() {
             icon={Bot}
             tab="subagents"
             tooltip={
-              runningSubagentCount > 0 && qaJsErrorCount > 0
-                ? `Subagents (${runningSubagentCount} running, ${qaJsErrorCount} JS errors)`
-                : runningSubagentCount > 0
-                  ? `Subagents (${runningSubagentCount} running)`
-                  : qaJsErrorCount > 0
-                    ? `Subagents (${qaJsErrorCount} JS errors)`
-                    : 'Subagents'
+              runningSubagentCount > 0
+                ? `Subagents (${runningSubagentCount} running)`
+                : 'Subagents'
+            }
+            pulse={runningSubagentCount > 0}
+            count={runningSubagentCount}
+          />
+          <ActivityBarIcon
+            icon={Globe}
+            tab="browser"
+            tooltip={
+              qaJsErrorCount > 0
+                ? `Browser (${qaJsErrorCount} JS errors)`
+                : 'Browser'
             }
             badge={qaJsErrorCount}
-            pulse={runningSubagentCount > 0}
           />
           <div className="mt-auto pb-2">
             <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />

@@ -133,7 +133,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null;
 
   // Session terminal panel (per-Claude-session terminals)
   sessionTerminals: Record<string, {
@@ -263,7 +263,7 @@ interface ZeusState {
   fetchQaFlows: () => void;
 
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null) => void;
   toggleRightPanel: () => void;
 
   // Session terminal actions
@@ -2509,10 +2509,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null) => {
     set({ activeRightTab: tab });
-    // Fetch QA status when switching to subagents tab
-    if (tab === 'subagents') {
+    // Fetch QA status when switching to browser tab
+    if (tab === 'browser') {
       zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'get_qa_status' }, auth: '' });
     }
   },
