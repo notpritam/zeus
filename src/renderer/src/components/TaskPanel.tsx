@@ -177,7 +177,7 @@ export function TaskPanel() {
               <Button size="sm" className="h-7 flex-1 text-xs" onClick={handleCreate} disabled={!name.trim() || !prompt.trim() || !currentProject}>
                 Create Task
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowCreate(false)}>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowCreate(false); setName(''); setPrompt(''); }}>
                 Cancel
               </Button>
             </div>
