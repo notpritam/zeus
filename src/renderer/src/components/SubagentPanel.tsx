@@ -158,7 +158,6 @@ function SubagentPanel() {
   const [agentFollowUp, setAgentFollowUp] = useState('');
   const [compressedLog, setCompressedLog] = useState(true);
   const { lightbox, openLightbox, closeLightbox } = useLightbox();
-  const [showNewAgentForm, setShowNewAgentForm] = useState(false);
   const agentLogRef = useRef<HTMLDivElement>(null);
   const agentUserScrolledUp = useRef(false);
   const [showAgentScrollToBottom, setShowAgentScrollToBottom] = useState(false);
@@ -167,6 +166,7 @@ function SubagentPanel() {
   const [panelView, setPanelView] = useState<'selector' | 'form' | 'agents'>('agents');
   const [selectedType, setSelectedType] = useState<SubagentType | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, string>>({});
+  const [spawning, setSpawning] = useState(false);
 
   // Sync agent target URL when session's detected URL changes
   useEffect(() => {
@@ -254,20 +254,19 @@ function SubagentPanel() {
     }
   }, [selectedAgentId]);
 
-  // Fetch available flows when showing the new agent form
+  // Fetch available flows when showing type selector
   useEffect(() => {
-    if (showNewAgentForm || !hasAnyAgent) {
+    if (panelView === 'selector' || !hasAnyAgent) {
       fetchQaFlows();
     }
-  }, [showNewAgentForm, hasAnyAgent]);
+  }, [panelView, hasAnyAgent]);
 
   function handleStartSubagent(def: typeof SUBAGENT_TYPES[0]) {
-    console.log('[SubagentPanel] handleStartSubagent called', { parentSessionId, parentSessionType, formInputs, defType: def.type });
-    if (!parentSessionId) { console.warn('[SubagentPanel] No parentSessionId — aborting'); return; }
+    if (!parentSessionId || spawning) return;
     const workingDir = sessionCtx?.workingDir || '/';
     const canSubmit = def.inputFields.filter(f => f.required).every(f => formInputs[f.key]?.trim());
-    if (!canSubmit) { console.warn('[SubagentPanel] Required fields not filled — aborting'); return; }
-    console.log('[SubagentPanel] Calling startSubagent', { type: def.type, workingDir, parentSessionId, parentSessionType });
+    if (!canSubmit) return;
+    setSpawning(true);
     startSubagent(
       def.type,
       'claude',
@@ -276,10 +275,17 @@ function SubagentPanel() {
       parentSessionId,
       parentSessionType as 'terminal' | 'claude',
     );
-    setPanelView('agents');
     setFormInputs({});
-    setShowNewAgentForm(false);
+    // panelView switches to 'agents' once subagent_started arrives (see effect below)
   }
+
+  // Switch to agents view and clear spawning state when a new agent arrives
+  useEffect(() => {
+    if (spawning && sessionAgents.length > 0) {
+      setSpawning(false);
+      setPanelView('agents');
+    }
+  }, [spawning, sessionAgents.length]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -848,9 +854,10 @@ function SubagentPanel() {
                     <button
                       className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => handleStartSubagent(def)}
-                      disabled={!canSubmit}
+                      disabled={!canSubmit || spawning}
                     >
-                      <Play className="size-3" /> Start Agent
+                      {spawning ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+                      {spawning ? 'Starting...' : 'Start Agent'}
                     </button>
                   </div>
                 );
@@ -860,7 +867,7 @@ function SubagentPanel() {
               {panelView === 'agents' && (
                 <>
                   {/* Agent list bar — shows when there are agents for this session */}
-                  {hasAnyAgent && !showNewAgentForm && (
+                  {hasAnyAgent && (
                     <>
                       <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1">
                         <Bot className="text-muted-foreground size-3 shrink-0" />
@@ -1044,7 +1051,7 @@ function SubagentPanel() {
                   )}
 
                   {/* No agents — show type selector directly */}
-                  {!hasAnyAgent && !showNewAgentForm && (
+                  {!hasAnyAgent && (
                     <div className="p-3 space-y-2">
                       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Spawn Subagent</span>
                       {SUBAGENT_TYPES.map((def) => (
