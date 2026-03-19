@@ -33,29 +33,67 @@ Proposed: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session'
 - `closeNewClaudeModal(): void`
 
 **Modify:**
-- `setViewMode(mode)` — update to save current `viewMode` into `previousViewMode` before transitioning (enables Escape-back navigation)
-- `previousViewMode` type — widen from `'terminal' | 'claude'` to `ViewMode` to support back-navigation from any view
-- **All `previousViewMode` assignment sites in diff-tab logic** — the store currently has 13+ locations that cast `state.viewMode as 'terminal' | 'claude'` when setting `previousViewMode`. These narrow casts must be removed so that `'settings'`, `'new-session'`, and `'diff'` are preserved as valid return targets. Without this, closing a diff while on settings/new-session would navigate to the wrong view. Search for `previousViewMode` in the store and remove all `as 'terminal' | 'claude'` casts.
-- All call sites that invoke `openNewClaudeModal()` → `setViewMode('new-session')`
-  - `App.tsx` `handleKeyDown` callback (Cmd+N handler, line ~183)
-  - `App.tsx` `buildCommands` call — rename `openNewClaudeModal` param to `openNewSession` and pass `() => setViewMode('new-session')`
-  - `SessionSidebar.tsx` "New Claude Session" button `onNewClaudeSession` prop
-  - `CommandPalette.tsx` `buildCommands` — rename parameter from `openNewClaudeModal` to `openNewSession`
+
+**1. `previousViewMode` type & initial state:**
+- Widen type from `'terminal' | 'claude'` to `ViewMode`
+- Update initial state at line 423 from `previousViewMode: 'terminal' as const` to `previousViewMode: 'terminal'` (no cast needed — `'terminal'` satisfies `ViewMode` directly)
+
+**2. Centralize `previousViewMode` tracking in `setViewMode`:**
+
+Current implementation (line 1951):
+```typescript
+setViewMode: (mode) => set({ viewMode: mode })
+```
+
+New implementation:
+```typescript
+setViewMode: (mode) => set((state) => ({
+  viewMode: mode,
+  previousViewMode: state.viewMode !== 'diff' ? state.viewMode : state.previousViewMode,
+}))
+```
+
+This centralizes the `previousViewMode` tracking that is currently duplicated across ~7 diff-tab locations.
+
+**3. Remove narrow casts in diff-tab logic:**
+
+The store has ~7 locations (lines 1042, 1214, 2041, 2067, 2099, 2152, 2317) with:
+```typescript
+previousViewMode: state.viewMode !== 'diff'
+  ? (state.viewMode as 'terminal' | 'claude')
+  : state.previousViewMode
+```
+
+Since `setViewMode` now handles `previousViewMode` tracking, these diff-tab locations should either:
+- (a) Delegate to `setViewMode('diff')` instead of duplicating the pattern, OR
+- (b) Remove the `as 'terminal' | 'claude'` cast and use `state.viewMode` directly (since the type is now `ViewMode`)
+
+Option (a) is preferred — it eliminates duplication.
+
+**4. All call sites that invoke `openNewClaudeModal()` → `setViewMode('new-session')`:**
+- `App.tsx` `handleKeyDown` callback (Cmd+N handler)
+- `App.tsx` `buildCommands` call — rename `openNewClaudeModal` param to `openNewSession` and pass `() => setViewMode('new-session')`
+- `SessionSidebar.tsx` — **4 trigger sites:**
+  - `onNewClaudeSession` prop usage in collapsed sidebar (line ~385)
+  - Direct `openNewClaudeModal()` store call in mobile sidebar (line ~406) — **bypasses the prop, must be changed to `setViewMode('new-session')`**
+  - Desktop sidebar section header button (line ~669)
+  - Any other `onNewClaudeSession` prop call sites
+- `CommandPalette.tsx` `buildCommands` — rename parameter from `openNewClaudeModal` to `openNewSession`
 
 **Add (side effect in NewSessionView):**
-- Last-used project persistence via `zeusWs.send()` — this logic currently lives in `App.tsx` (lines 477-487) and must move into `NewSessionView`'s submit handler since the modal wrapper in App.tsx is being deleted
+- Last-used project persistence via `zeusWs.send()` — this logic currently lives in `App.tsx` (lines 498-510) and must move into `NewSessionView`'s submit handler since the modal wrapper in App.tsx is being deleted
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `src/renderer/src/stores/useZeusStore.ts` | Remove modal state/actions, add `'new-session'` to ViewMode, widen `previousViewMode` type, update `setViewMode` to track previous |
-| `src/renderer/src/App.tsx` | Remove `NewClaudeSessionModal` import+render, add `NewSessionView` to **both** mobile (line ~275) and desktop (line ~410) view switches, remove last-used-project persistence from App, update `handleKeyDown` and `buildCommands` |
-| `src/renderer/src/components/NewSessionView.tsx` | **New file** — full-page session creation view |
-| `src/renderer/src/components/NewClaudeSessionModal.tsx` | **Delete** |
-| `src/renderer/src/components/SessionSidebar.tsx` | Update "new session" button handler |
+| `src/renderer/src/stores/useZeusStore.ts` | Remove modal state/actions, add `'new-session'` to ViewMode, widen `previousViewMode` type + initial state, centralize tracking in `setViewMode`, remove narrow casts in ~7 diff-tab locations |
+| `src/renderer/src/App.tsx` | Remove `NewClaudeSessionModal` import+render, add `NewSessionView` to **both** mobile and desktop view switches, remove last-used-project persistence, update `handleKeyDown` and `buildCommands` |
+| `src/renderer/src/components/NewSessionView.tsx` | **New file** — full-page session creation view with `useNewSessionForm` hook |
+| `src/renderer/src/components/NewClaudeSessionModal.tsx` | **Delete** (only imported by App.tsx — safe to remove) |
+| `src/renderer/src/components/SessionSidebar.tsx` | Update all 4 "new session" trigger sites (including direct store call at line ~406) |
 | `src/renderer/src/components/CommandPalette.tsx` | Rename `openNewClaudeModal` param to `openNewSession` in `buildCommands` |
-| `src/renderer/src/components/Header.tsx` | Remove modal-related props if any |
+| `src/renderer/src/components/Header.tsx` | No modal-related props — minimal/no changes |
 
 ---
 
@@ -96,6 +134,12 @@ const tabs: { id: NewSessionTab; label: string; icon: typeof Zap }[] = [
   { id: 'projects',    label: 'Projects',     icon: FolderOpen },
 ];
 ```
+
+Tab switches within `NewSessionView` use conditional rendering (`activeTab === 'quick-start' && ...`), NOT unmount/remount. This means form state persists when switching between Quick Start, Configure, and Projects tabs within the same session.
+
+### Sidebar Active State
+
+The `new-session` view is ephemeral — **no sidebar highlight**. The sidebar session list shows the previously-active session as selected (dimmed or no highlight). The "New Claude Session" button in the sidebar header could optionally show a subtle active indicator, but this is not required.
 
 ---
 
@@ -168,13 +212,19 @@ Purpose: Manage saved projects without starting a session.
 
 ### State Management
 
-All form state lives in **local React state** (useState) inside `NewSessionView`. No Zustand involvement for form fields.
+Form state is encapsulated in a **`useNewSessionForm` custom hook** to keep `NewSessionView` focused on layout. The hook manages:
+- 12+ `useState` hooks (selectedProjectId, customDir, prompt, sessionName, permissionMode, model, notificationSound, enableGitWatcher, enableQA, qaTargetUrl, showCustomDir, showAddProject, newProjectName, newProjectPath, createNewDir)
+- Derived values: `workingDir`, `canSubmit`
+- `handleSubmit()` function (calls `startClaudeSession` + persists last-used project)
+
+No Zustand involvement for form fields — all local state.
 
 **From Zustand (read-only):**
 - `savedProjects: SavedProject[]`
 - `claudeDefaults: ClaudeDefaults`
 - `lastUsedProjectId: string | null`
 - `settingsError: string | null`
+- `previousViewMode: ViewMode`
 
 **Zustand actions called:**
 - `startClaudeSession(config)` — creates the session
@@ -188,7 +238,7 @@ All form state lives in **local React state** (useState) inside `NewSessionView`
 User clicks "Start Session"
   → validate: prompt + workingDir required
   → call startClaudeSession({ prompt, workingDir, sessionName?, permissionMode?, model?, notificationSound?, enableGitWatcher?, enableQA?, qaTargetUrl? })
-  → persist last-used project via WebSocket (if project is from savedProjects)
+  → persist last-used project via zeusWs.send() (if project is from savedProjects)
   → startClaudeSession internally sets viewMode='claude' + activeClaudeId
   → user lands on the new Claude session
 ```
@@ -198,18 +248,19 @@ User clicks "Start Session"
 | Trigger | Action |
 |---------|--------|
 | Cmd+N | `setViewMode('new-session')` |
-| Sidebar "New Claude Session" button | `setViewMode('new-session')` |
+| Sidebar "New Claude Session" button (all 4 sites) | `setViewMode('new-session')` |
 | Command Palette "New Claude Session" | `setViewMode('new-session')` |
-| Escape key (while on new-session view) | `setViewMode(previousViewMode)` — returns to the view the user was on before navigating here |
+| Escape key (while on new-session view) | `setViewMode(previousViewMode)` — guarded: only fires if CommandPalette is NOT open |
 | Click session in sidebar | `selectClaudeSession(id)` or `selectSession(id)` — navigates away |
 | After session created | Auto-navigates to `viewMode: 'claude'` |
+| Cmd+, (while on new-session) | Goes to settings; Cmd+, again returns to `new-session` via `previousViewMode` |
 
 ### Last-Used Project Persistence
 
-The current `App.tsx` wraps the modal's `onStart` to send a WebSocket message persisting the last-used project ID. Since the modal is being deleted, this logic moves into `NewSessionView`'s submit handler:
+The current `App.tsx` wraps the modal's `onStart` to send a WebSocket message persisting the last-used project ID. Since the modal is being deleted, this logic moves into the `useNewSessionForm` hook's `handleSubmit`:
 
 ```typescript
-// Inside NewSessionView handleSubmit:
+// Inside useNewSessionForm handleSubmit:
 const project = savedProjects.find((p) => p.path === config.workingDir);
 if (project) {
   zeusWs.send({
@@ -247,7 +298,8 @@ Form state resets when the component mounts (navigating to `new-session` view). 
 |----------|---------|--------|-----------------|
 | Cmd+N | Global | Navigate to new-session view | `App.tsx` `handleKeyDown` |
 | Cmd+Enter | While prompt focused | Submit form (start session) | `NewSessionView` textarea `onKeyDown` |
-| Escape | On new-session view | `setViewMode(previousViewMode)` | `NewSessionView` local `useEffect` with `keydown` listener (only active when `viewMode === 'new-session'`) |
+| Escape | On new-session view | `setViewMode(previousViewMode)` | `NewSessionView` local `useEffect` with `keydown` listener. **Guard:** only fires if CommandPalette is not open (check `showCommandPalette` from store or pass as prop). If CommandPalette is open, Escape closes it instead. |
+| Cmd+, | On new-session view | Navigate to settings (existing handler in App.tsx works via `setViewMode`) | `App.tsx` `handleKeyDown` — works automatically since `setViewMode` now saves `previousViewMode` |
 
 ---
 
@@ -258,6 +310,13 @@ Form state resets when the component mounts (navigating to `new-session` view). 
 - Project cards stack vertically
 - Start button is full-width
 - Same responsive breakpoint: `md` (768px)
+- Note: mobile view switch in App.tsx (line ~283) currently handles `settings | claude | terminal` only (no `diff` — confirmed). Add `new-session` case alongside the existing ternary chain.
+
+---
+
+## UX Notes
+
+**No transition animation.** The current modal has enter/exit animation via Dialog. The full-page view swap will be an instant cut, consistent with all other view mode transitions (terminal → claude → settings). This is a minor UX regression from the modal's slide-in but is consistent with the rest of the app.
 
 ---
 
@@ -268,7 +327,7 @@ Form state resets when the component mounts (navigating to `new-session` view). 
 - WebSocket protocol — unchanged
 - `SavedProject`, `ClaudeDefaults`, `PermissionMode` types — unchanged
 - Right panel behavior — unchanged
-- Session sidebar session list — unchanged (just the "new session" button handler changes)
+- Session sidebar session list — unchanged (just the "new session" button handlers change)
 
 ---
 
@@ -280,8 +339,13 @@ Form state resets when the component mounts (navigating to `new-session` view). 
 - [ ] Projects: add project → appears in list; remove project → disappears
 - [ ] QA toggle shows/hides QA URL field
 - [ ] Escape returns to previous view
+- [ ] Escape does NOT fire when CommandPalette is open
+- [ ] Cmd+, from new-session → settings → Cmd+, returns to new-session
 - [ ] Clicking a sidebar session navigates away from new-session view
 - [ ] Mobile: horizontal tabs work, content scrolls, form submits
 - [ ] Empty state: no projects → helpful CTA on Quick Start tab
 - [ ] Form validation: Start button disabled without prompt + directory
 - [ ] After creation: correct session is active, viewMode is 'claude'
+- [ ] Tab switches within NewSessionView preserve form state
+- [ ] All 4 SessionSidebar trigger sites open new-session view (including direct store call)
+- [ ] Diff tab opened from new-session → close diff → returns to new-session (via `previousViewMode`)
