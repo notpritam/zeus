@@ -1,10 +1,11 @@
-import { GitBranch, FolderOpen, Bot, Globe, RefreshCw, Info, Settings } from 'lucide-react';
+import { GitBranch, FolderOpen, Bot, Globe, RefreshCw, Info, Settings, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
 import FileExplorer from '@/components/FileExplorer';
 import SubagentPanel from '@/components/SubagentPanel';
 import BrowserPanel from '@/components/BrowserPanel';
+import AndroidPanel from '@/components/AndroidPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
 import SessionSettingsPanel from '@/components/SessionSettingsPanel';
 import {
@@ -82,7 +83,7 @@ function ActivityBarIcon({
   pulse,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings';
+  tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android';
   tooltip: string;
   badge?: number;   // red error badge (top-right)
   count?: number;   // themed count badge (top-right, lower priority than badge)
@@ -187,7 +188,7 @@ function RightPanel() {
               className="min-w-0 flex-1 flex flex-col overflow-hidden"
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : activeRightTab === 'browser' ? <BrowserPanel /> : <SubagentPanel />}
+                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : activeRightTab === 'browser' ? <BrowserPanel /> : activeRightTab === 'android' ? <AndroidPanel /> : <SubagentPanel />}
               </div>
               <WatcherStatusBar />
             </motion.div>
@@ -236,6 +237,11 @@ function RightPanel() {
                 : 'Browser'
             }
             badge={qaJsErrorCount}
+          />
+          <ActivityBarIcon
+            icon={Smartphone}
+            tab="android"
+            tooltip="Android"
           />
           <div className="mt-auto pb-2">
             <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />

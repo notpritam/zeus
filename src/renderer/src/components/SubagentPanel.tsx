@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Search,
   Check,
+  Smartphone,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
@@ -44,6 +45,17 @@ const SUBAGENT_TYPES = [
     inputFields: [
       { key: 'task', label: 'Review Instructions', type: 'textarea' as const, required: true, placeholder: 'Review this plan for...' },
       { key: 'filePath', label: 'Plan File', type: 'file' as const, required: true, placeholder: 'docs/superpowers/plans/...' },
+    ],
+  },
+  {
+    type: 'android_qa' as SubagentType,
+    name: 'Android QA Tester',
+    icon: Smartphone,
+    description: 'Android device QA testing with Maestro automation',
+    inputFields: [
+      { key: 'task', label: 'Task', type: 'textarea' as const, required: true, placeholder: 'What to test on the Android device...' },
+      { key: 'appId', label: 'App ID', type: 'text' as const, required: false, placeholder: 'com.example.app (optional)' },
+      { key: 'avdName', label: 'AVD Name', type: 'text' as const, required: false, placeholder: 'Auto-detected if omitted' },
     ],
   },
 ];
