@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { SessionRecord, SavedProject } from '../../shared/types';
+import type { SessionRecord, SavedProject, TaskRecord, TaskStatus } from '../../shared/types';
 import type { NormalizedEntry } from '../services/claude-types';
 import { validateNormalizedEntry, safeParseNormalizedEntry } from '../../shared/validators';
 import { zeusEnv } from './env';
@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -223,6 +223,30 @@ function runMigrations(database: Database.Database): void {
     `);
   }
 
+  if (currentVersion < 12) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        prompt        TEXT NOT NULL,
+        branch        TEXT NOT NULL,
+        base_branch   TEXT NOT NULL,
+        worktree_dir  TEXT NOT NULL,
+        project_path  TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'creating',
+        session_id    TEXT,
+        pr_url        TEXT,
+        diff_summary  TEXT,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL,
+        completed_at  INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_path);
+      CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
+    `);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -281,6 +305,8 @@ export function pruneOldSessions(maxAgeDays = 30): void {
     `DELETE FROM subagent_entries WHERE subagent_id IN (SELECT id FROM subagent_sessions WHERE started_at < ?)`,
   ).run(cutoff);
   db.prepare(`DELETE FROM subagent_sessions WHERE started_at < ?`).run(cutoff);
+
+  pruneOldTasks(maxAgeDays);
 }
 
 // ─── Claude Sessions CRUD ───
@@ -1347,4 +1373,91 @@ export function getSessionMcps(sessionId: string) {
     status: r.status as 'attached' | 'active' | 'failed',
     attachedAt: r.attached_at,
   }));
+}
+
+// ─── Tasks ───
+
+export function insertTask(task: {
+  id: string;
+  name: string;
+  prompt: string;
+  branch: string;
+  baseBranch: string;
+  worktreeDir: string;
+  projectPath: string;
+  status: string;
+  sessionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}): void {
+  if (!db) return;
+  db.prepare(`
+    INSERT INTO tasks (id, name, prompt, branch, base_branch, worktree_dir, project_path, status, session_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(task.id, task.name, task.prompt, task.branch, task.baseBranch, task.worktreeDir, task.projectPath, task.status, task.sessionId, task.createdAt, task.updatedAt);
+}
+
+export function updateTaskStatus(id: string, status: string, extra?: { sessionId?: string; prUrl?: string; diffSummary?: string; completedAt?: number }): void {
+  if (!db) return;
+  const now = Date.now();
+  const updates: string[] = ['status = ?', 'updated_at = ?'];
+  const params: unknown[] = [status, now];
+
+  if (extra?.sessionId !== undefined) { updates.push('session_id = ?'); params.push(extra.sessionId); }
+  if (extra?.prUrl !== undefined) { updates.push('pr_url = ?'); params.push(extra.prUrl); }
+  if (extra?.diffSummary !== undefined) { updates.push('diff_summary = ?'); params.push(extra.diffSummary); }
+  if (extra?.completedAt !== undefined) { updates.push('completed_at = ?'); params.push(extra.completedAt); }
+
+  params.push(id);
+  db.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function getTask(id: string): TaskRecord | null {
+  if (!db) return null;
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? rowToTaskRecord(row) : null;
+}
+
+export function getAllTasks(projectPath?: string): TaskRecord[] {
+  if (!db) return [];
+  const query = projectPath
+    ? db.prepare("SELECT * FROM tasks WHERE project_path = ? AND status != 'discarded' ORDER BY created_at DESC")
+    : db.prepare("SELECT * FROM tasks WHERE status != 'discarded' ORDER BY created_at DESC");
+  const rows = (projectPath ? query.all(projectPath) : query.all()) as Record<string, unknown>[];
+  return rows.map(rowToTaskRecord);
+}
+
+export function deleteTask(id: string): void {
+  if (!db) return;
+  db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+}
+
+export function pruneOldTasks(maxAgeDays = 30): void {
+  if (!db) return;
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const result = db.prepare(
+    `DELETE FROM tasks WHERE status IN ('discarded', 'merged', 'archived') AND updated_at < ?`,
+  ).run(cutoff);
+  if (result.changes > 0) {
+    console.log(`[Zeus DB] Pruned ${result.changes} old task(s)`);
+  }
+}
+
+function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    prompt: row.prompt as string,
+    branch: row.branch as string,
+    baseBranch: row.base_branch as string,
+    worktreeDir: row.worktree_dir as string,
+    projectPath: row.project_path as string,
+    status: row.status as TaskStatus,
+    sessionId: (row.session_id as string) || null,
+    prUrl: (row.pr_url as string) || null,
+    diffSummary: (row.diff_summary as string) || null,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    completedAt: (row.completed_at as number) || null,
+  };
 }
