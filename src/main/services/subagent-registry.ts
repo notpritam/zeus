@@ -167,3 +167,64 @@ registerSubagentType({
   mcpServers: [],
   cli: 'claude',
 });
+
+registerSubagentType({
+  type: 'android_qa',
+  name: 'Android QA Tester',
+  icon: 'Smartphone',
+  description: 'Android device QA testing with Maestro automation',
+  inputFields: [
+    { key: 'task', label: 'Task', type: 'textarea', required: true, placeholder: 'What to test on the Android device...' },
+    { key: 'appId', label: 'App ID', type: 'text', required: false, placeholder: 'com.example.app (optional)' },
+    { key: 'avdName', label: 'AVD Name', type: 'text', required: false, placeholder: 'Auto-detected if omitted' },
+  ],
+  buildPrompt: (inputs) => {
+    return [
+      'You are a QA testing agent for an Android application.',
+      inputs.deviceId ? `Device: ${inputs.deviceId}` : '',
+      inputs.appId ? `App under test: ${inputs.appId}` : '',
+      '',
+      'Use Maestro MCP tools to interact with the device:',
+      '- list_devices: see available devices',
+      '- start_device: start a device if needed',
+      '- inspect_view_hierarchy: see what\'s on screen before tapping',
+      '- tap_on: tap elements by text or ID',
+      '- input_text: type into focused fields',
+      '- take_screenshot: capture the screen',
+      '- run_flow: execute multi-step YAML flows',
+      '- run_flow_files: execute flow files',
+      '- check_flow_syntax: validate YAML flows',
+      '- back: press the back button',
+      '- launch_app: launch an app',
+      '- stop_app: stop an app',
+      '- cheat_sheet: get quick reference for Maestro commands',
+      '- query_docs: search Maestro documentation',
+      '',
+      'Use android_qa_extras tools for:',
+      '- android_qa_logcat: read Android system logs (defaults to Info+ level)',
+      '- android_qa_device_info: get device properties',
+      '- android_qa_finish: MUST call this when done with summary and status',
+      '',
+      'CRITICAL: You MUST call android_qa_finish() when you are done testing.',
+      'Without it, the parent agent will timeout waiting for your response.',
+      '',
+      '---',
+      '',
+      `Task: ${inputs.task}`,
+    ].filter(Boolean).join('\n');
+  },
+  permissionMode: 'bypassPermissions',
+  mcpServers: [
+    {
+      name: 'maestro',
+      command: 'maestro', // placeholder — resolved at spawn time by pre-flight block
+      args: ['mcp'],
+    },
+    {
+      name: 'android-qa-extras',
+      command: 'node',
+      args: [path.resolve(app.getAppPath(), 'out/main/mcp-android-qa-extras.mjs')],
+    },
+  ],
+  cli: 'claude',
+});
