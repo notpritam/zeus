@@ -1,0 +1,148 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useZeusStore } from '@/stores/useZeusStore';
+import { zeusWs } from '@/lib/ws';
+import type { PermissionMode } from '../../../shared/types';
+
+export function useNewSessionForm() {
+  const {
+    savedProjects,
+    claudeDefaults,
+    lastUsedProjectId,
+    settingsError,
+    startClaudeSession,
+    addProject,
+    removeProject,
+  } = useZeusStore();
+
+  // Project selection
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(lastUsedProjectId);
+  const [customDir, setCustomDir] = useState('');
+  const [showCustomDir, setShowCustomDir] = useState(savedProjects.length === 0);
+
+  // Add project form
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectPath, setNewProjectPath] = useState('');
+  const [createNewDir, setCreateNewDir] = useState(false);
+
+  // Session config
+  const [prompt, setPrompt] = useState('');
+  const [sessionName, setSessionName] = useState('');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(claudeDefaults.permissionMode);
+  const [model, setModel] = useState(claudeDefaults.model);
+  const [notificationSound, setNotificationSound] = useState(claudeDefaults.notificationSound);
+  const [enableGitWatcher, setEnableGitWatcher] = useState(true);
+  const [enableQA, setEnableQA] = useState(false);
+  const [qaTargetUrl, setQaTargetUrl] = useState(window.location.origin);
+
+  // Derived
+  const workingDir = showCustomDir
+    ? customDir.trim()
+    : savedProjects.find((p) => p.id === selectedProjectId)?.path ?? '';
+
+  const canSubmit = !!(prompt.trim() && workingDir);
+
+  // Auto-select newly added project
+  const prevProjectCountRef = useRef(savedProjects.length);
+  useEffect(() => {
+    if (savedProjects.length > prevProjectCountRef.current) {
+      const newest = savedProjects[savedProjects.length - 1];
+      if (newest) {
+        setSelectedProjectId(newest.id);
+        setShowCustomDir(false);
+        setShowAddProject(false);
+        setNewProjectName('');
+        setNewProjectPath('');
+        setCreateNewDir(false);
+      }
+    }
+    prevProjectCountRef.current = savedProjects.length;
+  }, [savedProjects]);
+
+  const handleAddProject = useCallback(() => {
+    const name = newProjectName.trim();
+    const projectPath = newProjectPath.trim();
+    if (!name || !projectPath) return;
+    addProject(name, projectPath, createNewDir || undefined);
+  }, [newProjectName, newProjectPath, createNewDir, addProject]);
+
+  const handleSubmit = useCallback(() => {
+    if (!canSubmit) return;
+
+    const config = {
+      prompt: prompt.trim(),
+      workingDir,
+      sessionName: sessionName.trim() || undefined,
+      permissionMode,
+      model: model.trim() || undefined,
+      notificationSound,
+      enableGitWatcher,
+      enableQA,
+      qaTargetUrl: enableQA ? qaTargetUrl.trim() || undefined : undefined,
+    };
+
+    startClaudeSession(config);
+
+    // Persist last-used project
+    const project = savedProjects.find((p) => p.path === config.workingDir);
+    if (project) {
+      zeusWs.send({
+        channel: 'settings',
+        sessionId: '',
+        payload: { type: 'set_last_used_project', id: project.id },
+        auth: '',
+      });
+    }
+  }, [
+    canSubmit, prompt, workingDir, sessionName, permissionMode, model,
+    notificationSound, enableGitWatcher, enableQA, qaTargetUrl,
+    startClaudeSession, savedProjects,
+  ]);
+
+  return {
+    // Project selection
+    savedProjects,
+    selectedProjectId,
+    setSelectedProjectId,
+    customDir,
+    setCustomDir,
+    showCustomDir,
+    setShowCustomDir,
+    workingDir,
+
+    // Add project
+    showAddProject,
+    setShowAddProject,
+    newProjectName,
+    setNewProjectName,
+    newProjectPath,
+    setNewProjectPath,
+    createNewDir,
+    setCreateNewDir,
+    handleAddProject,
+    settingsError,
+
+    // Session config
+    prompt,
+    setPrompt,
+    sessionName,
+    setSessionName,
+    permissionMode,
+    setPermissionMode,
+    model,
+    setModel,
+    notificationSound,
+    setNotificationSound,
+    enableGitWatcher,
+    setEnableGitWatcher,
+    enableQA,
+    setEnableQA,
+    qaTargetUrl,
+    setQaTargetUrl,
+
+    // Actions
+    canSubmit,
+    handleSubmit,
+    removeProject,
+  };
+}
