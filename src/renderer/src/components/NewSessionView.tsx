@@ -11,7 +11,11 @@ import {
   X,
   Plus,
   FolderPlus,
+  Plug,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { useNewSessionForm } from '@/hooks/useNewSessionForm';
 import type { PermissionMode } from '../../../shared/types';
@@ -221,6 +225,175 @@ function QuickStartTab({
       >
         Start Session
       </Button>
+    </div>
+  );
+}
+
+function McpSessionConfig({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
+  const mcpServers = useZeusStore((s) => s.mcpServers);
+  const mcpProfiles = useZeusStore((s) => s.mcpProfiles);
+  const mcpHealthResults = useZeusStore((s) => s.mcpHealthResults);
+  const fetchMcpServers = useZeusStore((s) => s.fetchMcpServers);
+  const fetchMcpProfiles = useZeusStore((s) => s.fetchMcpProfiles);
+  const healthCheckMcp = useZeusStore((s) => s.healthCheckMcp);
+
+  useEffect(() => {
+    fetchMcpServers();
+    fetchMcpProfiles();
+  }, []);
+
+  // Resolve which servers come from the selected profile
+  const selectedProfile = mcpProfiles.find((p) => p.id === form.mcpProfileId)
+    ?? mcpProfiles.find((p) => p.isDefault);
+
+  const profileServerIds = new Set(selectedProfile?.servers.map((s) => s.id) ?? []);
+
+  // Build resolved server list: profile servers + overrides
+  const resolvedServers = mcpServers
+    .filter((s) => s.enabled)
+    .map((s) => {
+      const fromProfile = profileServerIds.has(s.id);
+      const override = form.mcpServerOverrides[s.id];
+      // If override exists, use it; otherwise use profile membership
+      const included = override !== undefined ? override : fromProfile;
+      return { server: s, included, fromProfile };
+    });
+
+  const includedCount = resolvedServers.filter((r) => r.included).length;
+  const unhealthyCount = resolvedServers.filter(
+    (r) => r.included && mcpHealthResults[r.server.id] && !mcpHealthResults[r.server.id].healthy,
+  ).length;
+
+  const toggleServer = (serverId: string, fromProfile: boolean) => {
+    form.setMcpServerOverrides((prev: Record<string, boolean>) => {
+      const current = prev[serverId];
+      const currentlyIncluded = current !== undefined ? current : fromProfile;
+      return { ...prev, [serverId]: !currentlyIncluded };
+    });
+  };
+
+  if (mcpServers.length === 0) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Plug className="size-3.5 text-muted-foreground" />
+          <Label className="text-xs font-semibold">MCP Servers</Label>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          No MCP servers registered. Add servers in Settings &rarr; MCP Servers.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Plug className="size-3.5 text-primary" />
+          <Label className="text-xs font-semibold">MCP Servers</Label>
+          <Badge variant="secondary" className="text-[9px] px-1 py-0">
+            {includedCount} selected
+          </Badge>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 text-[10px] px-1.5"
+          onClick={() => healthCheckMcp()}
+        >
+          Check Health
+        </Button>
+      </div>
+
+      {/* Profile selector */}
+      {mcpProfiles.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-muted-foreground">Profile</label>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              variant={!form.mcpProfileId ? 'default' : 'secondary'}
+              size="xs"
+              className="rounded-full text-[10px]"
+              onClick={() => {
+                form.setMcpProfileId(undefined);
+                form.setMcpServerOverrides({});
+              }}
+            >
+              {mcpProfiles.find((p) => p.isDefault) ? 'Default' : 'None'}
+            </Button>
+            {mcpProfiles.map((profile) => (
+              <Button
+                key={profile.id}
+                variant={form.mcpProfileId === profile.id ? 'default' : 'secondary'}
+                size="xs"
+                className="rounded-full text-[10px]"
+                onClick={() => {
+                  form.setMcpProfileId(profile.id);
+                  form.setMcpServerOverrides({});
+                }}
+              >
+                {profile.name}
+                <span className="text-muted-foreground ml-0.5">({profile.servers.length})</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Server toggles */}
+      <div className="space-y-1 max-h-48 overflow-y-auto">
+        {resolvedServers.map(({ server, included, fromProfile }) => {
+          const health = mcpHealthResults[server.id];
+          return (
+            <button
+              key={server.id}
+              onClick={() => toggleServer(server.id, fromProfile)}
+              className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
+                included
+                  ? 'bg-primary/10 text-foreground'
+                  : 'hover:bg-secondary/60 text-muted-foreground'
+              }`}
+            >
+              {/* Checkbox */}
+              <span className={`flex size-3.5 items-center justify-center rounded border shrink-0 ${
+                included
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border'
+              }`}>
+                {included && <Check className="size-2" />}
+              </span>
+
+              {/* Health dot */}
+              {health ? (
+                health.healthy ? (
+                  <span className="size-1.5 shrink-0 rounded-full bg-green-500" />
+                ) : (
+                  <span className="size-1.5 shrink-0 rounded-full bg-red-500" title={health.error} />
+                )
+              ) : (
+                <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
+              )}
+
+              <span className="flex-1 truncate">{server.name}</span>
+
+              {health && (
+                <span className="text-[9px] text-muted-foreground shrink-0">{health.latencyMs}ms</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Unhealthy warning */}
+      {unhealthyCount > 0 && (
+        <div className="flex items-center gap-2 rounded-md bg-yellow-500/10 border border-yellow-500/20 px-2.5 py-1.5">
+          <AlertTriangle className="size-3 text-yellow-500 shrink-0" />
+          <span className="text-[10px] text-yellow-600 dark:text-yellow-400">
+            {unhealthyCount} server{unhealthyCount > 1 ? 's' : ''} unreachable — session will start but {unhealthyCount > 1 ? 'these MCPs' : 'this MCP'} may not work
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -435,6 +608,11 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
             />
           </div>
         )}
+
+        <Separator />
+
+        {/* MCP Server Selection */}
+        <McpSessionConfig form={form} />
       </div>
 
       <Separator />

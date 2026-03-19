@@ -35,6 +35,10 @@ export function useNewSessionForm() {
   const [enableQA, setEnableQA] = useState(false);
   const [qaTargetUrl, setQaTargetUrl] = useState(window.location.origin);
 
+  // MCP config
+  const [mcpProfileId, setMcpProfileId] = useState<string | undefined>(undefined);
+  const [mcpServerOverrides, setMcpServerOverrides] = useState<Record<string, boolean>>({});
+
   // Derived
   const workingDir = showCustomDir
     ? customDir.trim()
@@ -69,6 +73,14 @@ export function useNewSessionForm() {
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
 
+    // Compute MCP additive/subtractive overrides from the toggle map
+    const mcpServerIds = Object.entries(mcpServerOverrides)
+      .filter(([, enabled]) => enabled)
+      .map(([id]) => id);
+    const mcpExcludeIds = Object.entries(mcpServerOverrides)
+      .filter(([, enabled]) => !enabled)
+      .map(([id]) => id);
+
     const config = {
       prompt: prompt.trim(),
       workingDir,
@@ -79,6 +91,9 @@ export function useNewSessionForm() {
       enableGitWatcher,
       enableQA,
       qaTargetUrl: enableQA ? qaTargetUrl.trim() || undefined : undefined,
+      mcpProfileId,
+      mcpServerIds: mcpServerIds.length > 0 ? mcpServerIds : undefined,
+      mcpExcludeIds: mcpExcludeIds.length > 0 ? mcpExcludeIds : undefined,
     };
 
     startClaudeSession(config);
@@ -96,7 +111,7 @@ export function useNewSessionForm() {
   }, [
     canSubmit, prompt, workingDir, sessionName, permissionMode, model,
     notificationSound, enableGitWatcher, enableQA, qaTargetUrl,
-    startClaudeSession, savedProjects,
+    mcpProfileId, mcpServerOverrides, startClaudeSession, savedProjects,
   ]);
 
   return {
@@ -139,6 +154,12 @@ export function useNewSessionForm() {
     setEnableQA,
     qaTargetUrl,
     setQaTargetUrl,
+
+    // MCP config
+    mcpProfileId,
+    setMcpProfileId,
+    mcpServerOverrides,
+    setMcpServerOverrides,
 
     // Actions
     canSubmit,
