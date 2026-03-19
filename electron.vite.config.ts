@@ -17,6 +17,7 @@ export default defineConfig({
           index: resolve(__dirname, 'src/main/index.ts'),
           'mcp-qa-server': resolve(__dirname, 'src/main/mcp/qa-server.ts'),
           'mcp-zeus-bridge': resolve(__dirname, 'src/main/mcp/zeus-bridge.ts'),
+          'mcp-android-qa-extras': resolve(__dirname, 'src/main/mcp/android-qa-extras.ts'),
         },
         external: (id) => externalPattern.test(id),
       },

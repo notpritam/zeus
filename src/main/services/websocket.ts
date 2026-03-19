@@ -72,11 +72,12 @@ import {
   copyClaudeEntriesForResume,
   updateClaudeSessionQaTargetUrl,
 } from './db';
-import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName } from '../../shared/types';
+import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName, AndroidPayload } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
 import { GitWatcherManager, initGitRepo } from './git';
 import { FileTreeServiceManager } from './file-tree';
 import { QAService } from './qa';
+import { AndroidQAService, findMaestroPath, findAdbPath } from './android-qa';
 import { getSubagentType, type SubagentContext } from './subagent-registry';
 import { detectDevServerUrlDetailed } from './detect-dev-server';
 import { SystemMonitorService } from './system-monitor';
@@ -115,6 +116,16 @@ const fileTreeManager = new FileTreeServiceManager();
 
 // QA service (singleton PinchTab server)
 let qaService: QAService | null = null;
+
+// Module-level singleton (mirrors qaService pattern)
+let androidQAService: AndroidQAService | null = null;
+
+function getAndroidQAService(): AndroidQAService {
+  if (!androidQAService) {
+    androidQAService = new AndroidQAService();
+  }
+  return androidQAService;
+}
 
 // Subagent sessions — keyed by subagentId, multiple per parent session
 interface SubagentRecord {
@@ -738,15 +749,29 @@ function wireSubagent(record: SubagentRecord): void {
     if (entry.entryType.type === 'tool_use') {
       const { toolName, status } = entry.entryType;
       const isScreenshot = /screenshot/i.test(toolName);
-      if (isScreenshot && status === 'success' && qaService?.isRunning()) {
-        try {
-          const imageData = await qaService.screenshot();
-          if (imageData) {
-            const meta = (entry.metadata ?? {}) as Record<string, unknown>;
-            meta.images = [imageData];
-            entry = { ...entry, metadata: meta };
-          }
-        } catch { /* non-critical */ }
+      if (isScreenshot && status === 'success') {
+        // PinchTab QA screenshot (existing behavior, unchanged)
+        if (qaService?.isRunning()) {
+          try {
+            const imageData = await qaService.screenshot();
+            if (imageData) {
+              const meta = (entry.metadata ?? {}) as Record<string, unknown>;
+              meta.images = [imageData];
+              entry = { ...entry, metadata: meta };
+            }
+          } catch { /* non-critical */ }
+        }
+        // Android QA screenshot
+        else if (record.subagentType === 'android_qa' && androidQAService?.isRunning()) {
+          try {
+            const imageData = await androidQAService.screenshot();
+            if (imageData) {
+              const meta = (entry.metadata ?? {}) as Record<string, unknown>;
+              meta.images = [imageData];
+              entry = { ...entry, metadata: meta };
+            }
+          } catch { /* non-critical */ }
+        }
       }
     }
 
@@ -2204,6 +2229,114 @@ async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   }
 }
 
+// Helper to send a response with responseId forwarding (matches handleQA pattern)
+function sendAndroidResponse(ws: WebSocket, envelope: WsEnvelope, responsePayload: Record<string, unknown>): void {
+  const inPayload = envelope.payload as Record<string, unknown>;
+  sendEnvelope(ws, {
+    channel: 'android', sessionId: '', auth: '',
+    payload: { ...responsePayload, responseId: inPayload.responseId },
+  });
+}
+
+async function handleAndroid(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as AndroidPayload;
+  const service = getAndroidQAService();
+
+  switch (payload.type) {
+    case 'start_emulator': {
+      try {
+        const device = await service.start(payload.avdName);
+        service.removeAllListeners('logcat');
+        service.on('logcat', (entries) => {
+          broadcastEnvelope({
+            channel: 'android', sessionId: '', auth: '',
+            payload: { type: 'logcat_entries', entries },
+          });
+        });
+        sendAndroidResponse(ws, envelope, { type: 'emulator_started', device });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'stop_emulator': {
+      try {
+        await service.stop();
+        sendAndroidResponse(ws, envelope, { type: 'emulator_stopped' });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'list_devices': {
+      try {
+        const devices = await service.listDevices();
+        const avds = await service.listAvds();
+        sendAndroidResponse(ws, envelope, { type: 'devices_list', devices, avds });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'get_android_status': {
+      try {
+        const devices = await service.listDevices();
+        sendAndroidResponse(ws, envelope, {
+          type: 'android_status',
+          running: service.isRunning(),
+          devices,
+        });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'screenshot': {
+      try {
+        const dataUrl = await service.screenshot();
+        sendAndroidResponse(ws, envelope, { type: 'screenshot_result', dataUrl });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'view_hierarchy': {
+      try {
+        const nodes = await service.viewHierarchy();
+        sendAndroidResponse(ws, envelope, { type: 'view_hierarchy_result', nodes });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'install_apk': {
+      try {
+        await service.installApk(payload.apkPath);
+        sendAndroidResponse(ws, envelope, { type: 'apk_installed', apkPath: payload.apkPath });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+
+    case 'launch_app': {
+      try {
+        await service.launchApp(payload.appId);
+        sendAndroidResponse(ws, envelope, { type: 'app_launched', appId: payload.appId });
+      } catch (err) {
+        sendAndroidResponse(ws, envelope, { type: 'android_error', message: String(err) });
+      }
+      break;
+    }
+  }
+}
+
 async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   const payload = envelope.payload as SubagentPayload;
 
@@ -2253,6 +2386,34 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
             });
           }
         }
+      }
+
+      // Android QA-specific setup: ensure emulator is running
+      if (subagentType === 'android_qa') {
+        const androidService = getAndroidQAService();
+
+        // 1. Ensure emulator is running (detect existing or boot new)
+        let device = await androidService.detectRunning();
+        if (!device) {
+          device = await androidService.start(inputs.avdName);
+        }
+
+        // 2. Wire logcat streaming
+        androidService.removeAllListeners('logcat');
+        androidService.on('logcat', (entries) => {
+          broadcastEnvelope({
+            channel: 'android', sessionId: '', auth: '',
+            payload: { type: 'logcat_entries', entries },
+          });
+        });
+
+        // 3. Launch app if appId provided
+        if (inputs.appId) {
+          await androidService.launchApp(inputs.appId);
+        }
+
+        // 4. Inject deviceId into inputs so buildPrompt can reference it
+        inputs.deviceId = device.deviceId;
       }
 
       // Resolve target URL (QA-specific): explicit input > parent session's detected URL > live detection > env default
@@ -2414,6 +2575,36 @@ async function handleSubagent(ws: WebSocket, envelope: WsEnvelope): Promise<void
       if (definition?.mcpServers?.length) {
         sessionOpts.mcpServers = definition.mcpServers;
       }
+
+      // Android QA: clone registry mcpServers and resolve maestro path at spawn time
+      if (subagentType === 'android_qa' && definition?.mcpServers?.length) {
+        const clonedServers = definition.mcpServers.map(s => ({
+          ...s,
+          args: s.args ? [...s.args] : undefined,
+          env: s.env ? { ...s.env } : undefined,
+        }));
+
+        // Resolve maestro binary path (deferred from module load)
+        const maestroServer = clonedServers.find(s => s.name === 'maestro');
+        if (maestroServer) {
+          maestroServer.command = findMaestroPath();
+        }
+
+        // Inject device ID into extras server env
+        const extrasServer = clonedServers.find(s => s.name === 'android-qa-extras');
+        if (extrasServer) {
+          let adbPathResolved = 'adb';
+          try { adbPathResolved = findAdbPath(); } catch { /* fallback to bare adb */ }
+          extrasServer.env = {
+            ...(extrasServer.env ?? {}),
+            ZEUS_ANDROID_DEVICE_ID: inputs.deviceId ?? '',
+            ZEUS_ANDROID_ADB_PATH: adbPathResolved,
+          };
+        }
+
+        sessionOpts.mcpServers = clonedServers;
+      }
+
       const session = new ClaudeSession(sessionOpts);
 
       const agentName = payload.name || undefined;
@@ -3023,6 +3214,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
         sendEnvelope(ws, {
           channel: 'subagent', sessionId: '', auth: '',
           payload: { type: 'subagent_error', message: `Subagent error: ${(err as Error).message}` },
+        });
+      });
+      break;
+    case 'android':
+      handleAndroid(ws, envelope).catch((err) => {
+        console.error('[Android] Unhandled error in handleAndroid:', err);
+        sendEnvelope(ws, {
+          channel: 'android', sessionId: '', auth: '',
+          payload: { type: 'android_error', message: `Android error: ${(err as Error).message}` },
         });
       });
       break;

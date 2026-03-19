@@ -32,6 +32,10 @@ import type {
   PerfPayload,
   ThemeMeta,
   ThemeFile,
+  AndroidDeviceInfo,
+  LogcatEntry,
+  AndroidViewNode,
+  AndroidPayload,
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
@@ -125,6 +129,24 @@ interface ZeusState {
   // QA URL detection result (transient — for UI feedback)
   qaUrlDetectionResult: { sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string; timestamp: number } | null;
 
+  // Android QA
+  androidRunning: boolean;
+  androidDevices: AndroidDeviceInfo[];
+  androidAvds: string[];
+  androidScreenshot: string | null;
+  androidViewHierarchy: AndroidViewNode[] | null;
+  androidLogcat: LogcatEntry[];
+
+  // Android QA actions
+  startAndroidEmulator: (avdName?: string) => void;
+  stopAndroidEmulator: () => void;
+  listAndroidDevices: () => void;
+  takeAndroidScreenshot: () => void;
+  getAndroidViewHierarchy: () => void;
+  installAndroidApk: (apkPath: string) => void;
+  launchAndroidApp: (appId: string) => void;
+  clearAndroidLogcat: () => void;
+
   // Subagents — keyed by parentSessionId → multiple agents
   subagents: Record<string, SubagentClient[]>;        // parentSessionId → agents
   activeSubagentId: Record<string, string | null>;   // parentSessionId → selected subagentId
@@ -136,7 +158,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | null;
 
   // Session terminal panel (per-Claude-session terminals)
   sessionTerminals: Record<string, {
@@ -456,6 +478,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   qaJsErrors: [],
 
   qaUrlDetectionResult: null,
+
+  androidRunning: false,
+  androidDevices: [],
+  androidAvds: [],
+  androidScreenshot: null,
+  androidViewHierarchy: null,
+  androidLogcat: [],
 
   subagents: {},
   activeSubagentId: {},
@@ -1476,6 +1505,37 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    // Subscribe to android channel
+    const unsubAndroid = zeusWs.on('android', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as AndroidPayload;
+      switch (payload.type) {
+        case 'emulator_started':
+          set({ androidRunning: true, androidDevices: [...get().androidDevices, payload.device] });
+          break;
+        case 'emulator_stopped':
+          set({ androidRunning: false, androidDevices: [], androidLogcat: [] });
+          break;
+        case 'devices_list':
+          set({ androidDevices: payload.devices, androidAvds: payload.avds });
+          break;
+        case 'android_status':
+          set({ androidRunning: payload.running, androidDevices: payload.devices });
+          break;
+        case 'screenshot_result':
+          set({ androidScreenshot: payload.dataUrl });
+          break;
+        case 'view_hierarchy_result':
+          set({ androidViewHierarchy: payload.nodes });
+          break;
+        case 'logcat_entries':
+          set({ androidLogcat: [...get().androidLogcat, ...payload.entries].slice(-500) });
+          break;
+        case 'android_error':
+          console.error('[AndroidQA]', payload.message);
+          break;
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -1489,6 +1549,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubQA();
       unsubSubagent();
       unsubPerf();
+      unsubAndroid();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -2804,6 +2865,54 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       const { [claudeSessionId]: _, ...rest } = s.sessionTerminals;
       return { sessionTerminals: rest };
     });
+  },
+
+  // --- Android QA actions ---
+
+  startAndroidEmulator: (avdName?: string) => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'start_emulator', avdName },
+    });
+  },
+  stopAndroidEmulator: () => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'stop_emulator' },
+    });
+  },
+  listAndroidDevices: () => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'list_devices' },
+    });
+  },
+  takeAndroidScreenshot: () => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'screenshot' },
+    });
+  },
+  getAndroidViewHierarchy: () => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'view_hierarchy' },
+    });
+  },
+  installAndroidApk: (apkPath: string) => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'install_apk', apkPath },
+    });
+  },
+  launchAndroidApp: (appId: string) => {
+    zeusWs.send({
+      channel: 'android', sessionId: '', auth: '',
+      payload: { type: 'launch_app', appId },
+    });
+  },
+  clearAndroidLogcat: () => {
+    set({ androidLogcat: [] });
   },
 
   // --- Performance actions ---
