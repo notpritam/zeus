@@ -169,7 +169,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -532,8 +532,62 @@ export interface QaSnapshotNode {
 
 // ─── Subagent Types ───
 
-export type SubagentType = 'qa' | 'plan_reviewer';
+export type SubagentType = 'qa' | 'plan_reviewer' | 'android_qa';
 export type SubagentCli = 'claude';
+
+// ─── Android QA Types ───
+
+export interface AndroidDeviceInfo {
+  deviceId: string;      // e.g. "emulator-5554"
+  avdName: string;       // e.g. "Pixel_9"
+  status: 'running' | 'offline' | 'booting';
+  apiLevel?: number;     // e.g. 35
+  platform: 'android';
+}
+
+export interface LogcatEntry {
+  timestamp: number;     // Unix ms — use Date.now() at parse time
+  pid: number;
+  tid: number;
+  level: 'V' | 'D' | 'I' | 'W' | 'E' | 'F';
+  tag: string;
+  message: string;
+}
+
+export interface AndroidViewNode {
+  className: string;
+  text?: string;
+  resourceId?: string;
+  contentDescription?: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  clickable: boolean;
+  enabled: boolean;
+  checked: boolean;
+  focused: boolean;
+  children?: AndroidViewNode[];
+}
+
+export type AndroidPayload =
+  // Client → Server
+  | { type: 'start_emulator'; avdName?: string }
+  | { type: 'stop_emulator' }
+  | { type: 'list_devices' }
+  | { type: 'get_android_status' }
+  | { type: 'screenshot' }
+  | { type: 'view_hierarchy' }
+  | { type: 'install_apk'; apkPath: string }
+  | { type: 'launch_app'; appId: string }
+  // Server → Client
+  | { type: 'android_status'; running: boolean; devices: AndroidDeviceInfo[] }
+  | { type: 'emulator_started'; device: AndroidDeviceInfo }
+  | { type: 'emulator_stopped' }
+  | { type: 'devices_list'; devices: AndroidDeviceInfo[]; avds: string[] }
+  | { type: 'screenshot_result'; dataUrl: string }
+  | { type: 'view_hierarchy_result'; nodes: AndroidViewNode[]; raw?: string }
+  | { type: 'app_launched'; appId: string }
+  | { type: 'apk_installed'; apkPath: string }
+  | { type: 'logcat_entries'; entries: LogcatEntry[] }
+  | { type: 'android_error'; message: string };
 
 // ─── QA Agent ───
 
