@@ -29,7 +29,8 @@ export interface SessionOptions {
   enableQA?: boolean;
   qaTargetUrl?: string;
   zeusSessionId?: string;
-  qaAgentId?: string;
+  subagentId?: string;
+  mcpServers?: Array<{ name: string; command: string; args?: string[]; env?: Record<string, string> }>;
 }
 
 export interface ApprovalRequest {
@@ -85,7 +86,7 @@ export class ClaudeSession extends EventEmitter {
         ...process.env,
         NPM_CONFIG_LOGLEVEL: 'error',
         ...(this.options.zeusSessionId ? { ZEUS_SESSION_ID: this.options.zeusSessionId } : {}),
-        ...(this.options.qaAgentId ? { ZEUS_QA_AGENT_ID: this.options.qaAgentId } : {}),
+        ...(this.options.subagentId ? { ZEUS_QA_AGENT_ID: this.options.subagentId } : {}),
       },
     });
 
@@ -193,8 +194,8 @@ export class ClaudeSession extends EventEmitter {
   /** Kill the session process */
   kill(): void {
     // Don't set _isRunning = false here — let the exit/close handler do it
-    // so that the 'done' event is properly emitted and listeners (e.g. wireQAAgent)
-    // can run cleanup like broadcasting qa_agent_stopped.
+    // so that the 'done' event is properly emitted and listeners (e.g. wireSubagent)
+    // can run cleanup like broadcasting subagent_stopped.
     this.child?.kill('SIGTERM');
   }
 
@@ -222,33 +223,38 @@ export class ClaudeSession extends EventEmitter {
       }
     }
 
-    // MCP server integration — mutually exclusive:
-    //   QA agent sessions (have qaAgentId) get zeus-qa (browser automation tools)
-    //   Regular sessions get zeus-bridge (orchestration, QA dispatch)
-    const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
-    const isQAAgent = !!this.options.qaAgentId;
+    // MCP server integration:
+    //   Subagent sessions get their type-specific MCP servers from the registry
+    //   Regular sessions get zeus-bridge (orchestration, subagent dispatch)
+    const mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
+    const isSubagent = !!this.options.subagentId;
 
-    if (isQAAgent) {
-      const qaServerPath = path.resolve(app.getAppPath(), 'out/main/mcp-qa-server.mjs');
-      mcpServers['zeus-qa'] = {
-        command: 'node',
-        args: [qaServerPath],
-        env: {
-          ZEUS_QA_AGENT_ID: this.options.qaAgentId!,
+    if (isSubagent && this.options.mcpServers) {
+      for (const mcp of this.options.mcpServers) {
+        const env: Record<string, string> = {
+          ...(mcp.env ?? {}),
+          ZEUS_QA_AGENT_ID: this.options.subagentId!,
           ZEUS_WS_URL: process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888',
-          ZEUS_PINCHTAB_PORT: process.env.ZEUS_PINCHTAB_PORT ?? '9867',
-        },
-      };
+        };
+        mcpServers[mcp.name] = {
+          command: mcp.command,
+          args: mcp.args,
+          env,
+        };
+      }
 
-      const targetUrl = this.options.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
-      const qaPrompt = [
-        'You have access to QA browser testing tools via the zeus-qa MCP server.',
-        `After making UI changes, call qa_run_test_flow with url "${targetUrl}".`,
-        'Check the summary for errors. If issues found, fix them and re-test.',
-        'Do not claim work is complete until qa_run_test_flow returns a clean report.',
-      ].join(' ');
-      args.push('--append-system-prompt', qaPrompt);
-    } else {
+      // QA-specific system prompt injection (only if zeus-qa MCP server is attached)
+      if (this.options.mcpServers.some(m => m.name === 'zeus-qa')) {
+        const targetUrl = this.options.qaTargetUrl || process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
+        const qaPrompt = [
+          'You have access to QA browser testing tools via the zeus-qa MCP server.',
+          `After making UI changes, call qa_run_test_flow with url "${targetUrl}".`,
+          'Check the summary for errors. If issues found, fix them and re-test.',
+          'Do not claim work is complete until qa_run_test_flow returns a clean report.',
+        ].join(' ');
+        args.push('--append-system-prompt', qaPrompt);
+      }
+    } else if (!isSubagent) {
       const bridgePath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-bridge.mjs');
       mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath] };
 
