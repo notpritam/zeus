@@ -2025,6 +2025,26 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         });
       }
     }
+  } else if (payload.type === 'scan_by_extension') {
+    const service = fileTreeManager.getService(sessionId);
+    if (service) {
+      try {
+        const results = await service.scanByExtension(payload.ext);
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'scan_by_extension_result', ext: payload.ext, results },
+          auth: '',
+        });
+      } catch (err) {
+        sendEnvelope(ws, {
+          channel: 'files',
+          sessionId,
+          payload: { type: 'files_error', message: (err as Error).message },
+          auth: '',
+        });
+      }
+    }
   } else if (payload.type === 'save_file') {
     const service = fileTreeManager.getService(sessionId);
     if (service) {

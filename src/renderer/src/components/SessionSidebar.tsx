@@ -25,28 +25,9 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName, NormalizedEntry } from '../../../shared/types';
+import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName } from '../../../shared/types';
 import { SESSION_ICON_COLORS } from '../../../shared/types';
 import { useZeusStore } from '@/stores/useZeusStore';
-
-/** Extract last user message content per session from claudeEntries */
-function useLastUserMessages(claudeEntries: Record<string, NormalizedEntry[]>): Record<string, string> {
-  return useMemo(() => {
-    const result: Record<string, string> = {};
-    for (const [sid, entries] of Object.entries(claudeEntries)) {
-      for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i].entryType.type === 'user_message') {
-          const content = entries[i].content.trim();
-          if (content) {
-            result[sid] = content.length > 60 ? content.slice(0, 60) + '...' : content;
-          }
-          break;
-        }
-      }
-    }
-    return result;
-  }, [claudeEntries]);
-}
 
 // ─── Long press hook ───
 
@@ -370,9 +351,8 @@ function CollapsedSidebar({
   onSelectSession: (id: string) => void;
   onOpenSettings: () => void;
 }) {
-  // Compute last user message per session for collapsed tooltip display
-  const claudeEntries = useZeusStore((s) => s.claudeEntries);
-  const lastUserMessages = useLastUserMessages(claudeEntries);
+  // Stable last user message previews (only updates when user sends a message)
+  const lastUserMessages = useZeusStore((s) => s.lastUserMessagePreview);
 
   // Sort by last activity (most recent first), fallback to startedAt
   const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
@@ -620,9 +600,8 @@ function SessionSidebar({
 
   const closeSheet = () => setSheetTarget(null);
 
-  // Compute last user message per session for display
-  const claudeEntries = useZeusStore((s) => s.claudeEntries);
-  const lastUserMessages = useLastUserMessages(claudeEntries);
+  // Stable last user message previews (only updates when user sends a message)
+  const lastUserMessages = useZeusStore((s) => s.lastUserMessagePreview);
 
   // Filter out terminal sessions that belong to session terminal tabs (Cmd+J panels)
   const sessionTerminals = useZeusStore((s) => s.sessionTerminals);

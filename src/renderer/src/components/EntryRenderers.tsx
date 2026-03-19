@@ -120,7 +120,7 @@ export function UserBubble({ content, metadata, timestamp }: { content: string; 
           </div>
         )}
       </div>
-      <div className={`flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100`}>
+      <div className={`flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 max-sm:opacity-100`}>
         {formatTimestampIST(timestamp) && (
           <span className="text-muted-foreground mt-1 flex items-center px-1 text-[10px]">{formatTimestampIST(timestamp)}</span>
         )}
@@ -138,7 +138,7 @@ export function AssistantBubble({ content, timestamp }: { content: string; times
           <Markdown content={content} />
         </div>
       </div>
-      <div className={`flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100`}>
+      <div className={`flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 max-sm:opacity-100`}>
         {formatTimestampIST(timestamp) && (
           <span className="text-muted-foreground mt-1 flex items-center px-1 text-[10px]">{formatTimestampIST(timestamp)}</span>
         )}

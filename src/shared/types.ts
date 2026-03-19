@@ -79,6 +79,8 @@ export type FilesPayload =
   | { type: 'files_changed'; directories: string[] }
   | { type: 'search_files'; query: string }
   | { type: 'search_files_result'; query: string; results: Array<{ path: string; name: string; type: 'file' | 'directory' }> }
+  | { type: 'scan_by_extension'; ext: string }
+  | { type: 'scan_by_extension_result'; ext: string; results: Array<{ path: string; name: string }> }
   | { type: 'files_connected' }
   | { type: 'files_error'; message: string };
 

@@ -181,6 +181,35 @@ export class FileTreeService extends EventEmitter {
     return results.slice(0, 30).map(({ path: p, name, type }) => ({ path: p, name, type }));
   }
 
+  async scanByExtension(ext: string, maxResults = 200): Promise<Array<{ path: string; name: string }>> {
+    const results: Array<{ path: string; name: string }> = [];
+    const lowerExt = ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`;
+    const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.claude', 'tmp']);
+
+    const walk = async (dir: string, relPrefix: string): Promise<void> => {
+      if (results.length >= maxResults) return;
+      let dirents;
+      try {
+        dirents = await readdir(dir, { withFileTypes: true });
+      } catch { return; }
+      for (const dirent of dirents) {
+        if (results.length >= maxResults) return;
+        if (dirent.name.startsWith('.') && dirent.isDirectory()) continue;
+        if (ignoreDirs.has(dirent.name)) continue;
+        const relPath = relPrefix ? `${relPrefix}/${dirent.name}` : dirent.name;
+        if (dirent.isDirectory()) {
+          await walk(path.join(dir, dirent.name), relPath);
+        } else if (dirent.name.toLowerCase().endsWith(lowerExt)) {
+          results.push({ path: relPath, name: dirent.name });
+        }
+      }
+    };
+
+    await walk(this.workingDir, '');
+    results.sort((a, b) => a.path.localeCompare(b.path));
+    return results;
+  }
+
   async readFileContent(filePath: string): Promise<string | null> {
     try {
       const resolved = this.validatePath(filePath);

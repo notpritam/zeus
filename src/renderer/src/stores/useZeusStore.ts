@@ -75,6 +75,7 @@ interface ZeusState {
   pendingApprovals: ClaudeApprovalInfo[];
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>; // sessionId → timestamp of last activity
+  lastUserMessagePreview: Record<string, string>; // sessionId → truncated last user message (for sidebar)
   messageQueue: Record<string, Array<{ id: string; content: string }>>;
 
   // Git
@@ -128,6 +129,7 @@ interface ZeusState {
   subagents: Record<string, SubagentClient[]>;        // parentSessionId → agents
   activeSubagentId: Record<string, string | null>;   // parentSessionId → selected subagentId
   qaFlows: FlowSummary[];
+  markdownFiles: Array<{ path: string; name: string }>;
 
   // Performance monitoring
   perfMetrics: SystemMetrics | null;
@@ -263,6 +265,7 @@ interface ZeusState {
   fetchSubagents: (parentSessionId: string) => void;
   fetchSubagentEntries: (subagentId: string) => void;
   fetchQaFlows: () => void;
+  fetchMarkdownFiles: (sessionId: string) => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null) => void;
@@ -297,6 +300,12 @@ interface ZeusState {
 const ENTRIES_PAGE_SIZE = 50;
 
 let claudeIdCounter = 0;
+
+function truncatePreview(content: string, max = 60): string {
+  const trimmed = content.trim();
+  if (!trimmed) return '';
+  return trimmed.length > max ? trimmed.slice(0, max) + '...' : trimmed;
+}
 let drainInFlight: Record<string, boolean> = {};
 
 // Maps correlationId (= tabId) → claudeSessionId for pending terminal tab creation
@@ -345,6 +354,10 @@ function drainQueue(
         ...state.claudeEntries,
         [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
       },
+      lastUserMessagePreview: {
+        ...state.lastUserMessagePreview,
+        [sid]: truncatePreview(next.content),
+      },
     }));
     zeusWs.send({
       channel: 'claude',
@@ -370,6 +383,10 @@ function drainQueue(
       claudeEntries: {
         ...state.claudeEntries,
         [sid]: [...(state.claudeEntries[sid] ?? []), userEntry],
+      },
+      lastUserMessagePreview: {
+        ...state.lastUserMessagePreview,
+        [sid]: truncatePreview(next.content),
       },
     }));
     zeusWs.send({
@@ -406,6 +423,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   pendingApprovals: [],
   sessionActivity: {},
   lastActivityAt: {},
+  lastUserMessagePreview: {},
   messageQueue: {},
 
   gitStatus: {},
@@ -442,6 +460,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   subagents: {},
   activeSubagentId: {},
   qaFlows: [] as FlowSummary[],
+  markdownFiles: [] as Array<{ path: string; name: string }>,
 
 
   perfMetrics: null,
@@ -694,6 +713,16 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         };
         const { entries, totalCount, oldestSeq, isPaginated } = p;
 
+        // Compute last user message preview from loaded entries
+        const lastUserPreview = (() => {
+          for (let i = entries.length - 1; i >= 0; i--) {
+            if (entries[i].entryType.type === 'user_message') {
+              return truncatePreview(entries[i].content);
+            }
+          }
+          return '';
+        })();
+
         if (isPaginated) {
           set((state) => {
             const meta = state.claudeEntriesMeta[sid];
@@ -704,6 +733,19 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             const incomingIds = new Set(entries.map((e) => e.id));
             const deduped = existingEntries.filter((e) => !incomingIds.has(e.id));
             const merged = isLoadMore ? [...entries, ...deduped] : entries;
+            // For initial load, also compute from merged entries (includes existing + new)
+            let preview = state.lastUserMessagePreview[sid];
+            if (!isLoadMore && lastUserPreview) {
+              preview = lastUserPreview;
+            } else if (!preview) {
+              // Compute from merged if we didn't have one
+              for (let i = merged.length - 1; i >= 0; i--) {
+                if (merged[i].entryType.type === 'user_message') {
+                  preview = truncatePreview(merged[i].content);
+                  break;
+                }
+              }
+            }
             return {
               claudeEntries: { ...state.claudeEntries, [sid]: merged },
               claudeEntriesMeta: {
@@ -715,6 +757,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
                   loading: false,
                 },
               },
+              ...(preview ? { lastUserMessagePreview: { ...state.lastUserMessagePreview, [sid]: preview } } : {}),
             };
           });
         } else {
@@ -725,6 +768,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
               ...state.claudeEntriesMeta,
               [sid]: { oldestSeq: null, totalCount: entries.length, hasMore: false, loading: false },
             },
+            ...(lastUserPreview ? { lastUserMessagePreview: { ...state.lastUserMessagePreview, [sid]: lastUserPreview } } : {}),
           }));
         }
         return;
@@ -1149,6 +1193,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }));
       }
 
+      // Handle extension scan results for any session
+      if (payload.type === 'scan_by_extension_result') {
+        const files = (payload as { results: Array<{ path: string; name: string }> }).results;
+        set({ markdownFiles: files });
+      }
+
       // Only process detailed events for the active session
       if (sid !== get().activeClaudeId) return;
 
@@ -1551,6 +1601,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       claudeSessions: [...state.claudeSessions, session],
       activeClaudeId: id,
       claudeEntries: { ...state.claudeEntries, [id]: [userEntry] },
+      lastUserMessagePreview: { ...state.lastUserMessagePreview, [id]: truncatePreview(prompt) },
       sessionActivity: { ...state.sessionActivity, [id]: { state: 'starting' } },
       lastActivityAt: { ...state.lastActivityAt, [id]: Date.now() },
       viewMode: 'claude',
@@ -1613,6 +1664,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       claudeEntries: {
         ...state.claudeEntries,
         [activeClaudeId]: [...(state.claudeEntries[activeClaudeId] ?? []), userEntry],
+      },
+      lastUserMessagePreview: {
+        ...state.lastUserMessagePreview,
+        [activeClaudeId]: truncatePreview(content),
       },
       sessionActivity: { ...state.sessionActivity, [activeClaudeId]: { state: 'starting' } },
       lastActivityAt: { ...state.lastActivityAt, [activeClaudeId]: Date.now() },
@@ -1732,6 +1787,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         [newId]: state.claudeEntriesMeta[id]
           ? { ...state.claudeEntriesMeta[id] }
           : { oldestSeq: null, totalCount: existingEntries.length + 1, hasMore: false, loading: false },
+      },
+      lastUserMessagePreview: {
+        ...state.lastUserMessagePreview,
+        [newId]: truncatePreview(resumePrompt),
       },
       sessionActivity: { ...state.sessionActivity, [newId]: { state: 'starting' } },
       lastActivityAt: { ...state.lastActivityAt, [newId]: Date.now() },
@@ -2517,6 +2576,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'qa', sessionId: '', auth: '',
       payload: { type: 'list_qa_flows' },
+    });
+  },
+
+  fetchMarkdownFiles: (sessionId: string) => {
+    zeusWs.send({
+      channel: 'files', sessionId, auth: '',
+      payload: { type: 'scan_by_extension', ext: '.md' },
     });
   },
 

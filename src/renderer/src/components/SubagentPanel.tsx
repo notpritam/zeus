@@ -15,6 +15,10 @@ import {
   Minimize2,
   Maximize2,
   ArrowDown,
+  FileText,
+  FolderOpen,
+  Search,
+  Check,
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
@@ -104,6 +108,8 @@ function SubagentPanel() {
   const fetchSubagents = useZeusStore((s) => s.fetchSubagents);
   const fetchSubagentEntries = useZeusStore((s) => s.fetchSubagentEntries);
   const fetchQaFlows = useZeusStore((s) => s.fetchQaFlows);
+  const markdownFiles = useZeusStore((s) => s.markdownFiles);
+  const fetchMarkdownFiles = useZeusStore((s) => s.fetchMarkdownFiles);
 
   const sessionCtx = useCurrentSessionContext();
 
@@ -118,6 +124,8 @@ function SubagentPanel() {
   const [selectedType, setSelectedType] = useState<SubagentType | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, string>>({});
   const [spawning, setSpawning] = useState(false);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
 
   // Sync agent target URL when session's detected URL changes
   useEffect(() => {
@@ -204,6 +212,13 @@ function SubagentPanel() {
     }
   }, [panelView, hasAnyAgent]);
 
+  // Fetch markdown files when form opens for plan_reviewer
+  useEffect(() => {
+    if (panelView === 'form' && selectedType === 'plan_reviewer' && parentSessionId) {
+      fetchMarkdownFiles(parentSessionId);
+    }
+  }, [panelView, selectedType, parentSessionId]);
+
   function handleStartSubagent(def: typeof SUBAGENT_TYPES[0]) {
     if (!parentSessionId || spawning) return;
     const workingDir = sessionCtx?.workingDir || '/';
@@ -258,41 +273,27 @@ function SubagentPanel() {
 
           {/* Type selector view */}
           {panelView === 'selector' && (
-            <div className="p-3 space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Spawn Subagent</span>
-                {hasAnyAgent && (
-                  <button onClick={() => setPanelView('agents')} className="text-xs text-muted-foreground hover:text-foreground">
-                    Cancel
-                  </button>
-                )}
-              </div>
+            <div className="p-2 space-y-0.5">
+              {hasAnyAgent && (
+                <button onClick={() => setPanelView('agents')} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 mb-1">
+                  <ChevronLeft className="size-3" /> Back
+                </button>
+              )}
               {SUBAGENT_TYPES.map((def) => {
-                const ofType = sessionAgents.filter((a) => a.info.subagentType === def.type);
-                const activeCount = ofType.filter((a) => a.info.status === 'running').length;
+                const activeCount = sessionAgents.filter((a) => a.info.subagentType === def.type && a.info.status === 'running').length;
                 return (
                   <button
                     key={def.type}
                     onClick={() => { setSelectedType(def.type); setFormInputs({}); setPanelView('form'); }}
-                    className="group w-full flex items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                    className="w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-secondary/60"
                   >
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
-                      <def.icon className="size-4.5 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium">{def.name}</div>
-                      <div className="text-[11px] text-muted-foreground leading-snug">{def.description}</div>
-                    </div>
-                    {ofType.length > 0 && (
-                      <div className="flex flex-col items-end gap-0.5 shrink-0">
-                        <span className="text-muted-foreground/60 text-[10px]">{ofType.length} total</span>
-                        {activeCount > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] text-green-400 font-medium">
-                            <span className="size-1.5 rounded-full bg-green-400 animate-pulse" />
-                            {activeCount} active
-                          </span>
-                        )}
-                      </div>
+                    <def.icon className="size-4 text-primary shrink-0" />
+                    <span className="text-xs font-medium flex-1">{def.name}</span>
+                    {activeCount > 0 && (
+                      <span className="flex items-center gap-1 text-[10px] text-green-400">
+                        <span className="size-1.5 rounded-full bg-green-400 animate-pulse" />
+                        {activeCount}
+                      </span>
                     )}
                   </button>
                 );
@@ -326,6 +327,104 @@ function SubagentPanel() {
                         value={formInputs[field.key] ?? ''}
                         onChange={(e) => setFormInputs((prev) => ({ ...prev, [field.key]: e.target.value }))}
                       />
+                    ) : field.type === 'file' ? (
+                      <div className="space-y-1.5">
+                        {/* Selected file display / trigger */}
+                        <button
+                          type="button"
+                          onClick={() => { setFilePickerOpen(!filePickerOpen); setFileSearchQuery(''); }}
+                          className={`w-full flex items-center gap-2 rounded border px-2.5 py-2 text-left text-sm transition-colors ${
+                            formInputs[field.key]
+                              ? 'bg-secondary border-primary/30 text-foreground'
+                              : 'bg-secondary border-border text-muted-foreground hover:border-primary/20'
+                          }`}
+                        >
+                          {formInputs[field.key] ? (
+                            <>
+                              <FileText className="size-3.5 shrink-0 text-primary" />
+                              <span className="min-w-0 flex-1 truncate text-xs">{formInputs[field.key]}</span>
+                              <Check className="size-3 shrink-0 text-green-400" />
+                            </>
+                          ) : (
+                            <>
+                              <FolderOpen className="size-3.5 shrink-0" />
+                              <span className="text-xs">Choose a markdown file...</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* File picker dropdown */}
+                        {filePickerOpen && (
+                          <div className="rounded-md border border-border bg-card shadow-lg overflow-hidden">
+                            {/* Search bar */}
+                            <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
+                              <Search className="size-3 text-muted-foreground shrink-0" />
+                              <input
+                                type="text"
+                                autoFocus
+                                value={fileSearchQuery}
+                                onChange={(e) => setFileSearchQuery(e.target.value)}
+                                className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
+                                placeholder="Filter files..."
+                              />
+                            </div>
+                            {/* File list */}
+                            <div className="max-h-48 overflow-y-auto">
+                              {(() => {
+                                const lowerQ = fileSearchQuery.toLowerCase();
+                                const filtered = markdownFiles.filter(
+                                  (f) => !lowerQ || f.path.toLowerCase().includes(lowerQ) || f.name.toLowerCase().includes(lowerQ),
+                                );
+                                if (filtered.length === 0) {
+                                  return (
+                                    <div className="px-3 py-4 text-center">
+                                      <FileText className="size-5 text-muted-foreground/30 mx-auto mb-1" />
+                                      <p className="text-[10px] text-muted-foreground">
+                                        {markdownFiles.length === 0 ? 'No markdown files found' : 'No matching files'}
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                // Group by directory
+                                const grouped: Record<string, typeof filtered> = {};
+                                for (const f of filtered) {
+                                  const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '.';
+                                  (grouped[dir] ??= []).push(f);
+                                }
+                                return Object.entries(grouped).map(([dir, files]) => (
+                                  <div key={dir}>
+                                    <div className="sticky top-0 bg-secondary/80 backdrop-blur-sm px-2.5 py-1 text-[10px] font-medium text-muted-foreground flex items-center gap-1">
+                                      <FolderOpen className="size-2.5" />
+                                      {dir}
+                                    </div>
+                                    {files.map((f) => {
+                                      const isSelected = formInputs[field.key] === f.path;
+                                      return (
+                                        <button
+                                          key={f.path}
+                                          onClick={() => {
+                                            setFormInputs((prev) => ({ ...prev, [field.key]: f.path }));
+                                            setFilePickerOpen(false);
+                                          }}
+                                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                                            isSelected
+                                              ? 'bg-primary/10 text-foreground'
+                                              : 'hover:bg-secondary/60 text-foreground/80'
+                                          }`}
+                                        >
+                                          <FileText className={`size-3 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                                          <span className="min-w-0 flex-1 truncate text-xs">{f.name}</span>
+                                          {isSelected && <Check className="size-3 shrink-0 text-green-400" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <input
                         type="text"
@@ -355,44 +454,13 @@ function SubagentPanel() {
               {/* Agent list — shows when there are agents for this session */}
               {hasAnyAgent && (
                 <>
-                  {/* Type counts + new agent button */}
-                  <div className="border-border flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-                    {SUBAGENT_TYPES.map((def) => {
-                      const ofType = sessionAgents.filter((a) => a.info.subagentType === def.type);
-                      const activeCount = ofType.filter((a) => a.info.status === 'running').length;
-                      if (ofType.length === 0) return null;
-                      return (
-                        <span
-                          key={def.type}
-                          className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground"
-                        >
-                          <def.icon className="size-3" />
-                          <span className="font-medium">{def.name}</span>
-                          {activeCount > 0 && (
-                            <span className="flex items-center gap-0.5 text-green-400 font-semibold">
-                              <span className="size-1.5 rounded-full bg-green-400 animate-pulse" />
-                              {activeCount}
-                            </span>
-                          )}
-                          <span className="text-muted-foreground/50">{ofType.length}</span>
-                        </span>
-                      );
-                    })}
-                    <span className="flex-1" />
-                    <button onClick={() => setPanelView('selector')} title="New subagent" className="text-muted-foreground hover:text-foreground p-0.5">
-                      <Plus className="size-4" />
-                    </button>
-                  </div>
-
-                  {/* Agent list cards */}
+                  {/* Agent list */}
                   <div className="border-border shrink-0 overflow-y-auto border-b" style={{ maxHeight: '35%' }}>
                     <div className="flex flex-col gap-0.5 p-1">
                       {sessionAgents.map((a) => {
                         const isSelected = a.info.subagentId === selectedAgentId;
                         const isRunning = a.info.status === 'running';
                         const label = a.info.name || a.info.task;
-                        const typeDef = SUBAGENT_TYPES.find((d) => d.type === a.info.subagentType);
-                        const TypeIcon = typeDef?.icon ?? Bot;
                         return (
                           <button
                             key={a.info.subagentId}
@@ -404,20 +472,14 @@ function SubagentPanel() {
                             }`}
                           >
                             <span className={`size-1.5 shrink-0 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
-                            <TypeIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0 flex-1 overflow-hidden">
-                              <span className={`block truncate text-xs leading-tight ${isSelected ? 'font-medium' : ''}`}>
-                                {label.length > 50 ? label.slice(0, 50) + '...' : label}
-                              </span>
-                              <span className="text-muted-foreground text-[10px]">
-                                {typeDef?.name ?? a.info.subagentType} · {isRunning ? 'Running' : a.info.status}
-                              </span>
-                            </div>
+                            <span className={`min-w-0 flex-1 truncate text-xs ${isSelected ? 'font-medium' : ''}`}>
+                              {label.length > 50 ? label.slice(0, 50) + '...' : label}
+                            </span>
                             {!isRunning && (
                               <button
                                 className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
                                 onClick={(e) => { e.stopPropagation(); deleteSubagent(a.info.subagentId, parentSessionId); }}
-                                title="Delete agent"
+                                title="Delete"
                               >
                                 <Trash2 className="size-3" />
                               </button>
@@ -425,6 +487,11 @@ function SubagentPanel() {
                           </button>
                         );
                       })}
+                    </div>
+                    <div className="flex justify-end px-2 py-1 border-t border-border">
+                      <button onClick={() => setPanelView('selector')} title="New subagent" className="text-muted-foreground hover:text-foreground p-0.5">
+                        <Plus className="size-3.5" />
+                      </button>
                     </div>
                   </div>
 
@@ -573,31 +640,19 @@ function SubagentPanel() {
                 </>
               )}
 
-              {/* No agents — show type selector directly */}
+              {/* No agents — show type list */}
               {!hasAnyAgent && (
-                <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
-                  <div className="text-center">
-                    <Bot className="text-muted-foreground/20 mx-auto size-8 mb-2" />
-                    <p className="text-muted-foreground text-xs">No subagents yet</p>
-                    <p className="text-muted-foreground/50 text-[10px] mt-0.5">Choose a type to get started</p>
-                  </div>
-                  <div className="w-full space-y-2">
-                    {SUBAGENT_TYPES.map((def) => (
-                      <button
-                        key={def.type}
-                        onClick={() => { setSelectedType(def.type); setFormInputs({}); setPanelView('form'); }}
-                        className="group w-full flex items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
-                      >
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
-                          <def.icon className="size-4.5 text-primary" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium">{def.name}</div>
-                          <div className="text-[11px] text-muted-foreground leading-snug">{def.description}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                <div className="p-2 space-y-0.5">
+                  {SUBAGENT_TYPES.map((def) => (
+                    <button
+                      key={def.type}
+                      onClick={() => { setSelectedType(def.type); setFormInputs({}); setPanelView('form'); }}
+                      className="w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-secondary/60"
+                    >
+                      <def.icon className="size-4 text-primary shrink-0" />
+                      <span className="text-xs font-medium">{def.name}</span>
+                    </button>
+                  ))}
                 </div>
               )}
             </>
