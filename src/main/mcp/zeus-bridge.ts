@@ -1,5 +1,5 @@
 // src/main/mcp/zeus-bridge.ts
-// Standalone MCP server — connects to Zeus WebSocket to register QA sessions,
+// Standalone MCP server — connects to Zeus WebSocket to register subagent sessions,
 // manage Claude sessions, and control PinchTab in real-time.
 // Used by the Claude Code qa-tester subagent.
 
@@ -284,7 +284,7 @@ server.tool(
 );
 
 // ═══════════════════════════════════════════
-// ─── QA Agent Lifecycle ───
+// ─── Subagent Lifecycle (QA) ───
 // ═══════════════════════════════════════════
 
 server.tool(
@@ -300,8 +300,9 @@ server.tool(
     try {
       await connectWs();
       const defaultUrl = process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
-      const response = await sendAndWait('qa', {
-        type: 'register_external_qa',
+      const response = await sendAndWait('subagent', {
+        type: 'register_external_subagent',
+        subagentType: 'qa',
         task,
         targetUrl: target_url ?? defaultUrl,
         parentSessionId: parent_session_id ?? process.env.ZEUS_SESSION_ID ?? 'external',
@@ -311,7 +312,7 @@ server.tool(
       const data = response as Record<string, unknown>;
       return textResult({
         success: true,
-        qaAgentId: data.qaAgentId,
+        qaAgentId: data.subagentId,
         message: 'QA session registered. Use this qaAgentId in all subsequent zeus_qa_* calls.',
       });
     } catch (err) {
@@ -370,9 +371,9 @@ server.tool(
           entry = { kind: 'text', content: content ?? '', timestamp };
       }
 
-      sendToZeus('qa', {
-        type: 'external_qa_entry',
-        qaAgentId: qa_agent_id,
+      sendToZeus('subagent', {
+        type: 'external_subagent_entry',
+        subagentId: qa_agent_id,
         entry,
       });
 
@@ -397,16 +398,16 @@ server.tool(
 
       // Log final summary if provided
       if (summary) {
-        sendToZeus('qa', {
-          type: 'external_qa_entry',
-          qaAgentId: qa_agent_id,
+        sendToZeus('subagent', {
+          type: 'external_subagent_entry',
+          subagentId: qa_agent_id,
           entry: { kind: 'text', content: summary, timestamp: Date.now() },
         });
       }
 
-      sendToZeus('qa', {
-        type: 'external_qa_done',
-        qaAgentId: qa_agent_id,
+      sendToZeus('subagent', {
+        type: 'external_subagent_done',
+        subagentId: qa_agent_id,
         status: status ?? 'stopped',
       });
 
@@ -455,25 +456,26 @@ server.tool(
       await connectWs();
       const sessionId = parent_session_id ?? process.env.ZEUS_SESSION_ID ?? '';
       const defaultUrl = process.env.ZEUS_QA_DEFAULT_URL || 'http://localhost:5173';
-      console.error(`[zeus-bridge] zeus_qa_run: starting QA agent (pendingResponses.size=${pendingResponses.size}, wsReady=${wsReady})`);
+      console.error(`[zeus-bridge] zeus_qa_run: starting subagent (pendingResponses.size=${pendingResponses.size}, wsReady=${wsReady})`);
       // Wait up to 10 minutes — the QA agent runs to completion before responding
-      const response = await sendAndWait('qa', {
-        type: 'start_qa_agent',
-        task,
+      const response = await sendAndWait('subagent', {
+        type: 'start_subagent',
+        subagentType: 'qa',
+        cli: 'claude',
+        inputs: { task, targetUrl: target_url ?? defaultUrl },
         name: name ?? undefined,
         workingDir: working_dir ?? process.cwd(),
-        targetUrl: target_url ?? defaultUrl,
         parentSessionId: sessionId,
         parentSessionType: 'claude',
       }, 600_000);
       const data = response as Record<string, unknown>;
       return textResult({
-        qaAgentId: data.qaAgentId,
+        qaAgentId: data.subagentId,
         status: data.status ?? 'done',
         summary: data.summary ?? 'QA agent completed.',
       });
     } catch (err) {
-      return errorResult(`QA agent failed: ${(err as Error).message}`);
+      return errorResult(`Subagent failed: ${(err as Error).message}`);
     }
   },
 );
