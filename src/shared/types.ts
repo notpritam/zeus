@@ -169,7 +169,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -275,6 +275,9 @@ export interface ClaudeStartPayload {
   enableGitWatcher?: boolean;
   enableQA?: boolean;
   qaTargetUrl?: string;
+  mcpProfileId?: string;
+  mcpServerIds?: string[];
+  mcpExcludeIds?: string[];
 }
 
 export interface ClaudeResumePayload {
@@ -641,6 +644,77 @@ export type QaBrowserPayload =
   | { type: 'list_qa_flows' }
   | { type: 'qa_flows_list'; flows: import('./qa-flow-types').FlowSummary[] }
   | { type: 'qa_error'; message: string };
+
+// ─── MCP Management Types ───
+
+export interface McpServerRecord {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  source: 'zeus' | 'claude';
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface McpProfileRecord {
+  id: string;
+  name: string;
+  description: string;
+  isDefault: boolean;
+  servers: McpServerRecord[];
+  createdAt: number;
+}
+
+export interface SessionMcpRecord {
+  sessionId: string;
+  serverId: string;
+  serverName: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  status: 'attached' | 'active' | 'failed';
+  attachedAt: number;
+}
+
+export interface McpHealthResult {
+  healthy: boolean;
+  error?: string;
+  latencyMs: number;
+}
+
+export type McpPayload =
+  // Client → Server
+  | { type: 'get_servers' }
+  | { type: 'add_server'; name: string; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'update_server'; id: string; name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }
+  | { type: 'remove_server'; id: string }
+  | { type: 'toggle_server'; id: string; enabled: boolean }
+  | { type: 'health_check'; id?: string }
+  | { type: 'import_claude' }
+  | { type: 'get_profiles' }
+  | { type: 'create_profile'; name: string; description?: string; serverIds: string[] }
+  | { type: 'update_profile'; id: string; name?: string; description?: string; serverIds?: string[] }
+  | { type: 'delete_profile'; id: string }
+  | { type: 'set_default_profile'; id: string }
+  | { type: 'get_session_mcps'; sessionId: string }
+  // Server → Client
+  | { type: 'servers_list'; servers: McpServerRecord[] }
+  | { type: 'server_added'; server: McpServerRecord }
+  | { type: 'server_updated'; server: McpServerRecord }
+  | { type: 'server_removed'; id: string }
+  | { type: 'health_result'; id: string; healthy: boolean; error?: string; latencyMs: number }
+  | { type: 'health_results'; results: Record<string, McpHealthResult> }
+  | { type: 'import_result'; imported: string[]; skipped: string[] }
+  | { type: 'profiles_list'; profiles: McpProfileRecord[] }
+  | { type: 'profile_created'; profile: McpProfileRecord }
+  | { type: 'profile_updated'; profile: McpProfileRecord }
+  | { type: 'profile_deleted'; id: string }
+  | { type: 'session_mcps'; sessionId: string; mcps: SessionMcpRecord[] }
+  | { type: 'session_mcp_status'; sessionId: string; serverId: string; status: 'attached' | 'active' | 'failed' }
+  | { type: 'mcp_error'; message: string; serverId?: string };
 
 export type SubagentPayload =
   // Client → Server

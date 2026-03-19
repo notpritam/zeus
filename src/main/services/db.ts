@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -179,6 +179,47 @@ function runMigrations(database: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_subagent_started ON subagent_sessions(started_at);
       CREATE INDEX IF NOT EXISTS idx_subagent_type ON subagent_sessions(subagent_type);
       CREATE INDEX IF NOT EXISTS idx_subagent_entries_agent ON subagent_entries(subagent_id, seq);
+    `);
+  }
+
+  if (currentVersion < 11) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS mcp_servers (
+        id         TEXT PRIMARY KEY,
+        name       TEXT UNIQUE NOT NULL,
+        command    TEXT NOT NULL,
+        args       TEXT DEFAULT '[]',
+        env        TEXT DEFAULT '{}',
+        source     TEXT DEFAULT 'zeus',
+        enabled    INTEGER DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS mcp_profiles (
+        id          TEXT PRIMARY KEY,
+        name        TEXT UNIQUE NOT NULL,
+        description TEXT DEFAULT '',
+        is_default  INTEGER DEFAULT 0,
+        created_at  INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS mcp_profile_servers (
+        profile_id TEXT NOT NULL REFERENCES mcp_profiles(id) ON DELETE CASCADE,
+        server_id  TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+        PRIMARY KEY (profile_id, server_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS session_mcps (
+        session_id  TEXT NOT NULL,
+        server_id   TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+        status      TEXT DEFAULT 'attached',
+        attached_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, server_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_session_mcps_session ON session_mcps(session_id);
+      CREATE INDEX IF NOT EXISTS idx_mcp_profile_servers_profile ON mcp_profile_servers(profile_id);
     `);
   }
 
@@ -1067,4 +1108,243 @@ export function markStaleSubagentsErrored(): void {
   if (result.changes > 0) {
     console.log(`[Zeus DB] Marked ${result.changes} stale subagent session(s) as error`);
   }
+}
+
+// ─── MCP Servers CRUD ───
+
+export interface McpServerDbRow {
+  id: string;
+  name: string;
+  command: string;
+  args: string;
+  env: string;
+  source: string;
+  enabled: number;
+  created_at: number;
+  updated_at: number;
+}
+
+function mapMcpServerRow(r: McpServerDbRow) {
+  return {
+    id: r.id,
+    name: r.name,
+    command: r.command,
+    args: JSON.parse(r.args || '[]') as string[],
+    env: JSON.parse(r.env || '{}') as Record<string, string>,
+    source: r.source as 'zeus' | 'claude',
+    enabled: r.enabled === 1,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function getMcpServers() {
+  if (!db) return [];
+  const rows = db.prepare(`SELECT * FROM mcp_servers ORDER BY name`).all() as McpServerDbRow[];
+  return rows.map(mapMcpServerRow);
+}
+
+export function getMcpServer(id: string) {
+  if (!db) return null;
+  const r = db.prepare(`SELECT * FROM mcp_servers WHERE id = ?`).get(id) as McpServerDbRow | undefined;
+  return r ? mapMcpServerRow(r) : null;
+}
+
+export function getMcpServerByName(name: string) {
+  if (!db) return null;
+  const r = db.prepare(`SELECT * FROM mcp_servers WHERE name = ?`).get(name) as McpServerDbRow | undefined;
+  return r ? mapMcpServerRow(r) : null;
+}
+
+export function insertMcpServer(server: { id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; source?: string }) {
+  if (!db) return;
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO mcp_servers (id, name, command, args, env, source, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
+  ).run(
+    server.id,
+    server.name,
+    server.command,
+    JSON.stringify(server.args ?? []),
+    JSON.stringify(server.env ?? {}),
+    server.source ?? 'zeus',
+    now,
+    now,
+  );
+}
+
+export function updateMcpServer(id: string, updates: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }) {
+  if (!db) return;
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+
+  if (updates.name !== undefined) { sets.push('name = ?'); vals.push(updates.name); }
+  if (updates.command !== undefined) { sets.push('command = ?'); vals.push(updates.command); }
+  if (updates.args !== undefined) { sets.push('args = ?'); vals.push(JSON.stringify(updates.args)); }
+  if (updates.env !== undefined) { sets.push('env = ?'); vals.push(JSON.stringify(updates.env)); }
+  if (updates.enabled !== undefined) { sets.push('enabled = ?'); vals.push(updates.enabled ? 1 : 0); }
+
+  if (sets.length === 0) return;
+  sets.push('updated_at = ?');
+  vals.push(Date.now());
+  vals.push(id);
+
+  db.prepare(`UPDATE mcp_servers SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+}
+
+export function deleteMcpServer(id: string) {
+  if (!db) return;
+  db.prepare(`DELETE FROM mcp_servers WHERE id = ?`).run(id);
+}
+
+export function toggleMcpServer(id: string, enabled: boolean) {
+  if (!db) return;
+  db.prepare(`UPDATE mcp_servers SET enabled = ?, updated_at = ? WHERE id = ?`).run(enabled ? 1 : 0, Date.now(), id);
+}
+
+// ─── MCP Profiles CRUD ───
+
+export interface McpProfileDbRow {
+  id: string;
+  name: string;
+  description: string;
+  is_default: number;
+  created_at: number;
+}
+
+export function getMcpProfiles() {
+  if (!db) return [];
+  const profiles = db.prepare(`SELECT * FROM mcp_profiles ORDER BY name`).all() as McpProfileDbRow[];
+  return profiles.map((p) => {
+    const serverIds = db!
+      .prepare(`SELECT server_id FROM mcp_profile_servers WHERE profile_id = ?`)
+      .all(p.id) as Array<{ server_id: string }>;
+    const servers = serverIds
+      .map((s) => getMcpServer(s.server_id))
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+    return {
+      id: p.id,
+      name: p.name,
+      description: p.description || '',
+      isDefault: p.is_default === 1,
+      servers,
+      createdAt: p.created_at,
+    };
+  });
+}
+
+export function getMcpProfile(id: string) {
+  if (!db) return null;
+  const p = db.prepare(`SELECT * FROM mcp_profiles WHERE id = ?`).get(id) as McpProfileDbRow | undefined;
+  if (!p) return null;
+  const serverIds = db
+    .prepare(`SELECT server_id FROM mcp_profile_servers WHERE profile_id = ?`)
+    .all(p.id) as Array<{ server_id: string }>;
+  const servers = serverIds.map((s) => getMcpServer(s.server_id)).filter((s): s is NonNullable<typeof s> => s !== null);
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description || '',
+    isDefault: p.is_default === 1,
+    servers,
+    createdAt: p.created_at,
+  };
+}
+
+export function insertMcpProfile(profile: { id: string; name: string; description?: string; serverIds: string[] }) {
+  if (!db) return;
+  const now = Date.now();
+  db.transaction(() => {
+    db!.prepare(
+      `INSERT INTO mcp_profiles (id, name, description, is_default, created_at) VALUES (?, ?, ?, 0, ?)`
+    ).run(profile.id, profile.name, profile.description ?? '', now);
+
+    const stmt = db!.prepare(`INSERT INTO mcp_profile_servers (profile_id, server_id) VALUES (?, ?)`);
+    for (const sid of profile.serverIds) {
+      stmt.run(profile.id, sid);
+    }
+  })();
+}
+
+export function updateMcpProfile(id: string, updates: { name?: string; description?: string; serverIds?: string[] }) {
+  if (!db) return;
+  db.transaction(() => {
+    if (updates.name !== undefined) {
+      db!.prepare(`UPDATE mcp_profiles SET name = ? WHERE id = ?`).run(updates.name, id);
+    }
+    if (updates.description !== undefined) {
+      db!.prepare(`UPDATE mcp_profiles SET description = ? WHERE id = ?`).run(updates.description, id);
+    }
+    if (updates.serverIds !== undefined) {
+      db!.prepare(`DELETE FROM mcp_profile_servers WHERE profile_id = ?`).run(id);
+      const stmt = db!.prepare(`INSERT INTO mcp_profile_servers (profile_id, server_id) VALUES (?, ?)`);
+      for (const sid of updates.serverIds) {
+        stmt.run(id, sid);
+      }
+    }
+  })();
+}
+
+export function deleteMcpProfile(id: string) {
+  if (!db) return;
+  db.prepare(`DELETE FROM mcp_profiles WHERE id = ?`).run(id);
+}
+
+export function setDefaultMcpProfile(id: string) {
+  if (!db) return;
+  db.transaction(() => {
+    db!.prepare(`UPDATE mcp_profiles SET is_default = 0`).run();
+    db!.prepare(`UPDATE mcp_profiles SET is_default = 1 WHERE id = ?`).run(id);
+  })();
+}
+
+// ─── Session MCPs ───
+
+export function attachSessionMcps(sessionId: string, serverIds: string[]) {
+  if (!db) return;
+  const now = Date.now();
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO session_mcps (session_id, server_id, status, attached_at) VALUES (?, ?, 'attached', ?)`
+  );
+  for (const sid of serverIds) {
+    stmt.run(sessionId, sid, now);
+  }
+}
+
+export function updateSessionMcpStatus(sessionId: string, serverId: string, status: string) {
+  if (!db) return;
+  db.prepare(`UPDATE session_mcps SET status = ? WHERE session_id = ? AND server_id = ?`).run(status, sessionId, serverId);
+}
+
+export function getSessionMcps(sessionId: string) {
+  if (!db) return [];
+  const rows = db.prepare(`
+    SELECT sm.session_id, sm.server_id, sm.status, sm.attached_at,
+           ms.name, ms.command, ms.args, ms.env
+    FROM session_mcps sm
+    JOIN mcp_servers ms ON ms.id = sm.server_id
+    WHERE sm.session_id = ?
+    ORDER BY sm.attached_at
+  `).all(sessionId) as Array<{
+    session_id: string;
+    server_id: string;
+    status: string;
+    attached_at: number;
+    name: string;
+    command: string;
+    args: string;
+    env: string;
+  }>;
+
+  return rows.map((r) => ({
+    sessionId: r.session_id,
+    serverId: r.server_id,
+    serverName: r.name,
+    command: r.command,
+    args: JSON.parse(r.args || '[]') as string[],
+    env: JSON.parse(r.env || '{}') as Record<string, string>,
+    status: r.status as 'attached' | 'active' | 'failed',
+    attachedAt: r.attached_at,
+  }));
 }
