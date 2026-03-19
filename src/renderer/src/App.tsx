@@ -8,7 +8,7 @@ import ClaudeView from '@/components/ClaudeView';
 import RightPanel from '@/components/RightPanel';
 import DiffTabBar from '@/components/DiffTabBar';
 import DiffView from '@/components/DiffView';
-import NewClaudeSessionModal from '@/components/NewClaudeSessionModal';
+import NewSessionView from '@/components/NewSessionView';
 import CommandPalette, { buildCommands } from '@/components/CommandPalette';
 import SettingsView from '@/components/SettingsView';
 import {
@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/ResizablePanel';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { useNotificationSound } from '@/hooks/useNotificationSound';
-import { zeusWs } from '@/lib/ws';
 
 // ─── Error Boundary for DiffView / any panel ───
 
@@ -82,10 +81,7 @@ function App() {
     claudeEntries,
     pendingApprovals,
     viewMode,
-    savedProjects,
-    claudeDefaults,
-    lastUsedProjectId,
-    showNewClaudeModal,
+    previousViewMode,
     activeRightTab,
     openDiffTabs,
     connect,
@@ -94,7 +90,6 @@ function App() {
     startSession,
     stopSession,
     selectSession,
-    startClaudeSession,
     sendClaudeMessage,
     approveClaudeTool,
     denyClaudeTool,
@@ -112,13 +107,8 @@ function App() {
     archiveClaudeSession,
     deleteTerminalSession,
     archiveTerminalSession,
-    openNewClaudeModal,
-    closeNewClaudeModal,
     toggleRightPanel,
     toggleSessionTerminalPanel,
-    addProject,
-    removeProject,
-    settingsError,
     setViewMode,
   } = useZeusStore();
 
@@ -156,11 +146,11 @@ function App() {
         tunnel,
         togglePower,
         startSession,
-        openNewClaudeModal,
+        openNewSession: () => setViewMode('new-session'),
         toggleRightPanel,
         openSettings,
       }),
-    [powerBlock, tunnel, togglePower, startSession, openNewClaudeModal, toggleRightPanel, openSettings],
+    [powerBlock, tunnel, togglePower, startSession, setViewMode, toggleRightPanel, openSettings],
   );
 
   // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)
@@ -171,9 +161,8 @@ function App() {
 
       if (e.key === ',') {
         e.preventDefault();
-        // Toggle settings view — if already on settings, go back to terminal
         if (viewMode === 'settings') {
-          setViewMode('terminal');
+          setViewMode(previousViewMode);
         } else {
           setViewMode('settings');
         }
@@ -182,7 +171,7 @@ function App() {
         startSession();
       } else if (e.key === 'n') {
         e.preventDefault();
-        openNewClaudeModal();
+        setViewMode('new-session');
       } else if (e.key === 'b') {
         e.preventDefault();
         toggleRightPanel();
@@ -193,7 +182,7 @@ function App() {
         }
       }
     },
-    [startSession, openNewClaudeModal, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode],
+    [startSession, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode, previousViewMode],
   );
 
   useEffect(() => {
@@ -241,7 +230,7 @@ function App() {
               setSidebarOpen(false);
             }}
             onNewClaudeSession={() => {
-              openNewClaudeModal();
+              setViewMode('new-session');
               setSidebarOpen(false);
             }}
             onSelectSession={(id) => {
@@ -288,6 +277,8 @@ function App() {
               onTogglePower={togglePower}
               onToggleTunnel={toggleTunnel}
             />
+          ) : viewMode === 'new-session' ? (
+            <NewSessionView />
           ) : viewMode === 'claude' ? (
             <ClaudeView
               session={activeClaudeSession}
@@ -377,7 +368,7 @@ function App() {
                 sessionActivity={sessionActivity}
                 lastActivityAt={lastActivityAt}
                 onNewSession={() => startSession()}
-                onNewClaudeSession={() => openNewClaudeModal()}
+                onNewClaudeSession={() => setViewMode('new-session')}
                 onSelectSession={(id) => selectSession(id)}
                 onStopSession={stopSession}
                 onSelectClaudeSession={(id) => selectClaudeSession(id)}
@@ -403,7 +394,7 @@ function App() {
                   sessionActivity={sessionActivity}
                   lastActivityAt={lastActivityAt}
                   onNewSession={() => startSession()}
-                  onNewClaudeSession={() => openNewClaudeModal()}
+                  onNewClaudeSession={() => setViewMode('new-session')}
                   onSelectSession={(id) => selectSession(id)}
                   onStopSession={stopSession}
                   onSelectClaudeSession={(id) => selectClaudeSession(id)}
@@ -437,6 +428,8 @@ function App() {
                     onTogglePower={togglePower}
                     onToggleTunnel={toggleTunnel}
                   />
+                ) : viewMode === 'new-session' ? (
+                  <NewSessionView />
                 ) : viewMode === 'diff' ? (
                   <PanelErrorBoundary name="Diff Viewer" onReset={() => useZeusStore.getState().returnToHome()}>
                     <DiffView />
@@ -488,30 +481,6 @@ function App() {
         commands={commands}
       />
 
-      {/* New Claude Session Modal */}
-      <NewClaudeSessionModal
-        open={showNewClaudeModal}
-        onClose={closeNewClaudeModal}
-        savedProjects={savedProjects}
-        claudeDefaults={claudeDefaults}
-        lastUsedProjectId={lastUsedProjectId}
-        onStart={(config) => {
-          startClaudeSession(config);
-          // Persist last used project
-          const project = savedProjects.find((p) => p.path === config.workingDir);
-          if (project) {
-            zeusWs.send({
-              channel: 'settings',
-              sessionId: '',
-              payload: { type: 'set_last_used_project', id: project.id },
-              auth: '',
-            });
-          }
-        }}
-        onAddProject={addProject}
-        onRemoveProject={removeProject}
-        settingsError={settingsError}
-      />
     </div>
   );
 }

@@ -48,7 +48,10 @@ export function writeToSession(sessionId: string, data: string): void {
 export function resizeSession(sessionId: string, cols: number, rows: number): void {
   const term = sessions.get(sessionId);
   if (!term) throw new Error(`Session not found: ${sessionId}`);
-  term.resize(cols, rows);
+  // node-pty throws on zero/negative dimensions — clamp to safe minimums
+  const safeCols = Math.max(1, Math.floor(cols));
+  const safeRows = Math.max(1, Math.floor(rows));
+  term.resize(safeCols, safeRows);
 }
 
 export function destroySession(sessionId: string): void {

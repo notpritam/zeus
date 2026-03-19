@@ -8,7 +8,7 @@ let db: Database.Database | null = null;
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -120,6 +120,68 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE terminal_sessions ADD COLUMN deleted_at INTEGER`);
   }
 
+  if (currentVersion < 10) {
+    // Rename qa_agent_sessions → subagent_sessions
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS subagent_sessions (
+        id                  TEXT PRIMARY KEY,
+        parent_session_id   TEXT NOT NULL,
+        parent_session_type TEXT NOT NULL DEFAULT 'claude',
+        name                TEXT,
+        task                TEXT NOT NULL,
+        target_url          TEXT,
+        status              TEXT NOT NULL DEFAULT 'running',
+        started_at          INTEGER NOT NULL,
+        ended_at            INTEGER,
+        claude_session_id   TEXT,
+        last_message_id     TEXT,
+        working_dir         TEXT,
+        subagent_type       TEXT NOT NULL DEFAULT 'qa',
+        cli                 TEXT NOT NULL DEFAULT 'claude'
+      );
+      CREATE TABLE IF NOT EXISTS subagent_entries (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        subagent_id   TEXT NOT NULL,
+        kind          TEXT NOT NULL,
+        data          TEXT NOT NULL,
+        timestamp     INTEGER NOT NULL,
+        seq           INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+
+    // Copy data if old tables exist
+    const hasOldTable = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='qa_agent_sessions'"
+    ).get();
+    if (hasOldTable) {
+      database.exec(`
+        INSERT OR IGNORE INTO subagent_sessions
+          (id, parent_session_id, parent_session_type, name, task, target_url,
+           status, started_at, ended_at, claude_session_id, last_message_id,
+           working_dir, subagent_type, cli)
+        SELECT
+          id, parent_session_id, parent_session_type, name, task, target_url,
+          status, started_at, ended_at, claude_session_id, last_message_id,
+          working_dir, 'qa', 'claude'
+        FROM qa_agent_sessions;
+
+        INSERT OR IGNORE INTO subagent_entries (id, subagent_id, kind, data, timestamp, seq)
+        SELECT id, qa_agent_id, kind, data, timestamp, seq
+        FROM qa_agent_entries;
+
+        DROP TABLE IF EXISTS qa_agent_entries;
+        DROP TABLE IF EXISTS qa_agent_sessions;
+      `);
+    }
+
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_subagent_parent ON subagent_sessions(parent_session_id);
+      CREATE INDEX IF NOT EXISTS idx_subagent_started ON subagent_sessions(started_at);
+      CREATE INDEX IF NOT EXISTS idx_subagent_type ON subagent_sessions(subagent_type);
+      CREATE INDEX IF NOT EXISTS idx_subagent_entries_agent ON subagent_entries(subagent_id, seq);
+    `);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -175,9 +237,9 @@ export function pruneOldSessions(maxAgeDays = 30): void {
   db.prepare(`DELETE FROM claude_sessions WHERE started_at < ?`).run(cutoff);
   db.prepare(`DELETE FROM terminal_sessions WHERE started_at < ?`).run(cutoff);
   db.prepare(
-    `DELETE FROM qa_agent_entries WHERE qa_agent_id IN (SELECT id FROM qa_agent_sessions WHERE started_at < ?)`,
+    `DELETE FROM subagent_entries WHERE subagent_id IN (SELECT id FROM subagent_sessions WHERE started_at < ?)`,
   ).run(cutoff);
-  db.prepare(`DELETE FROM qa_agent_sessions WHERE started_at < ?`).run(cutoff);
+  db.prepare(`DELETE FROM subagent_sessions WHERE started_at < ?`).run(cutoff);
 }
 
 // ─── Claude Sessions CRUD ───
@@ -729,9 +791,9 @@ export function deleteProject(id: string): void {
   db.prepare(`DELETE FROM saved_projects WHERE id = ?`).run(id);
 }
 
-// ─── QA Agent Sessions CRUD ───
+// ─── Subagent Sessions CRUD ───
 
-export interface QaAgentSessionRow {
+export interface SubagentSessionRow {
   id: string;
   parentSessionId: string;
   parentSessionType: 'terminal' | 'claude';
@@ -744,9 +806,11 @@ export interface QaAgentSessionRow {
   claudeSessionId?: string | null;
   lastMessageId?: string | null;
   workingDir?: string | null;
+  subagentType: string;
+  cli: string;
 }
 
-interface QaAgentSessionDbRow {
+interface SubagentSessionDbRow {
   id: string;
   parent_session_id: string;
   parent_session_type: string;
@@ -759,13 +823,15 @@ interface QaAgentSessionDbRow {
   claude_session_id: string | null;
   last_message_id: string | null;
   working_dir: string | null;
+  subagent_type: string;
+  cli: string;
 }
 
-export function insertQaAgentSession(info: QaAgentSessionRow): void {
+export function insertSubagentSession(info: SubagentSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO qa_agent_sessions (id, parent_session_id, parent_session_type, name, task, target_url, status, started_at, ended_at, claude_session_id, last_message_id, working_dir)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO subagent_sessions (id, parent_session_id, parent_session_type, name, task, target_url, status, started_at, ended_at, claude_session_id, last_message_id, working_dir, subagent_type, cli)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.parentSessionId,
@@ -779,42 +845,44 @@ export function insertQaAgentSession(info: QaAgentSessionRow): void {
     info.claudeSessionId ?? null,
     info.lastMessageId ?? null,
     info.workingDir ?? null,
+    info.subagentType,
+    info.cli,
   );
 }
 
-export function updateQaAgentSessionStatus(
+export function updateSubagentSessionStatus(
   id: string,
   status: string,
   endedAt?: number,
 ): void {
   if (!db) return;
   if (endedAt != null) {
-    db.prepare(`UPDATE qa_agent_sessions SET status = ?, ended_at = ? WHERE id = ?`).run(
+    db.prepare(`UPDATE subagent_sessions SET status = ?, ended_at = ? WHERE id = ?`).run(
       status,
       endedAt,
       id,
     );
   } else {
-    db.prepare(`UPDATE qa_agent_sessions SET status = ? WHERE id = ?`).run(status, id);
+    db.prepare(`UPDATE subagent_sessions SET status = ? WHERE id = ?`).run(status, id);
   }
 }
 
-export function updateQaAgentResumeData(
+export function updateSubagentResumeData(
   id: string,
   claudeSessionId: string | null,
   lastMessageId: string | null,
 ): void {
   if (!db) return;
-  db.prepare(`UPDATE qa_agent_sessions SET claude_session_id = ?, last_message_id = ? WHERE id = ?`).run(
+  db.prepare(`UPDATE subagent_sessions SET claude_session_id = ?, last_message_id = ? WHERE id = ?`).run(
     claudeSessionId,
     lastMessageId,
     id,
   );
 }
 
-export function getQaAgentSession(id: string): QaAgentSessionRow | null {
+export function getSubagentSession(id: string): SubagentSessionRow | null {
   if (!db) return null;
-  const r = db.prepare(`SELECT * FROM qa_agent_sessions WHERE id = ?`).get(id) as QaAgentSessionDbRow | undefined;
+  const r = db.prepare(`SELECT * FROM subagent_sessions WHERE id = ?`).get(id) as SubagentSessionDbRow | undefined;
   if (!r) return null;
   return {
     id: r.id,
@@ -829,14 +897,16 @@ export function getQaAgentSession(id: string): QaAgentSessionRow | null {
     claudeSessionId: r.claude_session_id,
     lastMessageId: r.last_message_id,
     workingDir: r.working_dir,
+    subagentType: r.subagent_type,
+    cli: r.cli,
   };
 }
 
-export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSessionRow[] {
+export function getSubagentSessionsByParent(parentSessionId: string): SubagentSessionRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM qa_agent_sessions WHERE parent_session_id = ? ORDER BY started_at DESC`)
-    .all(parentSessionId) as QaAgentSessionDbRow[];
+    .prepare(`SELECT * FROM subagent_sessions WHERE parent_session_id = ? ORDER BY started_at DESC`)
+    .all(parentSessionId) as SubagentSessionDbRow[];
   return rows.map((r) => ({
     id: r.id,
     parentSessionId: r.parent_session_id,
@@ -850,14 +920,16 @@ export function getQaAgentSessionsByParent(parentSessionId: string): QaAgentSess
     claudeSessionId: r.claude_session_id,
     lastMessageId: r.last_message_id,
     workingDir: r.working_dir,
+    subagentType: r.subagent_type,
+    cli: r.cli,
   }));
 }
 
-export function getAllQaAgentSessions(): QaAgentSessionRow[] {
+export function getAllSubagentSessions(): SubagentSessionRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM qa_agent_sessions ORDER BY started_at DESC`)
-    .all() as QaAgentSessionDbRow[];
+    .prepare(`SELECT * FROM subagent_sessions ORDER BY started_at DESC`)
+    .all() as SubagentSessionDbRow[];
   return rows.map((r) => ({
     id: r.id,
     parentSessionId: r.parent_session_id,
@@ -871,76 +943,78 @@ export function getAllQaAgentSessions(): QaAgentSessionRow[] {
     claudeSessionId: r.claude_session_id,
     lastMessageId: r.last_message_id,
     workingDir: r.working_dir,
+    subagentType: r.subagent_type,
+    cli: r.cli,
   }));
 }
 
-export function deleteQaAgentSession(id: string): void {
+export function deleteSubagentSession(id: string): void {
   if (!db) return;
-  db.prepare(`DELETE FROM qa_agent_entries WHERE qa_agent_id = ?`).run(id);
-  db.prepare(`DELETE FROM qa_agent_sessions WHERE id = ?`).run(id);
+  db.prepare(`DELETE FROM subagent_entries WHERE subagent_id = ?`).run(id);
+  db.prepare(`DELETE FROM subagent_sessions WHERE id = ?`).run(id);
 }
 
-export function clearQaAgentEntries(qaAgentId: string): void {
+export function clearSubagentEntries(subagentId: string): void {
   if (!db) return;
-  db.prepare(`DELETE FROM qa_agent_entries WHERE qa_agent_id = ?`).run(qaAgentId);
+  db.prepare(`DELETE FROM subagent_entries WHERE subagent_id = ?`).run(subagentId);
 }
 
-export function deleteQaAgentsByParent(parentSessionId: string): void {
+export function deleteSubagentsByParent(parentSessionId: string): void {
   if (!db) return;
   db.prepare(
-    `DELETE FROM qa_agent_entries WHERE qa_agent_id IN (SELECT id FROM qa_agent_sessions WHERE parent_session_id = ?)`,
+    `DELETE FROM subagent_entries WHERE subagent_id IN (SELECT id FROM subagent_sessions WHERE parent_session_id = ?)`,
   ).run(parentSessionId);
-  db.prepare(`DELETE FROM qa_agent_sessions WHERE parent_session_id = ?`).run(parentSessionId);
+  db.prepare(`DELETE FROM subagent_sessions WHERE parent_session_id = ?`).run(parentSessionId);
 }
 
-export function countQaAgentsByParent(parentSessionId: string): number {
+export function countSubagentsByParent(parentSessionId: string): number {
   if (!db) return 0;
   const row = db
-    .prepare(`SELECT COUNT(*) as cnt FROM qa_agent_sessions WHERE parent_session_id = ?`)
+    .prepare(`SELECT COUNT(*) as cnt FROM subagent_sessions WHERE parent_session_id = ?`)
     .get(parentSessionId) as { cnt: number } | undefined;
   return row?.cnt ?? 0;
 }
 
-// ─── QA Agent Entries CRUD ───
+// ─── Subagent Entries CRUD ───
 
-export interface QaAgentEntryRow {
+export interface SubagentEntryRow {
   id?: number;
-  qaAgentId: string;
+  subagentId: string;
   kind: string;
   data: string; // JSON stringified entry
   timestamp: number;
   seq: number;
 }
 
-interface QaAgentEntryDbRow {
+interface SubagentEntryDbRow {
   id: number;
-  qa_agent_id: string;
+  subagent_id: string;
   kind: string;
   data: string;
   timestamp: number;
   seq: number;
 }
 
-export function insertQaAgentEntry(qaAgentId: string, kind: string, data: string, timestamp: number): void {
+export function insertSubagentEntry(subagentId: string, kind: string, data: string, timestamp: number): void {
   if (!db) return;
   const maxSeq = db
-    .prepare(`SELECT MAX(seq) as max_seq FROM qa_agent_entries WHERE qa_agent_id = ?`)
-    .get(qaAgentId) as { max_seq: number | null } | undefined;
+    .prepare(`SELECT MAX(seq) as max_seq FROM subagent_entries WHERE subagent_id = ?`)
+    .get(subagentId) as { max_seq: number | null } | undefined;
   const nextSeq = (maxSeq?.max_seq ?? -1) + 1;
 
   db.prepare(
-    `INSERT INTO qa_agent_entries (qa_agent_id, kind, data, timestamp, seq) VALUES (?, ?, ?, ?, ?)`,
-  ).run(qaAgentId, kind, data, timestamp, nextSeq);
+    `INSERT INTO subagent_entries (subagent_id, kind, data, timestamp, seq) VALUES (?, ?, ?, ?, ?)`,
+  ).run(subagentId, kind, data, timestamp, nextSeq);
 }
 
-export function getQaAgentEntries(qaAgentId: string): QaAgentEntryRow[] {
+export function getSubagentEntries(subagentId: string): SubagentEntryRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM qa_agent_entries WHERE qa_agent_id = ? ORDER BY seq ASC`)
-    .all(qaAgentId) as QaAgentEntryDbRow[];
+    .prepare(`SELECT * FROM subagent_entries WHERE subagent_id = ? ORDER BY seq ASC`)
+    .all(subagentId) as SubagentEntryDbRow[];
   return rows.map((r) => ({
     id: r.id,
-    qaAgentId: r.qa_agent_id,
+    subagentId: r.subagent_id,
     kind: r.kind,
     data: r.data,
     timestamp: r.timestamp,
@@ -985,12 +1059,12 @@ export function finalizeAllCompletedSessions(): void {
   }
 }
 
-export function markStaleQaAgentsErrored(): void {
+export function markStaleSubagentsErrored(): void {
   if (!db) return;
   const result = db
-    .prepare(`UPDATE qa_agent_sessions SET status = 'error', ended_at = ? WHERE status = 'running'`)
+    .prepare(`UPDATE subagent_sessions SET status = 'error', ended_at = ? WHERE status = 'running'`)
     .run(Date.now());
   if (result.changes > 0) {
-    console.log(`[Zeus DB] Marked ${result.changes} stale QA agent session(s) as error`);
+    console.log(`[Zeus DB] Marked ${result.changes} stale subagent session(s) as error`);
   }
 }

@@ -25,9 +25,28 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName } from '../../../shared/types';
+import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName, NormalizedEntry } from '../../../shared/types';
 import { SESSION_ICON_COLORS } from '../../../shared/types';
 import { useZeusStore } from '@/stores/useZeusStore';
+
+/** Extract last user message content per session from claudeEntries */
+function useLastUserMessages(claudeEntries: Record<string, NormalizedEntry[]>): Record<string, string> {
+  return useMemo(() => {
+    const result: Record<string, string> = {};
+    for (const [sid, entries] of Object.entries(claudeEntries)) {
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].entryType.type === 'user_message') {
+          const content = entries[i].content.trim();
+          if (content) {
+            result[sid] = content.length > 60 ? content.slice(0, 60) + '...' : content;
+          }
+          break;
+        }
+      }
+    }
+    return result;
+  }, [claudeEntries]);
+}
 
 // ─── Long press hook ───
 
@@ -107,7 +126,7 @@ interface SessionSidebarProps {
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onNewSession: () => void;
@@ -166,6 +185,7 @@ function ClaudeCard({
   session,
   active,
   activity,
+  lastUserMessage,
   onSelect,
   onUpdate,
   onDelete,
@@ -174,6 +194,7 @@ function ClaudeCard({
   session: ClaudeSessionInfo;
   active: boolean;
   activity: SessionActivity;
+  lastUserMessage?: string;
   onSelect: () => void;
   onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
@@ -204,7 +225,7 @@ function ClaudeCard({
   const textClass = statusTextColor(session, activity);
   const stLabel = statusLabel(session, activity);
 
-  const displayName = session.name || (session.prompt ? session.prompt.slice(0, 40) : 'Untitled');
+  const displayName = session.name || lastUserMessage || (session.prompt ? session.prompt.slice(0, 40) : 'Untitled');
   const longPressHandlers = useLongPress(onLongPress);
 
   return (
@@ -263,10 +284,10 @@ function ClaudeCard({
               <span className={`truncate text-[10px] ${textClass}`}>
                 {stLabel}
               </span>
-              {(session.qaAgentCount ?? 0) > 0 && (
+              {(session.subagentCount ?? 0) > 0 && (
                 <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[10px]">
                   <Eye className="size-3" />
-                  {session.qaAgentCount}
+                  {session.subagentCount}
                 </span>
               )}
             </div>
@@ -339,7 +360,7 @@ function CollapsedSidebar({
   claudeSessions: ClaudeSessionInfo[];
   activeSessionId: string | null;
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onExpandSidebar?: () => void;
@@ -349,6 +370,10 @@ function CollapsedSidebar({
   onSelectSession: (id: string) => void;
   onOpenSettings: () => void;
 }) {
+  // Compute last user message per session for collapsed tooltip display
+  const claudeEntries = useZeusStore((s) => s.claudeEntries);
+  const lastUserMessages = useLastUserMessages(claudeEntries);
+
   // Sort by last activity (most recent first), fallback to startedAt
   const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
     const aTime = lastActivityAt[a.id] ?? a.startedAt;
@@ -399,7 +424,7 @@ function CollapsedSidebar({
               const needsApproval = activity.state === 'waiting_approval';
               const dotClass = statusDotColor(s, activity);
               const isSessionRunning = s.status === 'running' && activity.state !== 'idle';
-              const displayName = s.name || (s.prompt ? s.prompt.slice(0, 30) : 'Untitled');
+              const displayName = s.name || lastUserMessages[s.id] || (s.prompt ? s.prompt.slice(0, 30) : 'Untitled');
 
               return (
                 <Tooltip key={s.id}>
@@ -595,6 +620,10 @@ function SessionSidebar({
 
   const closeSheet = () => setSheetTarget(null);
 
+  // Compute last user message per session for display
+  const claudeEntries = useZeusStore((s) => s.claudeEntries);
+  const lastUserMessages = useLastUserMessages(claudeEntries);
+
   // Filter out terminal sessions that belong to session terminal tabs (Cmd+J panels)
   const sessionTerminals = useZeusStore((s) => s.sessionTerminals);
   const standaloneSessions = useMemo(() => {
@@ -676,6 +705,7 @@ function SessionSidebar({
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
+                  lastUserMessage={lastUserMessages[s.id]}
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => setDeleteConfirm({ type: 'claude', session: s })}
@@ -724,7 +754,7 @@ function SessionSidebar({
       <BottomSheet open={!!sheetTarget} onClose={closeSheet}>
         {sheetTarget?.type === 'claude' && (() => {
           const s = sheetTarget.session;
-          const displayName = s.name || (s.prompt ? s.prompt.slice(0, 40) : 'Untitled');
+          const displayName = s.name || lastUserMessages[s.id] || (s.prompt ? s.prompt.slice(0, 40) : 'Untitled');
           return (
             <>
               <div className="mb-1 flex items-center gap-2 px-4 py-2">

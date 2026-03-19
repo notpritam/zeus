@@ -21,11 +21,13 @@ import type {
   FilesPayload,
   FileTreeEntry,
   SessionActivity,
-  QaPayload,
+  QaBrowserPayload,
   QaInstanceInfo,
   QaTabInfo,
   QaSnapshotNode,
-  QaAgentSessionInfo,
+  SubagentSessionInfo,
+  SubagentType,
+  SubagentCli,
   SystemMetrics,
   PerfPayload,
   ThemeMeta,
@@ -33,10 +35,10 @@ import type {
 } from '../../../shared/types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
 
-interface QaAgentClient {
-  info: QaAgentSessionInfo;
+interface SubagentClient {
+  info: SubagentSessionInfo;
   entries: NormalizedEntry[];
 }
 
@@ -100,9 +102,6 @@ interface ZeusState {
   activeThemeId: string;
   activeThemeColors: Record<string, string> | null;
 
-  // New Claude session modal
-  showNewClaudeModal: boolean;
-
   // View mode
   viewMode: ViewMode;
 
@@ -124,9 +123,9 @@ interface ZeusState {
   // QA URL detection result (transient — for UI feedback)
   qaUrlDetectionResult: { sessionId: string; qaTargetUrl: string | null; source: string; detail: string; framework?: string; verification?: string; timestamp: number } | null;
 
-  // QA Agent — keyed by parentSessionId → multiple agents
-  qaAgents: Record<string, QaAgentClient[]>;        // parentSessionId → agents
-  activeQaAgentId: Record<string, string | null>;   // parentSessionId → selected qaAgentId
+  // Subagents — keyed by parentSessionId → multiple agents
+  subagents: Record<string, SubagentClient[]>;        // parentSessionId → agents
+  activeSubagentId: Record<string, string | null>;   // parentSessionId → selected subagentId
   qaFlows: FlowSummary[];
 
   // Performance monitoring
@@ -134,7 +133,7 @@ interface ZeusState {
   perfMonitoring: boolean;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null;
 
   // Session terminal panel (per-Claude-session terminals)
   sessionTerminals: Record<string, {
@@ -196,10 +195,6 @@ interface ZeusState {
   deletedClaudeSessions: ClaudeSessionInfo[];
   setViewMode: (mode: ViewMode) => void;
 
-  // Modal actions
-  openNewClaudeModal: () => void;
-  closeNewClaudeModal: () => void;
-
   // Git actions
   startGitWatching: (sessionId: string, workingDir: string) => void;
   stopGitWatching: (sessionId: string) => void;
@@ -222,7 +217,7 @@ interface ZeusState {
   // Diff tab state
   openDiffTabs: DiffTab[];
   activeDiffTabId: string | null;
-  previousViewMode: 'terminal' | 'claude';
+  previousViewMode: ViewMode;
 
   // Diff tab actions
   openDiffTab: (sessionId: string, file: string, staged: boolean) => void;
@@ -256,19 +251,19 @@ interface ZeusState {
   fetchQATabs: () => void;
   clearQAError: () => void;
 
-  // QA Agent actions
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => void;
-  stopQAAgent: (qaAgentId: string) => void;
-  deleteQAAgent: (qaAgentId: string, parentSessionId: string) => void;
-  sendQAAgentMessage: (qaAgentId: string, text: string) => void;
-  clearQAAgentEntries: (qaAgentId: string) => void;
-  selectQaAgent: (parentSessionId: string, qaAgentId: string | null) => void;
-  fetchQaAgents: (parentSessionId: string) => void;
-  fetchQaAgentEntries: (qaAgentId: string) => void;
+  // Subagent actions
+  startSubagent: (subagentType: SubagentType, cli: SubagentCli, inputs: Record<string, string>, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', name?: string) => void;
+  stopSubagent: (subagentId: string) => void;
+  deleteSubagent: (subagentId: string, parentSessionId: string) => void;
+  sendSubagentMessage: (subagentId: string, text: string) => void;
+  clearSubagentEntries: (subagentId: string) => void;
+  selectSubagent: (parentSessionId: string, subagentId: string | null) => void;
+  fetchSubagents: (parentSessionId: string) => void;
+  fetchSubagentEntries: (subagentId: string) => void;
   fetchQaFlows: () => void;
 
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null) => void;
   toggleRightPanel: () => void;
 
   // Session terminal actions
@@ -420,7 +415,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   gitPulling: {},
   openDiffTabs: [],
   activeDiffTabId: null,
-  previousViewMode: 'terminal' as const,
+  previousViewMode: 'terminal',
 
   fileTree: {},
   fileTreeExpanded: {},
@@ -442,8 +437,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   qaUrlDetectionResult: null,
 
-  qaAgents: {},
-  activeQaAgentId: {},
+  subagents: {},
+  activeSubagentId: {},
   qaFlows: [] as FlowSummary[],
 
 
@@ -461,7 +456,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   themes: [],
   activeThemeId: 'zeus-dark',
   activeThemeColors: null,
-  showNewClaudeModal: false,
 
   viewMode: 'terminal',
 
@@ -566,12 +560,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         const p = envelope.payload as SessionListPayload;
         set({ sessions: p.sessions });
 
-        // Fetch QA agents for the active terminal session on reconnect
+        // Fetch subagents for the active terminal session on reconnect
         const activeTermId = get().activeSessionId;
         if (activeTermId) {
           zeusWs.send({
-            channel: 'qa', sessionId: '', auth: '',
-            payload: { type: 'list_qa_agents', parentSessionId: activeTermId },
+            channel: 'subagent', sessionId: '', auth: '',
+            payload: { type: 'list_subagents', parentSessionId: activeTermId },
           });
         }
       }
@@ -677,11 +671,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           });
         }
 
-        // Fetch QA agents for the active session on reconnect
+        // Fetch subagents for the active session on reconnect
         if (activeId) {
           zeusWs.send({
-            channel: 'qa', sessionId: '', auth: '',
-            payload: { type: 'list_qa_agents', parentSessionId: activeId },
+            channel: 'subagent', sessionId: '', auth: '',
+            payload: { type: 'list_subagents', parentSessionId: activeId },
           });
         }
         return;
@@ -1041,7 +1035,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             viewMode: 'diff' as ViewMode,
             previousViewMode:
               state.viewMode !== 'diff'
-                ? (state.viewMode as 'terminal' | 'claude')
+                ? state.viewMode
                 : state.previousViewMode,
           }));
         }
@@ -1213,7 +1207,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             viewMode: 'diff' as ViewMode,
             previousViewMode:
               state.viewMode !== 'diff'
-                ? (state.viewMode as 'terminal' | 'claude')
+                ? state.viewMode
                 : state.previousViewMode,
           }));
         }
@@ -1241,7 +1235,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
     // Subscribe to QA channel
     const unsubQA = zeusWs.on('qa', (envelope: WsEnvelope) => {
-      const payload = envelope.payload as QaPayload;
+      const payload = envelope.payload as QaBrowserPayload;
 
       if (payload.type === 'qa_started') {
         set({ qaRunning: true, qaLoading: false, qaError: null });
@@ -1253,7 +1247,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaText: null, qaLoading: false, qaError: null,
           qaCurrentUrl: window.location.origin,
           qaConsoleLogs: [], qaNetworkRequests: [], qaJsErrors: [],
-          qaAgents: {}, activeQaAgentId: {},
+          subagents: {}, activeSubagentId: {},
         });
       }
       if (payload.type === 'qa_status') {
@@ -1315,83 +1309,94 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           qaJsErrors: [...state.qaJsErrors, ...payload.errors].slice(-500),
         }));
       }
-      if (payload.type === 'qa_agent_started') {
-        const { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl } = payload;
+      if (payload.type === 'qa_flows_list') {
+        set({ qaFlows: payload.flows });
+      }
+    });
+
+    // Subscribe to subagent channel
+    const unsubSubagent = zeusWs.on('subagent', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as { type: string; [key: string]: unknown };
+
+      if (payload.type === 'subagent_started') {
+        const { subagentId, subagentType, cli, parentSessionId, parentSessionType, name, task, targetUrl } = payload as {
+          subagentId: string; subagentType?: string; cli?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string;
+        };
         set((state) => {
-          const existing = (state.qaAgents[parentSessionId] ?? []).find((a) => a.info.qaAgentId === qaAgentId);
-          let agents: QaAgentClient[];
+          const existing = (state.subagents[parentSessionId] ?? []).find((a) => a.info.subagentId === subagentId);
+          let agents: SubagentClient[];
           if (existing) {
             // Agent already exists (resume) — update status back to running
-            agents = (state.qaAgents[parentSessionId] ?? []).map((a) =>
-              a.info.qaAgentId === qaAgentId ? { ...a, info: { ...a.info, status: 'running' as const } } : a,
+            agents = (state.subagents[parentSessionId] ?? []).map((a) =>
+              a.info.subagentId === subagentId ? { ...a, info: { ...a.info, status: 'running' as const } } : a,
             );
           } else {
             // New agent
-            const newAgent: QaAgentClient = {
-              info: { qaAgentId, parentSessionId, parentSessionType, name, task, targetUrl, status: 'running', startedAt: Date.now() },
+            const newAgent: SubagentClient = {
+              info: { subagentId, subagentType: (subagentType ?? 'qa') as SubagentType, cli: (cli ?? 'claude') as SubagentCli, parentSessionId, parentSessionType, name, task, targetUrl, status: 'running', startedAt: Date.now() },
               entries: [],
             };
-            agents = [...(state.qaAgents[parentSessionId] ?? []), newAgent];
+            agents = [...(state.subagents[parentSessionId] ?? []), newAgent];
           }
           return {
-            qaAgents: { ...state.qaAgents, [parentSessionId]: agents },
-            activeQaAgentId: { ...state.activeQaAgentId, [parentSessionId]: qaAgentId },
+            subagents: { ...state.subagents, [parentSessionId]: agents },
+            activeSubagentId: { ...state.activeSubagentId, [parentSessionId]: subagentId },
           };
         });
       }
-      if (payload.type === 'qa_agent_stopped') {
-        const { qaAgentId, parentSessionId } = payload;
+      if (payload.type === 'subagent_stopped') {
+        const { subagentId, parentSessionId } = payload as { subagentId: string; parentSessionId: string };
         set((state) => {
-          const agents = (state.qaAgents[parentSessionId] ?? []).map((a) =>
-            a.info.qaAgentId === qaAgentId ? { ...a, info: { ...a.info, status: 'stopped' as const } } : a,
+          const agents = (state.subagents[parentSessionId] ?? []).map((a) =>
+            a.info.subagentId === subagentId ? { ...a, info: { ...a.info, status: 'stopped' as const } } : a,
           );
-          return { qaAgents: { ...state.qaAgents, [parentSessionId]: agents } };
+          return { subagents: { ...state.subagents, [parentSessionId]: agents } };
         });
       }
-      if (payload.type === 'qa_agent_deleted') {
-        const { qaAgentId, parentSessionId } = payload;
+      if (payload.type === 'subagent_deleted') {
+        const { subagentId, parentSessionId } = payload as { subagentId: string; parentSessionId: string };
         set((state) => {
-          const agents = (state.qaAgents[parentSessionId] ?? []).filter((a) => a.info.qaAgentId !== qaAgentId);
-          const activeId = state.activeQaAgentId[parentSessionId];
-          const newActiveId = activeId === qaAgentId
-            ? (agents.length > 0 ? agents[agents.length - 1].info.qaAgentId : null)
+          const agents = (state.subagents[parentSessionId] ?? []).filter((a) => a.info.subagentId !== subagentId);
+          const activeId = state.activeSubagentId[parentSessionId];
+          const newActiveId = activeId === subagentId
+            ? (agents.length > 0 ? agents[agents.length - 1].info.subagentId : null)
             : activeId;
           return {
-            qaAgents: { ...state.qaAgents, [parentSessionId]: agents },
-            activeQaAgentId: { ...state.activeQaAgentId, [parentSessionId]: newActiveId },
+            subagents: { ...state.subagents, [parentSessionId]: agents },
+            activeSubagentId: { ...state.activeSubagentId, [parentSessionId]: newActiveId },
           };
         });
       }
-      if (payload.type === 'qa_agent_entry') {
-        const { qaAgentId, parentSessionId, entry } = payload;
+      if (payload.type === 'subagent_entry') {
+        const { subagentId, parentSessionId, entry } = payload as { subagentId: string; parentSessionId: string; entry: NormalizedEntry };
         set((state) => {
-          const agents = (state.qaAgents[parentSessionId] ?? []).map((a) =>
-            a.info.qaAgentId === qaAgentId
+          const agents = (state.subagents[parentSessionId] ?? []).map((a) =>
+            a.info.subagentId === subagentId
               ? { ...a, entries: [...a.entries, entry].slice(-500) }
               : a,
           );
-          return { qaAgents: { ...state.qaAgents, [parentSessionId]: agents } };
+          return { subagents: { ...state.subagents, [parentSessionId]: agents } };
         });
       }
-      if (payload.type === 'qa_agent_list') {
-        const { parentSessionId, agents } = payload;
+      if (payload.type === 'subagent_list') {
+        const { parentSessionId, agents } = payload as { parentSessionId: string; agents: SubagentSessionInfo[] };
         set((state) => {
           // Merge server list with any existing entries we may have
-          const existing = state.qaAgents[parentSessionId] ?? [];
+          const existing = state.subagents[parentSessionId] ?? [];
           const merged = agents.map((info) => {
-            const found = existing.find((a) => a.info.qaAgentId === info.qaAgentId);
+            const found = existing.find((a) => a.info.subagentId === info.subagentId);
             return found ? { ...found, info } : { info, entries: [] };
           });
-          return { qaAgents: { ...state.qaAgents, [parentSessionId]: merged } };
+          return { subagents: { ...state.subagents, [parentSessionId]: merged } };
         });
       }
-      if (payload.type === 'qa_agent_entries') {
-        const { qaAgentId, entries: dbEntries } = payload;
+      if (payload.type === 'subagent_entries') {
+        const { subagentId, entries: dbEntries } = payload as { subagentId: string; entries: NormalizedEntry[] };
         set((state) => {
-          const updated = { ...state.qaAgents };
+          const updated = { ...state.subagents };
           for (const parentId of Object.keys(updated)) {
             updated[parentId] = updated[parentId].map((a) => {
-              if (a.info.qaAgentId !== qaAgentId) return a;
+              if (a.info.subagentId !== subagentId) return a;
               // Merge: DB entries are the base, append any streamed entries
               // that arrived after the last DB entry (by ID dedup)
               const dbIds = new Set(dbEntries.map((e) => e.id));
@@ -1399,11 +1404,13 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
               return { ...a, entries: [...dbEntries, ...newer] };
             });
           }
-          return { qaAgents: updated };
+          return { subagents: updated };
         });
       }
-      if (payload.type === 'qa_flows_list') {
-        set({ qaFlows: payload.flows });
+      if (payload.type === 'subagent_error') {
+        const { message } = payload as { type: string; message: string };
+        console.error('[ZeusStore] subagent_error:', message);
+        set({ qaError: message });
       }
     });
 
@@ -1426,6 +1433,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubGit();
       unsubFiles();
       unsubQA();
+      unsubSubagent();
       unsubPerf();
       zeusWs.disconnect();
       set({ connected: false });
@@ -1949,13 +1957,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   },
 
   setViewMode: (mode: ViewMode) => {
-    set({ viewMode: mode });
+    set((state) => ({
+      viewMode: mode,
+      previousViewMode: state.viewMode !== 'diff' ? state.viewMode : state.previousViewMode,
+    }));
   },
-
-  // --- Modal actions ---
-
-  openNewClaudeModal: () => set({ showNewClaudeModal: true }),
-  closeNewClaudeModal: () => set({ showNewClaudeModal: false }),
 
   // --- Git actions ---
 
@@ -2040,7 +2046,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
@@ -2066,7 +2072,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
@@ -2098,7 +2104,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       viewMode: 'diff' as ViewMode,
       previousViewMode:
         state.viewMode !== 'diff'
-          ? (state.viewMode as 'terminal' | 'claude')
+          ? state.viewMode
           : state.previousViewMode,
     }));
   },
@@ -2151,7 +2157,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       viewMode: 'diff' as ViewMode,
       previousViewMode:
         state.viewMode !== 'diff'
-          ? (state.viewMode as 'terminal' | 'claude')
+          ? state.viewMode
           : state.previousViewMode,
     }));
   },
@@ -2316,7 +2322,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         viewMode: 'diff' as ViewMode,
         previousViewMode:
           state.viewMode !== 'diff'
-            ? (state.viewMode as 'terminal' | 'claude')
+            ? state.viewMode
             : state.previousViewMode,
       }));
       return;
@@ -2420,76 +2426,77 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     set({ qaError: null });
   },
 
-  // --- QA Agent actions ---
+  // --- Subagent actions ---
 
-  startQAAgent: (task: string, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', targetUrl?: string, name?: string, flowId?: string, personas?: string[]) => {
-    set({ qaError: null });
+  startSubagent: (subagentType: SubagentType, cli: SubagentCli, inputs: Record<string, string>, workingDir: string, parentSessionId: string, parentSessionType: 'terminal' | 'claude', name?: string) => {
+    const envelope = {
+      channel: 'subagent' as const, sessionId: parentSessionId, auth: '',
+      payload: { type: 'start_subagent', subagentType, cli, inputs, workingDir, parentSessionId, parentSessionType, name },
+    };
+    console.log('[ZeusStore] startSubagent sending WS message:', envelope);
+    zeusWs.send(envelope);
+  },
+
+  stopSubagent: (subagentId: string) => {
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'start_qa_agent', task, name, workingDir, targetUrl, parentSessionId, parentSessionType, flowId, personas },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'stop_subagent', subagentId },
     });
   },
 
-  stopQAAgent: (qaAgentId: string) => {
+  deleteSubagent: (subagentId: string, parentSessionId: string) => {
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'stop_qa_agent', qaAgentId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'delete_subagent', subagentId, parentSessionId },
     });
   },
 
-  deleteQAAgent: (qaAgentId: string, parentSessionId: string) => {
+  sendSubagentMessage: (subagentId: string, text: string) => {
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'delete_qa_agent', qaAgentId, parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'subagent_message', subagentId, text },
     });
   },
 
-  sendQAAgentMessage: (qaAgentId: string, text: string) => {
-    zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'qa_agent_message', qaAgentId, text },
-    });
-  },
-
-  clearQAAgentEntries: (qaAgentId: string) => {
+  clearSubagentEntries: (subagentId: string) => {
     // Clear locally
     set((state) => {
-      const updated = { ...state.qaAgents };
+      const updated = { ...state.subagents };
       for (const [psid, agents] of Object.entries(updated)) {
-        const idx = agents.findIndex((a) => a.info.qaAgentId === qaAgentId);
+        const idx = agents.findIndex((a) => a.info.subagentId === subagentId);
         if (idx !== -1) {
           updated[psid] = agents.map((a) =>
-            a.info.qaAgentId === qaAgentId ? { ...a, entries: [] } : a,
+            a.info.subagentId === subagentId ? { ...a, entries: [] } : a,
           );
           break;
         }
       }
-      return { qaAgents: updated };
+      return { subagents: updated };
     });
     // Clear from server DB so entries don't reappear on refresh
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'clear_qa_agent_entries', qaAgentId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'clear_subagent_entries', subagentId },
     });
   },
 
-  selectQaAgent: (parentSessionId: string, qaAgentId: string | null) => {
+  selectSubagent: (parentSessionId: string, subagentId: string | null) => {
     set((state) => ({
-      activeQaAgentId: { ...state.activeQaAgentId, [parentSessionId]: qaAgentId },
+      activeSubagentId: { ...state.activeSubagentId, [parentSessionId]: subagentId },
     }));
   },
 
-  fetchQaAgents: (parentSessionId: string) => {
+  fetchSubagents: (parentSessionId: string) => {
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'list_qa_agents', parentSessionId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'list_subagents', parentSessionId },
     });
   },
 
-  fetchQaAgentEntries: (qaAgentId: string) => {
+  fetchSubagentEntries: (subagentId: string) => {
     zeusWs.send({
-      channel: 'qa', sessionId: '', auth: '',
-      payload: { type: 'get_qa_agent_entries', qaAgentId },
+      channel: 'subagent', sessionId: '', auth: '',
+      payload: { type: 'get_subagent_entries', subagentId },
     });
   },
 
@@ -2502,10 +2509,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'qa' | 'info' | 'settings' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'info' | 'settings' | null) => {
     set({ activeRightTab: tab });
-    // Fetch QA status when switching to QA tab
-    if (tab === 'qa') {
+    // Fetch QA status when switching to subagents tab
+    if (tab === 'subagents') {
       zeusWs.send({ channel: 'qa', sessionId: '', payload: { type: 'get_qa_status' }, auth: '' });
     }
   },
