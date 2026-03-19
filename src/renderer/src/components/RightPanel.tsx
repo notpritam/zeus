@@ -1,4 +1,4 @@
-import { GitBranch, FolderOpen, Eye, RefreshCw, Info, Settings } from 'lucide-react';
+import { GitBranch, FolderOpen, Bot, RefreshCw, Info, Settings } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
@@ -157,9 +157,9 @@ function RightPanel() {
     ? sessionGit.staged.length + sessionGit.unstaged.length
     : 0;
 
-  // QA running agents count (across all parent sessions)
+  // Running subagent count (across all parent sessions)
   const subagents = useZeusStore((s) => s.subagents);
-  const runningQaAgentCount = Object.values(subagents)
+  const runningSubagentCount = Object.values(subagents)
     .flat()
     .filter((a) => a.info.status === 'running')
     .length;
@@ -216,19 +216,19 @@ function RightPanel() {
           />
           <ActivityBarIcon icon={FolderOpen} tab="explorer" tooltip="Explorer" />
           <ActivityBarIcon
-            icon={Eye}
+            icon={Bot}
             tab="subagents"
             tooltip={
-              runningQaAgentCount > 0 && qaJsErrorCount > 0
-                ? `QA Preview (${runningQaAgentCount} running, ${qaJsErrorCount} errors)`
-                : runningQaAgentCount > 0
-                  ? `QA Preview (${runningQaAgentCount} agent${runningQaAgentCount > 1 ? 's' : ''} running)`
+              runningSubagentCount > 0 && qaJsErrorCount > 0
+                ? `Subagents (${runningSubagentCount} running, ${qaJsErrorCount} JS errors)`
+                : runningSubagentCount > 0
+                  ? `Subagents (${runningSubagentCount} running)`
                   : qaJsErrorCount > 0
-                    ? `QA Preview (${qaJsErrorCount} JS errors)`
-                    : 'QA Preview'
+                    ? `Subagents (${qaJsErrorCount} JS errors)`
+                    : 'Subagents'
             }
             badge={qaJsErrorCount}
-            pulse={runningQaAgentCount > 0}
+            pulse={runningSubagentCount > 0}
           />
           <div className="mt-auto pb-2">
             <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />

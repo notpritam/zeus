@@ -263,10 +263,10 @@ function ClaudeCard({
               <span className={`truncate text-[10px] ${textClass}`}>
                 {stLabel}
               </span>
-              {(session.qaAgentCount ?? 0) > 0 && (
+              {(session.subagentCount ?? 0) > 0 && (
                 <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 text-[10px]">
                   <Eye className="size-3" />
-                  {session.qaAgentCount}
+                  {session.subagentCount}
                 </span>
               )}
             </div>

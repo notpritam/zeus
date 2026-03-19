@@ -30,7 +30,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { NormalizedEntry } from '../../../shared/types';
 
 const EMPTY_ENTRIES: NormalizedEntry[] = [];
-const EMPTY_QA_AGENTS: { info: any; entries: any[] }[] = [];
+const EMPTY_SUBAGENTS: { info: any; entries: any[] }[] = [];
 const EMPTY_QUEUE: { id: string; content: string }[] = [];
 
 // ─── Error Boundary ───
@@ -364,7 +364,7 @@ function SessionInfoPanel() {
   const gitStatus = useZeusStore((s) => activeClaudeId ? s.gitStatus[activeClaudeId] : undefined);
   const gitConnected = useZeusStore((s) => activeClaudeId ? s.gitWatcherConnected[activeClaudeId] === true : false);
   const fileTreeConnected = useZeusStore((s) => activeClaudeId ? s.fileTreeConnected[activeClaudeId] === true : false);
-  const qaAgents = useZeusStore((s) => activeClaudeId ? (s.subagents[activeClaudeId] ?? EMPTY_QA_AGENTS) : EMPTY_QA_AGENTS);
+  const subagentsList = useZeusStore((s) => activeClaudeId ? (s.subagents[activeClaudeId] ?? EMPTY_SUBAGENTS) : EMPTY_SUBAGENTS);
   const pendingApprovals = useZeusStore(useShallow((s) => s.pendingApprovals.filter((a) => a.sessionId === activeClaudeId)));
   const updateQaTargetUrl = useZeusStore((s) => s.updateQaTargetUrl);
   const detectQaTargetUrl = useZeusStore((s) => s.detectQaTargetUrl);
@@ -404,7 +404,7 @@ function SessionInfoPanel() {
     activity.state === 'waiting_approval' ? `Awaiting: ${activity.toolName}` :
     activity.state === 'starting' ? 'Starting' : 'Unknown';
 
-  const runningQaAgents = qaAgents.filter((a) => a.info?.status === 'running').length;
+  const runningSubagents = subagentsList.filter((a) => a.info?.status === 'running').length;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -494,13 +494,13 @@ function SessionInfoPanel() {
         <StatRow label="Web Fetches" value={stats.webFetches} />
         <StatRow label="Agents Spawned" value={stats.agents} />
 
-        {/* QA Agents */}
-        {qaAgents.length > 0 && (
+        {/* Subagents */}
+        {subagentsList.length > 0 && (
           <>
-            <SectionHeader title="QA Agents" />
-            <InfoRow icon={Eye} label="Total" value={qaAgents.length} />
-            {runningQaAgents > 0 && <StatRow label="Running" value={runningQaAgents} color="text-green-400" />}
-            {qaAgents.map((a) => (
+            <SectionHeader title="Subagents" />
+            <InfoRow icon={Bot} label="Total" value={subagentsList.length} />
+            {runningSubagents > 0 && <StatRow label="Running" value={runningSubagents} color="text-green-400" />}
+            {subagentsList.map((a) => (
               <div key={a.info?.subagentId ?? Math.random()} className="flex items-center justify-between px-3 py-0.5">
                 <span className="text-muted-foreground truncate text-[11px] max-w-[140px]">{a.info?.name || a.info?.task?.slice(0, 30) || '—'}</span>
                 <Badge variant={a.info?.status === 'running' ? 'default' : 'secondary'} className="text-[9px]">{a.info?.status ?? '—'}</Badge>
