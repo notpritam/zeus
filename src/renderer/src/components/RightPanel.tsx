@@ -1,4 +1,4 @@
-import { GitBranch, FolderOpen, Bot, Globe, RefreshCw, Info, Settings, Smartphone, Plug } from 'lucide-react';
+import { GitBranch, FolderOpen, Bot, Globe, RefreshCw, Info, Settings, Smartphone, Plug, ListTodo } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useZeusStore } from '@/stores/useZeusStore';
 import GitPanel from '@/components/GitPanel';
@@ -7,6 +7,7 @@ import SubagentPanel from '@/components/SubagentPanel';
 import BrowserPanel from '@/components/BrowserPanel';
 import AndroidPanel from '@/components/AndroidPanel';
 import McpPanel from '@/components/McpPanel';
+import { TaskPanel } from '@/components/TaskPanel';
 import SessionInfoPanel from '@/components/SessionInfoPanel';
 import SessionSettingsPanel from '@/components/SessionSettingsPanel';
 import {
@@ -84,7 +85,7 @@ function ActivityBarIcon({
   pulse,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp';
+  tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks';
   tooltip: string;
   badge?: number;   // red error badge (top-right)
   count?: number;   // themed count badge (top-right, lower priority than badge)
@@ -174,6 +175,10 @@ function RightPanel() {
   // Running claude sessions count
   const runningClaudeCount = claudeSessions.filter((s) => s.status === 'running').length;
 
+  // Task counts
+  const tasks = useZeusStore((s) => s.tasks);
+  const activeTaskCount = tasks.filter((t) => t.status === 'running' || t.status === 'creating').length;
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full">
@@ -189,7 +194,7 @@ function RightPanel() {
               className="min-w-0 flex-1 flex flex-col overflow-hidden"
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : activeRightTab === 'browser' ? <BrowserPanel /> : activeRightTab === 'android' ? <AndroidPanel /> : activeRightTab === 'mcp' ? <McpPanel /> : <SubagentPanel />}
+                {activeRightTab === 'source-control' ? <GitPanel /> : activeRightTab === 'explorer' ? <FileExplorer /> : activeRightTab === 'info' ? <SessionInfoPanel /> : activeRightTab === 'settings' ? <SessionSettingsPanel /> : activeRightTab === 'browser' ? <BrowserPanel /> : activeRightTab === 'android' ? <AndroidPanel /> : activeRightTab === 'mcp' ? <McpPanel /> : activeRightTab === 'tasks' ? <TaskPanel /> : <SubagentPanel />}
               </div>
               <WatcherStatusBar />
             </motion.div>
@@ -248,6 +253,13 @@ function RightPanel() {
             icon={Plug}
             tab="mcp"
             tooltip="MCP Servers"
+          />
+          <ActivityBarIcon
+            icon={ListTodo}
+            tab="tasks"
+            tooltip={activeTaskCount > 0 ? `Tasks (${activeTaskCount} active)` : 'Tasks'}
+            count={activeTaskCount}
+            pulse={activeTaskCount > 0}
           />
           <div className="mt-auto pb-2">
             <ActivityBarIcon icon={Settings} tab="settings" tooltip="Session Settings" />

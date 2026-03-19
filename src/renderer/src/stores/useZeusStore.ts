@@ -177,7 +177,7 @@ interface ZeusState {
   taskError: string | null;
 
   // Right panel
-  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | null;
+  activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null;
 
   // Session terminal panel (per-Claude-session terminals)
   sessionTerminals: Record<string, {
@@ -328,7 +328,7 @@ interface ZeusState {
   clearMcpImportResult: () => void;
 
   // Right panel actions
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'mcp' | null) => void;
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null) => void;
   toggleRightPanel: () => void;
 
   // Session terminal actions
@@ -2813,7 +2813,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   // --- Right panel actions ---
 
-  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | null) => {
+  setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null) => {
     set({ activeRightTab: tab });
     // Fetch QA status when switching to browser tab
     if (tab === 'browser') {
