@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import {
   Plug,
   AlertTriangle,
   Check,
+  GitBranch,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -107,6 +108,88 @@ function AddProjectForm({ form }: { form: ReturnType<typeof useNewSessionForm> }
   );
 }
 
+function TaskModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
+  const { gitBranches, activeSessionId, listBranches } = useZeusStore();
+
+  const branches = useMemo(() => {
+    if (!activeSessionId) return [];
+    return gitBranches[activeSessionId] ?? [];
+  }, [activeSessionId, gitBranches]);
+
+  const currentBranch = useMemo(() => branches.find((b) => b.current)?.name ?? '', [branches]);
+
+  // Fetch branches when task mode is turned on
+  useEffect(() => {
+    if (form.isTaskMode && activeSessionId) {
+      listBranches(activeSessionId);
+    }
+  }, [form.isTaskMode, activeSessionId, listBranches]);
+
+  // Default baseBranch to current branch
+  useEffect(() => {
+    if (form.isTaskMode && currentBranch && !form.baseBranch) {
+      form.setBaseBranch(currentBranch);
+    }
+  }, [form.isTaskMode, currentBranch, form.baseBranch]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <GitBranch className="size-3.5 text-primary" />
+          <Label htmlFor="task-mode" className="text-xs font-semibold">
+            Create as Task (Worktree)
+          </Label>
+        </div>
+        <Switch
+          id="task-mode"
+          checked={form.isTaskMode}
+          onCheckedChange={form.setIsTaskMode}
+        />
+      </div>
+      {form.isTaskMode && (
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <p className="text-muted-foreground text-[10px]">
+            Runs Claude in an isolated git worktree on its own branch. Your main branch stays clean.
+          </p>
+          <div className="space-y-1.5">
+            <Label className="text-[10px] text-muted-foreground">Task Name</Label>
+            <Input
+              value={form.taskName}
+              onChange={(e) => form.setTaskName(e.target.value)}
+              placeholder="e.g. fix-login-bug"
+              className="text-xs"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[10px] text-muted-foreground">Base Branch</Label>
+            {branches.length > 0 ? (
+              <select
+                value={form.baseBranch}
+                onChange={(e) => form.setBaseBranch(e.target.value)}
+                className="border-input bg-transparent w-full rounded-md border px-3 py-1.5 text-xs shadow-xs"
+              >
+                {branches.filter((b) => !b.isRemoteOnly).map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name}{b.current ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                value={form.baseBranch}
+                onChange={(e) => form.setBaseBranch(e.target.value)}
+                placeholder="main (defaults to current branch)"
+                className="text-xs"
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickStartTab({
   form,
   onSwitchTab,
@@ -189,6 +272,9 @@ function QuickStartTab({
         />
       </div>
 
+      {/* Task Mode Toggle */}
+      <TaskModeSection form={form} />
+
       {/* Quick Settings */}
       <div className="space-y-3">
         <Label className="text-xs font-semibold uppercase tracking-wider">
@@ -223,7 +309,7 @@ function QuickStartTab({
         disabled={!form.canSubmit}
         onClick={form.handleSubmit}
       >
-        Start Session
+        {form.isTaskMode ? 'Create Task' : 'Start Session'}
       </Button>
     </div>
   );
@@ -611,6 +697,11 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
 
         <Separator />
 
+        {/* Task Mode */}
+        <TaskModeSection form={form} />
+
+        <Separator />
+
         {/* MCP Server Selection */}
         <McpSessionConfig form={form} />
       </div>
@@ -622,7 +713,7 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
         disabled={!form.canSubmit}
         onClick={form.handleSubmit}
       >
-        Start Session
+        {form.isTaskMode ? 'Create Task' : 'Start Session'}
       </Button>
     </div>
   );

@@ -167,6 +167,14 @@ export function useNewSessionForm() {
     handleAddProject,
     settingsError,
 
+    // Task mode
+    isTaskMode,
+    setIsTaskMode,
+    taskName,
+    setTaskName,
+    baseBranch,
+    setBaseBranch,
+
     // Session config
     prompt,
     setPrompt,
