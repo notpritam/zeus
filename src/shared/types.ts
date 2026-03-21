@@ -4,6 +4,8 @@
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 
+export type { PermissionsPayload } from './permission-types';
+
 // ─── Settings Types ───
 
 export interface SavedProject {
@@ -169,7 +171,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp' | 'task';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp' | 'task' | 'permissions';
   sessionId: string;
   payload: unknown;
   auth: string;
@@ -278,6 +280,7 @@ export interface ClaudeStartPayload {
   mcpProfileId?: string;
   mcpServerIds?: string[];
   mcpExcludeIds?: string[];
+  projectId?: string;  // for loading permission rules
 }
 
 export interface ClaudeResumePayload {

@@ -72,6 +72,10 @@ import {
   copyClaudeEntriesForResume,
   updateClaudeSessionQaTargetUrl,
   getTask,
+  getPermissionRules,
+  setPermissionRules,
+  clearPermissionRules,
+  getAuditLog,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName, AndroidPayload, TaskPayload, GitStatusData } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
@@ -85,6 +89,8 @@ import { SystemMonitorService } from './system-monitor';
 import { FlowRunner } from './flow-runner';
 import * as mcpRegistry from './mcp-registry';
 import type { McpPayload } from '../../shared/types';
+import type { PermissionsPayload, PermissionRule } from '../../shared/permission-types';
+import { PERMISSION_TEMPLATES } from './permission-evaluator';
 import { TaskManager } from './task-manager';
 
 let server: http.Server | null = null;
@@ -1015,6 +1021,13 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         env: s.env,
       }));
 
+      // Load permission rules for the project
+      const projectId = (envelope.payload as ClaudeStartPayload).projectId;
+      let permissionRules: PermissionRule[] = [];
+      if (projectId) {
+        permissionRules = getPermissionRules(projectId);
+      }
+
       const session = await claudeManager.createSession(envelope.sessionId, opts.prompt, {
         workingDir,
         permissionMode: opts.permissionMode ?? 'bypassPermissions',
@@ -1023,6 +1036,8 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         qaTargetUrl: opts.qaTargetUrl,
         zeusSessionId: envelope.sessionId,
         mcpServers: mcpServersForSession.length > 0 ? mcpServersForSession : undefined,
+        permissionRules,
+        projectId: projectId ?? undefined,
       });
 
       // Track attached MCPs in session_mcps table
@@ -3580,6 +3595,81 @@ async function handleTask(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
   }
 }
 
+async function handlePermissions(
+  ws: WebSocket,
+  envelope: WsEnvelope,
+  payload: PermissionsPayload,
+): Promise<void> {
+  if (payload.type === 'get_rules') {
+    const rules = getPermissionRules(payload.projectId);
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'rules_updated', projectId: payload.projectId, rules },
+      auth: '',
+    });
+  }
+
+  else if (payload.type === 'set_rules') {
+    setPermissionRules(payload.projectId, payload.rules);
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'rules_updated', projectId: payload.projectId, rules: payload.rules },
+      auth: '',
+    });
+  }
+
+  else if (payload.type === 'apply_template') {
+    const template = PERMISSION_TEMPLATES.find(t => t.id === payload.templateId);
+    if (!template) {
+      broadcastEnvelope({
+        channel: 'permissions',
+        sessionId: envelope.sessionId,
+        payload: { type: 'permissions_error', message: `Template not found: ${payload.templateId}` },
+        auth: '',
+      });
+      return;
+    }
+    setPermissionRules(payload.projectId, template.rules, template.name, true);
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'rules_updated', projectId: payload.projectId, rules: template.rules },
+      auth: '',
+    });
+  }
+
+  else if (payload.type === 'get_templates') {
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'templates_list', templates: PERMISSION_TEMPLATES },
+      auth: '',
+    });
+  }
+
+  else if (payload.type === 'get_audit_log') {
+    const { entries, total } = getAuditLog(payload.sessionId, payload.limit, payload.offset);
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'audit_log', sessionId: payload.sessionId, entries, total },
+      auth: '',
+    });
+  }
+
+  else if (payload.type === 'clear_rules') {
+    clearPermissionRules(payload.projectId);
+    broadcastEnvelope({
+      channel: 'permissions',
+      sessionId: envelope.sessionId,
+      payload: { type: 'rules_updated', projectId: payload.projectId, rules: [] },
+      auth: '',
+    });
+  }
+}
+
 function handleMessage(ws: WebSocket, raw: string): void {
   let envelope: WsEnvelope;
   try {
@@ -3650,6 +3740,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
         sendEnvelope(ws, {
           channel: 'task', sessionId: '', auth: '',
           payload: { type: 'task_error', message: (err as Error).message },
+        });
+      });
+      break;
+    case 'permissions':
+      handlePermissions(ws, envelope, envelope.payload as PermissionsPayload).catch((err) => {
+        sendEnvelope(ws, {
+          channel: 'permissions', sessionId: envelope.sessionId, auth: '',
+          payload: { type: 'permissions_error', message: (err as Error).message },
         });
       });
       break;
