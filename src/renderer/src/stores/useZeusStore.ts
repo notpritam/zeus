@@ -1118,9 +1118,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         }
       }
 
-      // Only process detailed events for the active session
-      if (sid !== get().activeClaudeId) return;
-
+      // Process git status and branches for ALL sessions (including project: watchers)
       if (payload.type === 'git_heartbeat') {
         const current = get().gitWatcherConnected[sid];
         if (!current) {
@@ -1137,12 +1135,29 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           gitWatcherConnected: { ...state.gitWatcherConnected, [sid]: true },
           gitNotARepo: { ...state.gitNotARepo, [sid]: false },
         }));
-        // Auto-open right panel on first status with changes
-        const totalChanges = payload.data.staged.length + payload.data.unstaged.length;
-        if (!get().activeRightTab && totalChanges > 0) {
-          set({ activeRightTab: 'source-control' });
+        // Auto-open right panel on first status with changes (only for active session)
+        if (sid === get().activeClaudeId) {
+          const totalChanges = payload.data.staged.length + payload.data.unstaged.length;
+          if (!get().activeRightTab && totalChanges > 0) {
+            set({ activeRightTab: 'source-control' });
+          }
         }
       }
+
+      if (payload.type === 'git_branches_result') {
+        set((state) => ({
+          gitBranches: { ...state.gitBranches, [sid]: payload.branches },
+        }));
+      }
+
+      if (payload.type === 'git_error') {
+        set((state) => ({
+          gitErrors: { ...state.gitErrors, [sid]: payload.message },
+        }));
+      }
+
+      // Only process detailed events for the active session
+      if (sid !== get().activeClaudeId) return;
 
       if (payload.type === 'git_file_contents_result') {
         const tabId = `${sid}:${payload.file}`;
@@ -1208,18 +1223,6 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
             gitErrors: { ...state.gitErrors, [sid]: payload.error! },
           }));
         }
-      }
-
-      if (payload.type === 'git_error') {
-        set((state) => ({
-          gitErrors: { ...state.gitErrors, [sid]: payload.message },
-        }));
-      }
-
-      if (payload.type === 'git_branches_result') {
-        set((state) => ({
-          gitBranches: { ...state.gitBranches, [sid]: payload.branches },
-        }));
       }
 
       if (payload.type === 'git_checkout_result') {

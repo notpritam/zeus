@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { zeusWs } from '@/lib/ws';
-import type { PermissionMode } from '../../../shared/types';
-import type { GitBranchInfo } from '../../../shared/types';
+import type { PermissionMode, GitBranchInfo } from '../../../shared/types';
+
+const EMPTY_BRANCHES: GitBranchInfo[] = [];
 
 export function useNewSessionForm() {
   const {
@@ -50,6 +51,46 @@ export function useNewSessionForm() {
     ? customDir.trim()
     : savedProjects.find((p) => p.id === selectedProjectId)?.path ?? '';
 
+  // Git watcher key — use a stable prefix so it doesn't clash with session IDs
+  const gitWatcherKey = workingDir ? `project:${workingDir}` : '';
+
+  // Auto-start git watcher when project changes
+  const prevWorkingDirRef = useRef('');
+  useEffect(() => {
+    if (workingDir && workingDir !== prevWorkingDirRef.current) {
+      prevWorkingDirRef.current = workingDir;
+      // Start watching to detect if it's a git repo and get branches
+      zeusWs.send({
+        channel: 'git',
+        sessionId: gitWatcherKey,
+        payload: { type: 'start_watching', workingDir },
+        auth: '',
+      });
+      // Also fetch branches
+      zeusWs.send({
+        channel: 'git',
+        sessionId: gitWatcherKey,
+        payload: { type: 'git_list_branches' },
+        auth: '',
+      });
+    }
+  }, [workingDir, gitWatcherKey]);
+
+  // Read git state from store keyed by our watcher key
+  const gitBranches = useZeusStore((s) => s.gitBranches[gitWatcherKey] ?? EMPTY_BRANCHES);
+  const gitNotARepo = useZeusStore((s) => s.gitNotARepo[gitWatcherKey] ?? false);
+  const gitWatcherConnected = useZeusStore((s) => s.gitWatcherConnected[gitWatcherKey] ?? false);
+  const gitStatus = useZeusStore((s) => s.gitStatus[gitWatcherKey]);
+
+  const currentBranch = useMemo(() => gitBranches.find((b) => b.current)?.name ?? '', [gitBranches]);
+
+  // Auto-set baseBranch when branches load
+  useEffect(() => {
+    if (currentBranch && !baseBranch) {
+      setBaseBranch(currentBranch);
+    }
+  }, [currentBranch, baseBranch]);
+
   const canSubmit = isTaskMode
     ? !!(prompt.trim() && workingDir && taskName.trim())
     : !!(prompt.trim() && workingDir);
@@ -77,6 +118,16 @@ export function useNewSessionForm() {
     if (!name || !projectPath) return;
     addProject(name, projectPath, createNewDir || undefined);
   }, [newProjectName, newProjectPath, createNewDir, addProject]);
+
+  const initGit = useCallback(() => {
+    if (!workingDir) return;
+    zeusWs.send({
+      channel: 'git',
+      sessionId: gitWatcherKey,
+      payload: { type: 'git_init', workingDir },
+      auth: '',
+    });
+  }, [workingDir, gitWatcherKey]);
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
@@ -174,6 +225,14 @@ export function useNewSessionForm() {
     setTaskName,
     baseBranch,
     setBaseBranch,
+
+    // Git info (auto-fetched for selected project)
+    gitBranches,
+    gitNotARepo,
+    gitWatcherConnected,
+    gitStatus,
+    currentBranch,
+    initGit,
 
     // Session config
     prompt,

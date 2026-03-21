@@ -108,29 +108,44 @@ function AddProjectForm({ form }: { form: ReturnType<typeof useNewSessionForm> }
   );
 }
 
+function GitInfoBar({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
+  if (!form.workingDir) return null;
+
+  if (form.gitNotARepo) {
+    return (
+      <div className="flex items-center justify-between rounded-md border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-3 text-yellow-500" />
+          <span className="text-[11px] text-yellow-600 dark:text-yellow-400">Not a git repository</span>
+        </div>
+        <Button size="xs" variant="outline" className="text-[10px]" onClick={form.initGit}>
+          Initialize Git
+        </Button>
+      </div>
+    );
+  }
+
+  if (form.currentBranch) {
+    const changeCount = (form.gitStatus?.staged?.length ?? 0) + (form.gitStatus?.unstaged?.length ?? 0);
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-3 py-1.5">
+        <GitBranch className="size-3 text-primary" />
+        <span className="text-[11px] font-medium">{form.currentBranch}</span>
+        {changeCount > 0 && (
+          <Badge variant="secondary" className="text-[9px] px-1 py-0">
+            {changeCount} change{changeCount !== 1 ? 's' : ''}
+          </Badge>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function TaskModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
-  const { gitBranches, activeSessionId, listBranches } = useZeusStore();
-
-  const branches = useMemo(() => {
-    if (!activeSessionId) return [];
-    return gitBranches[activeSessionId] ?? [];
-  }, [activeSessionId, gitBranches]);
-
-  const currentBranch = useMemo(() => branches.find((b) => b.current)?.name ?? '', [branches]);
-
-  // Fetch branches when task mode is turned on
-  useEffect(() => {
-    if (form.isTaskMode && activeSessionId) {
-      listBranches(activeSessionId);
-    }
-  }, [form.isTaskMode, activeSessionId, listBranches]);
-
-  // Default baseBranch to current branch
-  useEffect(() => {
-    if (form.isTaskMode && currentBranch && !form.baseBranch) {
-      form.setBaseBranch(currentBranch);
-    }
-  }, [form.isTaskMode, currentBranch, form.baseBranch]);
+  // Disable task mode if not a git repo
+  const disabled = form.gitNotARepo || !form.workingDir;
 
   return (
     <div className="space-y-3">
@@ -145,9 +160,13 @@ function TaskModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> 
           id="task-mode"
           checked={form.isTaskMode}
           onCheckedChange={form.setIsTaskMode}
+          disabled={disabled}
         />
       </div>
-      {form.isTaskMode && (
+      {disabled && form.gitNotARepo && (
+        <p className="text-[10px] text-muted-foreground">Initialize git first to use task mode.</p>
+      )}
+      {form.isTaskMode && !disabled && (
         <div className="space-y-2 rounded-lg border border-border p-3">
           <p className="text-muted-foreground text-[10px]">
             Runs Claude in an isolated git worktree on its own branch. Your main branch stays clean.
@@ -163,13 +182,13 @@ function TaskModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> 
           </div>
           <div className="space-y-1.5">
             <Label className="text-[10px] text-muted-foreground">Base Branch</Label>
-            {branches.length > 0 ? (
+            {form.gitBranches.length > 0 ? (
               <select
                 value={form.baseBranch}
                 onChange={(e) => form.setBaseBranch(e.target.value)}
                 className="border-input bg-transparent w-full rounded-md border px-3 py-1.5 text-xs shadow-xs"
               >
-                {branches.filter((b) => !b.isRemoteOnly).map((b) => (
+                {form.gitBranches.filter((b) => !b.isRemoteOnly).map((b) => (
                   <option key={b.name} value={b.name}>
                     {b.name}{b.current ? ' (current)' : ''}
                   </option>
@@ -252,6 +271,9 @@ function QuickStartTab({
             </p>
           </div>
         )}
+
+        {/* Git info for selected project */}
+        <GitInfoBar form={form} />
       </div>
 
       {/* Prompt */}
@@ -576,6 +598,9 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
         {form.showAddProject && (
           <AddProjectForm form={form} />
         )}
+
+        {/* Git info for selected project */}
+        <GitInfoBar form={form} />
       </div>
 
       <Separator />
