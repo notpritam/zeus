@@ -1,14 +1,21 @@
+import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import type { SessionRecord, SavedProject, TaskRecord, TaskStatus } from '../../shared/types';
 import type { NormalizedEntry } from '../services/claude-types';
+import type { PermissionRule } from '../../shared/permission-types';
 import { validateNormalizedEntry, safeParseNormalizedEntry } from '../../shared/validators';
 import { zeusEnv } from './env';
 
 let db: Database.Database | null = null;
 
+function getDb(): Database.Database {
+  if (!db) throw new Error('[Zeus DB] Database not initialized');
+  return db;
+}
+
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -247,6 +254,34 @@ function runMigrations(database: Database.Database): void {
     `);
   }
 
+  if (currentVersion < 13) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS permission_rules (
+        id          TEXT PRIMARY KEY,
+        project_id  TEXT NOT NULL,
+        name        TEXT NOT NULL DEFAULT 'Custom',
+        rules       TEXT NOT NULL DEFAULT '[]',
+        is_template INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pr_project ON permission_rules(project_id);
+
+      CREATE TABLE IF NOT EXISTS permission_audit_log (
+        id          TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL,
+        project_id  TEXT,
+        tool_name   TEXT NOT NULL,
+        pattern     TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        rule_matched TEXT,
+        timestamp   INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pal_session ON permission_audit_log(session_id, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_pal_project ON permission_audit_log(project_id, timestamp);
+    `);
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -307,6 +342,7 @@ export function pruneOldSessions(maxAgeDays = 30): void {
   db.prepare(`DELETE FROM subagent_sessions WHERE started_at < ?`).run(cutoff);
 
   pruneOldTasks(maxAgeDays);
+  pruneOldAuditLogs(maxAgeDays);
 }
 
 // ─── Claude Sessions CRUD ───
@@ -1460,4 +1496,69 @@ function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
     updatedAt: row.updated_at as number,
     completedAt: (row.completed_at as number) || null,
   };
+}
+
+// ─── Permission Rules ───
+
+export function getPermissionRules(projectId: string): PermissionRule[] {
+  const database = getDb();
+  const row = database.prepare(
+    'SELECT rules FROM permission_rules WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1'
+  ).get(projectId) as { rules: string } | undefined;
+  if (!row) return [];
+  try { return JSON.parse(row.rules); } catch { return []; }
+}
+
+export function setPermissionRules(projectId: string, rules: PermissionRule[], name = 'Custom', isTemplate = false): void {
+  const database = getDb();
+  const existing = database.prepare(
+    'SELECT id FROM permission_rules WHERE project_id = ? LIMIT 1'
+  ).get(projectId) as { id: string } | undefined;
+  const now = Date.now();
+  if (existing) {
+    database.prepare(
+      'UPDATE permission_rules SET rules = ?, name = ?, is_template = ?, updated_at = ? WHERE id = ?'
+    ).run(JSON.stringify(rules), name, isTemplate ? 1 : 0, now, existing.id);
+  } else {
+    const id = crypto.randomUUID();
+    database.prepare(
+      'INSERT INTO permission_rules (id, project_id, name, rules, is_template, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, projectId, name, JSON.stringify(rules), isTemplate ? 1 : 0, now, now);
+  }
+}
+
+export function clearPermissionRules(projectId: string): void {
+  const database = getDb();
+  database.prepare('DELETE FROM permission_rules WHERE project_id = ?').run(projectId);
+}
+
+// ─── Permission Audit Log ───
+
+export function insertAuditEntry(entry: {
+  id: string; sessionId: string; projectId: string | null;
+  toolName: string; pattern: string; action: string;
+  ruleMatched: string | null; timestamp: number;
+}): void {
+  const database = getDb();
+  database.prepare(
+    `INSERT INTO permission_audit_log (id, session_id, project_id, tool_name, pattern, action, rule_matched, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(entry.id, entry.sessionId, entry.projectId, entry.toolName, entry.pattern, entry.action, entry.ruleMatched, entry.timestamp);
+}
+
+export function getAuditLog(sessionId: string, limit = 100, offset = 0): { entries: any[]; total: number } {
+  const database = getDb();
+  const total = (database.prepare(
+    'SELECT COUNT(*) as count FROM permission_audit_log WHERE session_id = ?'
+  ).get(sessionId) as { count: number }).count;
+  const entries = database.prepare(
+    'SELECT * FROM permission_audit_log WHERE session_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+  ).all(sessionId, limit, offset);
+  return { entries, total };
+}
+
+export function pruneOldAuditLogs(maxAgeDays = 30): void {
+  const database = getDb();
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  database.prepare('DELETE FROM permission_audit_log WHERE timestamp < ?').run(cutoff);
 }
