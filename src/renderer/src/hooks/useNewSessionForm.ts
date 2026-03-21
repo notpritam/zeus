@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { zeusWs } from '@/lib/ws';
 import type { PermissionMode } from '../../../shared/types';
+import type { GitBranchInfo } from '../../../shared/types';
 
 export function useNewSessionForm() {
   const {
@@ -25,6 +26,11 @@ export function useNewSessionForm() {
   const [newProjectPath, setNewProjectPath] = useState('');
   const [createNewDir, setCreateNewDir] = useState(false);
 
+  // Task mode (worktree)
+  const [isTaskMode, setIsTaskMode] = useState(false);
+  const [taskName, setTaskName] = useState('');
+  const [baseBranch, setBaseBranch] = useState('');
+
   // Session config
   const [prompt, setPrompt] = useState('');
   const [sessionName, setSessionName] = useState('');
@@ -44,7 +50,9 @@ export function useNewSessionForm() {
     ? customDir.trim()
     : savedProjects.find((p) => p.id === selectedProjectId)?.path ?? '';
 
-  const canSubmit = !!(prompt.trim() && workingDir);
+  const canSubmit = isTaskMode
+    ? !!(prompt.trim() && workingDir && taskName.trim())
+    : !!(prompt.trim() && workingDir);
 
   // Auto-select newly added project
   const prevProjectCountRef = useRef(savedProjects.length);
@@ -72,6 +80,28 @@ export function useNewSessionForm() {
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
+
+    if (isTaskMode) {
+      // Create a worktree-based task
+      const { createTask } = useZeusStore.getState();
+      const opts: { baseBranch?: string; permissionMode?: PermissionMode; model?: string } = {};
+      if (baseBranch.trim()) opts.baseBranch = baseBranch.trim();
+      if (permissionMode !== 'default') opts.permissionMode = permissionMode;
+      if (model.trim()) opts.model = model.trim();
+      createTask(taskName.trim(), prompt.trim(), workingDir, Object.keys(opts).length ? opts : undefined);
+
+      // Persist last-used project
+      const project = savedProjects.find((p) => p.path === workingDir);
+      if (project) {
+        zeusWs.send({
+          channel: 'settings',
+          sessionId: '',
+          payload: { type: 'set_last_used_project', id: project.id },
+          auth: '',
+        });
+      }
+      return;
+    }
 
     // Compute MCP additive/subtractive overrides from the toggle map
     const mcpServerIds = Object.entries(mcpServerOverrides)
@@ -109,7 +139,7 @@ export function useNewSessionForm() {
       });
     }
   }, [
-    canSubmit, prompt, workingDir, sessionName, permissionMode, model,
+    canSubmit, isTaskMode, taskName, baseBranch, prompt, workingDir, sessionName, permissionMode, model,
     notificationSound, enableGitWatcher, enableQA, qaTargetUrl,
     mcpProfileId, mcpServerOverrides, startClaudeSession, savedProjects,
   ]);

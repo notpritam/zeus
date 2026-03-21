@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +7,7 @@ import {
   Plus, GitBranch, GitMerge, GitPullRequest,
   Archive, Trash2, Play, RefreshCw, ChevronDown, ChevronRight,
 } from 'lucide-react';
-import type { TaskRecord, TaskStatus } from '../../../shared/types';
+import type { TaskRecord, TaskStatus, PermissionMode } from '../../../shared/types';
 
 const STATUS_COLORS: Record<TaskStatus, string> = {
   creating: 'bg-yellow-500/20 text-yellow-400',
@@ -133,21 +133,53 @@ function TaskCard({ task }: { task: TaskRecord }) {
 }
 
 export function TaskPanel() {
-  const { tasks, savedProjects, lastUsedProjectId, createTask, taskError } = useZeusStore();
+  const { tasks, savedProjects, lastUsedProjectId, createTask, taskError, gitBranches, activeSessionId, listBranches } = useZeusStore();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [baseBranch, setBaseBranch] = useState('');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [model, setModel] = useState('');
 
   const currentProject = savedProjects.find((p) => p.id === lastUsedProjectId);
   const activeTasks = tasks.filter((t) => t.status === 'running' || t.status === 'creating');
   const completedTasks = tasks.filter((t) => t.status === 'completed' || t.status === 'error');
   const resolvedTasks = tasks.filter((t) => ['merged', 'pr_created', 'archived'].includes(t.status));
 
+  // Get branches from the active terminal session
+  const branches = useMemo(() => {
+    if (!activeSessionId) return [];
+    return gitBranches[activeSessionId] ?? [];
+  }, [activeSessionId, gitBranches]);
+
+  const currentBranch = useMemo(() => branches.find((b) => b.current)?.name ?? '', [branches]);
+
+  // Fetch branches when create form opens
+  useEffect(() => {
+    if (showCreate && activeSessionId) {
+      listBranches(activeSessionId);
+    }
+  }, [showCreate, activeSessionId, listBranches]);
+
+  // Default baseBranch to current branch when branches load
+  useEffect(() => {
+    if (showCreate && currentBranch && !baseBranch) {
+      setBaseBranch(currentBranch);
+    }
+  }, [showCreate, currentBranch, baseBranch]);
+
   const handleCreate = () => {
     if (!name.trim() || !prompt.trim() || !currentProject) return;
-    createTask(name.trim(), prompt.trim(), currentProject.path);
+    const opts: { baseBranch?: string; permissionMode?: PermissionMode; model?: string } = {};
+    if (baseBranch) opts.baseBranch = baseBranch;
+    if (permissionMode !== 'default') opts.permissionMode = permissionMode;
+    if (model.trim()) opts.model = model.trim();
+    createTask(name.trim(), prompt.trim(), currentProject.path, Object.keys(opts).length ? opts : undefined);
     setName('');
     setPrompt('');
+    setBaseBranch('');
+    setPermissionMode('default');
+    setModel('');
     setShowCreate(false);
   };
 
@@ -173,11 +205,58 @@ export function TaskPanel() {
               className="border-border bg-background text-foreground w-full rounded-md border px-2 py-1.5 text-xs"
               rows={3}
             />
+            <div>
+              <label className="text-muted-foreground mb-1 block text-[10px]">Base branch</label>
+              {branches.length > 0 ? (
+                <select
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                  className="border-border bg-background text-foreground w-full rounded-md border px-2 py-1.5 text-xs"
+                >
+                  {branches.filter((b) => !b.isRemoteOnly).map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}{b.current ? ' (current)' : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                  placeholder="main (defaults to current branch)"
+                  className="text-xs"
+                />
+              )}
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-muted-foreground mb-1 block text-[10px]">Permission mode</label>
+                <select
+                  value={permissionMode}
+                  onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
+                  className="border-border bg-background text-foreground w-full rounded-md border px-2 py-1.5 text-xs"
+                >
+                  <option value="default">Default</option>
+                  <option value="acceptEdits">Accept Edits</option>
+                  <option value="plan">Plan</option>
+                  <option value="bypassPermissions">Bypass Permissions</option>
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="text-muted-foreground mb-1 block text-[10px]">Model (optional)</label>
+                <Input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="e.g. sonnet"
+                  className="text-xs"
+                />
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button size="sm" className="h-7 flex-1 text-xs" onClick={handleCreate} disabled={!name.trim() || !prompt.trim() || !currentProject}>
                 Create Task
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowCreate(false); setName(''); setPrompt(''); }}>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowCreate(false); setName(''); setPrompt(''); setBaseBranch(''); setPermissionMode('default'); setModel(''); }}>
                 Cancel
               </Button>
             </div>
