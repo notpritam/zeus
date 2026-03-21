@@ -107,19 +107,21 @@ export function evaluate(
   toolName: string,
   pattern: string,
   rules: PermissionRule[],
-): PermissionAction {
-  let result: PermissionAction = 'ask';
+): { action: PermissionAction; matchedRule: PermissionRule | null } {
+  let action: PermissionAction = 'ask';
+  let matchedRule: PermissionRule | null = null;
 
   for (const rule of rules) {
     const toolMatches = matchGlob(toolName, rule.tool);
     const patternMatches = matchGlob(pattern, rule.pattern);
 
     if (toolMatches && patternMatches) {
-      result = rule.action;
+      action = rule.action;
+      matchedRule = rule;
     }
   }
 
-  return result;
+  return { action, matchedRule };
 }
 
 // ─── Built-in Templates ─────────────────────────────────────────────────────

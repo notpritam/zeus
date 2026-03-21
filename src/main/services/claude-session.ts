@@ -13,6 +13,9 @@ import type {
   PermissionResult,
 } from './claude-types';
 import { ClaudeLogProcessor } from './claude-log-processor';
+import type { PermissionRule } from '../../shared/permission-types';
+import { evaluate, extractPattern, relativize } from './permission-evaluator';
+import { insertAuditEntry } from './db';
 import path from 'path';
 import { app } from 'electron';
 
@@ -31,6 +34,8 @@ export interface SessionOptions {
   zeusSessionId?: string;
   subagentId?: string;
   mcpServers?: Array<{ name: string; command: string; args?: string[]; env?: Record<string, string> }>;
+  permissionRules?: PermissionRule[];  // glob-based rules
+  projectId?: string;                 // for audit logging
 }
 
 export interface ApprovalRequest {
@@ -50,6 +55,8 @@ export class ClaudeSession extends EventEmitter {
   private _pendingAssistantUuid: string | null = null;
   private _isRunning = false;
   private pendingApprovals = new Map<string, { requestId: string; toolInput: unknown }>();
+  private permissionRules: PermissionRule[];
+  private projectId: string | null;
 
   get sessionId(): string | null {
     return this._sessionId;
@@ -67,6 +74,8 @@ export class ClaudeSession extends EventEmitter {
   constructor(private options: SessionOptions) {
     super();
     this.logProcessor = new ClaudeLogProcessor(options.workingDir);
+    this.permissionRules = options.permissionRules ?? [];
+    this.projectId = options.projectId ?? null;
     this.logProcessor.onActivity((activity) => {
       this.emit('activity', activity);
     });
@@ -282,6 +291,15 @@ export class ClaudeSession extends EventEmitter {
   private buildHooks(mode: PermissionMode): Record<string, unknown[]> {
     const hooks: Record<string, unknown[]> = {};
 
+    // If glob rules are active, route ALL tools through approval
+    // (our evaluator will auto-resolve most of them in handleControlRequest)
+    if (this.permissionRules.length > 0) {
+      hooks['PreToolUse'] = [
+        { matcher: '.*', hookCallbackIds: ['tool_approval'] },
+      ];
+      return hooks;
+    }
+
     if (mode === 'plan') {
       // Plan mode: approve everything except ExitPlanMode and AskUserQuestion
       hooks['PreToolUse'] = [
@@ -374,6 +392,35 @@ export class ClaudeSession extends EventEmitter {
         return;
       }
 
+      // ─── Glob rule evaluation ───
+      if (this.permissionRules.length > 0) {
+        const rawPattern = extractPattern(tool_name, input as Record<string, unknown>);
+        const pattern = relativize(rawPattern, this.options.workingDir);
+        const { action, matchedRule } = evaluate(tool_name, pattern, this.permissionRules);
+
+        // Audit log
+        this.logAudit(tool_name, pattern, action, matchedRule);
+
+        if (action === 'allow') {
+          const result: PermissionResult = { behavior: 'allow', updatedInput: input };
+          await this.protocol!.sendPermissionResponse(requestId, result);
+          this.emit('permission_auto_resolved', { toolName: tool_name, pattern, action: 'allow' });
+          return;
+        }
+
+        if (action === 'deny') {
+          const result: PermissionResult = {
+            behavior: 'deny',
+            message: `Permission denied by project rule: ${matchedRule?.tool}:${matchedRule?.pattern} → deny`,
+          };
+          await this.protocol!.sendPermissionResponse(requestId, result);
+          this.emit('permission_auto_resolved', { toolName: tool_name, pattern, action: 'deny' });
+          return;
+        }
+
+        // action === 'ask' → fall through to existing UI flow
+      }
+
       // Regular tool — emit for user approval
       const approvalId = crypto.randomUUID();
       this.pendingApprovals.set(approvalId, { requestId, toolInput: input });
@@ -411,6 +458,23 @@ export class ClaudeSession extends EventEmitter {
           },
         });
       }
+    }
+  }
+
+  private logAudit(toolName: string, pattern: string, action: string, matchedRule: PermissionRule | null): void {
+    try {
+      insertAuditEntry({
+        id: crypto.randomUUID(),
+        sessionId: this.options.zeusSessionId ?? '',
+        projectId: this.projectId,
+        toolName,
+        pattern,
+        action,
+        ruleMatched: matchedRule ? JSON.stringify(matchedRule) : null,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.warn('[ClaudeSession] Failed to log audit entry:', err);
     }
   }
 }
