@@ -44,6 +44,7 @@ import type {
   TaskRecord,
   TaskPayload,
 } from '../../../shared/types';
+import type { PermissionRule, PermissionTemplate, PermissionAuditEntry, PermissionsPayload } from '../../../shared/permission-types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
@@ -175,6 +176,11 @@ interface ZeusState {
   tasks: TaskRecord[];
   activeTaskId: string | null;
   taskError: string | null;
+
+  // Permissions
+  permissionRules: Record<string, PermissionRule[]>;  // projectId → rules
+  permissionTemplates: PermissionTemplate[];
+  permissionAuditLog: Record<string, { entries: PermissionAuditEntry[]; total: number }>;  // sessionId → log
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null;
@@ -367,6 +373,14 @@ interface ZeusState {
   unarchiveTask: (taskId: string) => void;
   discardTask: (taskId: string) => void;
   getTaskDiff: (taskId: string) => void;
+
+  // Permission actions
+  fetchPermissionRules: (projectId: string) => void;
+  setPermissionRules: (projectId: string, rules: PermissionRule[]) => void;
+  applyPermissionTemplate: (projectId: string, templateId: string) => void;
+  fetchPermissionTemplates: () => void;
+  clearPermissionRules: (projectId: string) => void;
+  fetchAuditLog: (sessionId: string, limit?: number, offset?: number) => void;
 }
 
 const ENTRIES_PAGE_SIZE = 50;
@@ -554,6 +568,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   tasks: [],
   activeTaskId: null,
   taskError: null,
+
+  // Permissions
+  permissionRules: {},
+  permissionTemplates: [],
+  permissionAuditLog: {},
 
   savedProjects: [],
   claudeDefaults: {
@@ -1695,6 +1714,29 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    const unsubPermissions = zeusWs.on('permissions', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as PermissionsPayload;
+
+      if (payload.type === 'rules_updated') {
+        set((state) => ({
+          permissionRules: { ...state.permissionRules, [payload.projectId]: payload.rules },
+        }));
+      }
+
+      if (payload.type === 'templates_list') {
+        set({ permissionTemplates: payload.templates });
+      }
+
+      if (payload.type === 'audit_log') {
+        set((state) => ({
+          permissionAuditLog: {
+            ...state.permissionAuditLog,
+            [payload.sessionId]: { entries: payload.entries, total: payload.total },
+          },
+        }));
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -1711,6 +1753,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubAndroid();
       unsubMcp();
       unsubTask();
+      unsubPermissions();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -3282,6 +3325,50 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'task', sessionId: '', auth: '',
       payload: { type: 'get_task_diff', taskId },
+    });
+  },
+
+  // ─── Permission actions ───
+
+  fetchPermissionRules: (projectId) => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'get_rules', projectId },
+    });
+  },
+
+  setPermissionRules: (projectId, rules) => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'set_rules', projectId, rules },
+    });
+  },
+
+  applyPermissionTemplate: (projectId, templateId) => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'apply_template', projectId, templateId },
+    });
+  },
+
+  fetchPermissionTemplates: () => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'get_templates' },
+    });
+  },
+
+  clearPermissionRules: (projectId) => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'clear_rules', projectId },
+    });
+  },
+
+  fetchAuditLog: (sessionId, limit, offset) => {
+    zeusWs.send({
+      channel: 'permissions', sessionId: '', auth: '',
+      payload: { type: 'get_audit_log', sessionId, limit, offset },
     });
   },
 }));
