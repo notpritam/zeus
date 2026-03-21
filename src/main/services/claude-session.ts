@@ -375,23 +375,6 @@ export class ClaudeSession extends EventEmitter {
         return;
       }
 
-      // ExitPlanMode — approve and switch to bypass
-      if (tool_name === 'ExitPlanMode') {
-        const result: PermissionResult = {
-          behavior: 'allow',
-          updatedInput: input,
-          updatedPermissions: [
-            {
-              type: 'setMode',
-              mode: 'bypassPermissions',
-              destination: 'session',
-            },
-          ],
-        };
-        await this.protocol!.sendPermissionResponse(requestId, result);
-        return;
-      }
-
       // ─── Glob rule evaluation ───
       if (this.permissionRules.length > 0) {
         const rawPattern = extractPattern(tool_name, input as Record<string, unknown>);
@@ -419,6 +402,23 @@ export class ClaudeSession extends EventEmitter {
         }
 
         // action === 'ask' → fall through to existing UI flow
+      }
+
+      // ExitPlanMode — approve and switch to bypass (after glob evaluation so rules can deny it)
+      if (tool_name === 'ExitPlanMode') {
+        const result: PermissionResult = {
+          behavior: 'allow',
+          updatedInput: input,
+          updatedPermissions: [
+            {
+              type: 'setMode',
+              mode: 'bypassPermissions',
+              destination: 'session',
+            },
+          ],
+        };
+        await this.protocol!.sendPermissionResponse(requestId, result);
+        return;
       }
 
       // Regular tool — emit for user approval

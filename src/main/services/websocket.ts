@@ -3745,6 +3745,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       break;
     case 'permissions':
       handlePermissions(ws, envelope, envelope.payload as PermissionsPayload).catch((err) => {
+        console.error('[Permissions] Unhandled error in handlePermissions:', err);
         sendEnvelope(ws, {
           channel: 'permissions', sessionId: envelope.sessionId, auth: '',
           payload: { type: 'permissions_error', message: (err as Error).message },

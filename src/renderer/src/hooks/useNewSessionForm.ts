@@ -196,7 +196,7 @@ export function useNewSessionForm() {
   }, [
     canSubmit, isTaskMode, taskName, baseBranch, prompt, workingDir, sessionName, permissionMode, model,
     notificationSound, enableGitWatcher, enableQA, qaTargetUrl,
-    mcpProfileId, mcpServerOverrides, startClaudeSession, savedProjects,
+    mcpProfileId, mcpServerOverrides, startClaudeSession, savedProjects, selectedProjectId,
   ]);
 
   return {

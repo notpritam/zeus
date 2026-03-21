@@ -255,31 +255,34 @@ function runMigrations(database: Database.Database): void {
   }
 
   if (currentVersion < 13) {
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS permission_rules (
-        id          TEXT PRIMARY KEY,
-        project_id  TEXT NOT NULL,
-        name        TEXT NOT NULL DEFAULT 'Custom',
-        rules       TEXT NOT NULL DEFAULT '[]',
-        is_template INTEGER NOT NULL DEFAULT 0,
-        created_at  INTEGER NOT NULL,
-        updated_at  INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_pr_project ON permission_rules(project_id);
+    const migrate13 = database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS permission_rules (
+          id          TEXT PRIMARY KEY,
+          project_id  TEXT NOT NULL,
+          name        TEXT NOT NULL DEFAULT 'Custom',
+          rules       TEXT NOT NULL DEFAULT '[]',
+          is_template INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pr_project ON permission_rules(project_id);
 
-      CREATE TABLE IF NOT EXISTS permission_audit_log (
-        id          TEXT PRIMARY KEY,
-        session_id  TEXT NOT NULL,
-        project_id  TEXT,
-        tool_name   TEXT NOT NULL,
-        pattern     TEXT NOT NULL,
-        action      TEXT NOT NULL,
-        rule_matched TEXT,
-        timestamp   INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_pal_session ON permission_audit_log(session_id, timestamp);
-      CREATE INDEX IF NOT EXISTS idx_pal_project ON permission_audit_log(project_id, timestamp);
-    `);
+        CREATE TABLE IF NOT EXISTS permission_audit_log (
+          id          TEXT PRIMARY KEY,
+          session_id  TEXT NOT NULL,
+          project_id  TEXT,
+          tool_name   TEXT NOT NULL,
+          pattern     TEXT NOT NULL,
+          action      TEXT NOT NULL,
+          rule_matched TEXT,
+          timestamp   INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pal_session ON permission_audit_log(session_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_pal_project ON permission_audit_log(project_id, timestamp);
+      `);
+    });
+    migrate13();
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
