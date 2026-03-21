@@ -46,6 +46,9 @@ export function useNewSessionForm() {
   const [mcpProfileId, setMcpProfileId] = useState<string | undefined>(undefined);
   const [mcpServerOverrides, setMcpServerOverrides] = useState<Record<string, boolean>>({});
 
+  // Permission rules editor
+  const [showRulesEditor, setShowRulesEditor] = useState(false);
+
   // Derived
   const workingDir = showCustomDir
     ? customDir.trim()
@@ -175,6 +178,7 @@ export function useNewSessionForm() {
       mcpProfileId,
       mcpServerIds: mcpServerIds.length > 0 ? mcpServerIds : undefined,
       mcpExcludeIds: mcpExcludeIds.length > 0 ? mcpExcludeIds : undefined,
+      projectId: selectedProjectId ?? undefined,
     };
 
     startClaudeSession(config);
@@ -257,6 +261,10 @@ export function useNewSessionForm() {
     setMcpProfileId,
     mcpServerOverrides,
     setMcpServerOverrides,
+
+    // Permission rules editor
+    showRulesEditor,
+    setShowRulesEditor,
 
     // Actions
     canSubmit,

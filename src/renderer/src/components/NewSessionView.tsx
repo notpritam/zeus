@@ -15,10 +15,12 @@ import {
   AlertTriangle,
   Check,
   GitBranch,
+  Shield,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { useNewSessionForm } from '@/hooks/useNewSessionForm';
+import { PermissionRulesEditor } from '@/components/PermissionRulesEditor';
 import type { PermissionMode } from '../../../shared/types';
 
 const PERMISSION_MODES: { value: PermissionMode; label: string }[] = [
@@ -216,6 +218,7 @@ function QuickStartTab({
   form: ReturnType<typeof useNewSessionForm>;
   onSwitchTab: (tab: NewSessionTab) => void;
 }) {
+  const { permissionRules } = useZeusStore();
   return (
     <div className="space-y-6">
       <div>
@@ -324,6 +327,27 @@ function QuickStartTab({
           />
         </div>
       </div>
+
+      {/* Permission Rules */}
+      {form.selectedProjectId && (
+        <div>
+          <button
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[10px]"
+            onClick={() => form.setShowRulesEditor(!form.showRulesEditor)}
+          >
+            <Shield className="size-3" />
+            {(permissionRules[form.selectedProjectId] ?? []).length > 0
+              ? `${(permissionRules[form.selectedProjectId] ?? []).length} permission rules active`
+              : 'Configure permission rules'
+            }
+          </button>
+          {form.showRulesEditor && (
+            <div className="mt-2">
+              <PermissionRulesEditor projectId={form.selectedProjectId} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Start Button */}
       <Button
@@ -507,6 +531,7 @@ function McpSessionConfig({ form }: { form: ReturnType<typeof useNewSessionForm>
 }
 
 function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
+  const { permissionRules } = useZeusStore();
   return (
     <div className="space-y-6">
       <div>
@@ -651,6 +676,27 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
             ))}
           </div>
         </div>
+
+        {/* Permission Rules */}
+        {form.selectedProjectId && (
+          <div className="space-y-1.5">
+            <button
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[10px]"
+              onClick={() => form.setShowRulesEditor(!form.showRulesEditor)}
+            >
+              <Shield className="size-3" />
+              {(permissionRules[form.selectedProjectId] ?? []).length > 0
+                ? `${(permissionRules[form.selectedProjectId] ?? []).length} permission rules active`
+                : 'Configure permission rules'
+              }
+            </button>
+            {form.showRulesEditor && (
+              <div className="mt-2">
+                <PermissionRulesEditor projectId={form.selectedProjectId} />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold">

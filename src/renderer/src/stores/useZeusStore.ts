@@ -224,6 +224,7 @@ interface ZeusState {
     mcpProfileId?: string;
     mcpServerIds?: string[];
     mcpExcludeIds?: string[];
+    projectId?: string;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
@@ -1840,6 +1841,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       mcpProfileId,
       mcpServerIds,
       mcpExcludeIds,
+      projectId,
     } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
@@ -1892,6 +1894,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         mcpProfileId,
         mcpServerIds,
         mcpExcludeIds,
+        projectId,
       },
       auth: '',
     });
