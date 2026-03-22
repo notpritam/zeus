@@ -655,8 +655,9 @@ server.tool(
 // ─── Agent Room Proxy Tools ───
 // ═══════════════════════════════════════════
 
-// Track the active room created by this PM session
+// Track the active room and PM agent created by this PM session
 let activeRoomId: string | null = null;
+let activePmAgentId: string | null = null;
 
 server.tool(
   'room_create',
@@ -674,9 +675,12 @@ server.tool(
         name,
         task,
         sessionId,
-      }, 15_000) as { roomId?: string };
+      }, 15_000) as { roomId?: string; agentId?: string };
       if (response.roomId) {
         activeRoomId = response.roomId;
+      }
+      if (response.agentId) {
+        activePmAgentId = response.agentId;
       }
       return textResult(response);
     } catch (err) {
@@ -733,6 +737,7 @@ server.tool(
       const response = await sendAndWait('room', {
         type: 'room_post_message',
         roomId: activeRoomId,
+        agentId: activePmAgentId,
         message,
         messageType: type,
         to,
@@ -759,6 +764,7 @@ server.tool(
       const response = await sendAndWait('room', {
         type: 'room_read_messages',
         roomId: activeRoomId,
+        agentId: activePmAgentId,
         since,
         limit,
         sessionId,

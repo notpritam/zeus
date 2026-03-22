@@ -448,7 +448,7 @@ function postSystemMessage(roomId: string, content: string): void {
 
 export function readMessages(
   roomId: string,
-  agentId: string,
+  agentId: string | undefined,
   since?: number,
   limit?: number
 ): RoomMessage[] {
@@ -456,7 +456,7 @@ export function readMessages(
   const messages = rows.map(rowToMessage);
 
   // Auto-update read cursor to the highest seq in the returned messages
-  if (messages.length > 0) {
+  if (messages.length > 0 && agentId) {
     const maxSeq = messages[messages.length - 1].seq;
     updateReadCursor(agentId, roomId, maxSeq);
   }
