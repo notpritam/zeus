@@ -46,6 +46,7 @@ import type {
 } from '../../../shared/types';
 import type { PermissionRule, PermissionTemplate, PermissionAuditEntry, PermissionsPayload } from '../../../shared/permission-types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
+import type { Room, RoomAgent, RoomMessage, RoomWsPayload } from '../../../shared/room-types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
 
@@ -181,6 +182,12 @@ interface ZeusState {
   permissionRules: Record<string, PermissionRule[]>;  // projectId → rules
   permissionTemplates: PermissionTemplate[];
   permissionAuditLog: Record<string, { entries: PermissionAuditEntry[]; total: number }>;  // sessionId → log
+
+  // Agent Rooms
+  rooms: Room[];
+  activeRoomId: string | null;
+  roomMessages: Record<string, RoomMessage[]>;
+  roomAgents: Record<string, RoomAgent[]>;
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null;
@@ -382,6 +389,14 @@ interface ZeusState {
   fetchPermissionTemplates: () => void;
   clearPermissionRules: (projectId: string) => void;
   fetchAuditLog: (sessionId: string, limit?: number, offset?: number) => void;
+
+  // Room actions
+  selectRoom: (roomId: string | null) => void;
+  createRoom: (name: string, task: string, sessionId: string) => void;
+  spawnRoomAgent: (roomId: string, role: string, prompt: string, model?: string, roomAware?: boolean) => void;
+  dismissRoomAgent: (roomId: string, agentId: string) => void;
+  postRoomMessage: (roomId: string, message: string, msgType?: string) => void;
+  fetchRooms: () => void;
 }
 
 const ENTRIES_PAGE_SIZE = 50;
@@ -575,6 +590,12 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   permissionTemplates: [],
   permissionAuditLog: {},
 
+  // Agent Rooms
+  rooms: [] as Room[],
+  activeRoomId: null as string | null,
+  roomMessages: {} as Record<string, RoomMessage[]>,
+  roomAgents: {} as Record<string, RoomAgent[]>,
+
   savedProjects: [],
   claudeDefaults: {
     permissionMode: 'bypassPermissions',
@@ -630,6 +651,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         zeusWs.send({
           channel: 'task', sessionId: '', auth: '', payload: { type: 'list_tasks' },
         });
+        zeusWs.send({ channel: 'room', sessionId: '', payload: { type: 'list_rooms' }, auth: '' });
         return;
       }
 
@@ -1738,6 +1760,92 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       }
     });
 
+    const unsubRoom = zeusWs.on('room', (envelope: WsEnvelope) => {
+      const payload = envelope.payload as RoomWsPayload;
+
+      switch (payload.type) {
+        case 'room_created': {
+          set((s) => ({ rooms: [...s.rooms, payload.room] }));
+          break;
+        }
+        case 'room_updated': {
+          set((s) => ({
+            rooms: s.rooms.map((r) =>
+              r.roomId === payload.room.roomId ? payload.room : r
+            ),
+          }));
+          break;
+        }
+        case 'room_agent_joined': {
+          set((s) => ({
+            roomAgents: {
+              ...s.roomAgents,
+              [payload.agent.roomId]: [
+                ...(s.roomAgents[payload.agent.roomId] || []),
+                payload.agent,
+              ],
+            },
+          }));
+          break;
+        }
+        case 'room_agent_updated': {
+          set((s) => ({
+            roomAgents: {
+              ...s.roomAgents,
+              [payload.agent.roomId]: (
+                s.roomAgents[payload.agent.roomId] || []
+              ).map((a) =>
+                a.agentId === payload.agent.agentId ? payload.agent : a
+              ),
+            },
+          }));
+          break;
+        }
+        case 'room_message': {
+          set((s) => ({
+            roomMessages: {
+              ...s.roomMessages,
+              [payload.message.roomId]: [
+                ...(s.roomMessages[payload.message.roomId] || []),
+                payload.message,
+              ],
+            },
+          }));
+          break;
+        }
+        case 'room_completed': {
+          set((s) => ({
+            rooms: s.rooms.map((r) =>
+              r.roomId === payload.room.roomId ? payload.room : r
+            ),
+          }));
+          break;
+        }
+        case 'room_list': {
+          set({ rooms: payload.rooms });
+          break;
+        }
+        case 'room_detail': {
+          set((s) => ({
+            rooms: s.rooms.some((r) => r.roomId === payload.room.roomId)
+              ? s.rooms.map((r) =>
+                  r.roomId === payload.room.roomId ? payload.room : r
+                )
+              : [...s.rooms, payload.room],
+            roomAgents: {
+              ...s.roomAgents,
+              [payload.room.roomId]: payload.agents,
+            },
+            roomMessages: {
+              ...s.roomMessages,
+              [payload.room.roomId]: payload.messages,
+            },
+          }));
+          break;
+        }
+      }
+    });
+
     zeusWs.connect();
 
     // Return cleanup function
@@ -1755,6 +1863,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       unsubMcp();
       unsubTask();
       unsubPermissions();
+      unsubRoom();
       zeusWs.disconnect();
       set({ connected: false });
     };
@@ -3372,6 +3481,79 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     zeusWs.send({
       channel: 'permissions', sessionId: '', auth: '',
       payload: { type: 'get_audit_log', sessionId, limit, offset },
+    });
+  },
+
+  // Room actions
+  selectRoom: (roomId: string | null) => {
+    set({ activeRoomId: roomId });
+    if (roomId) {
+      zeusWs.send({
+        channel: 'room',
+        sessionId: roomId,
+        payload: { type: 'get_room', roomId },
+        auth: '',
+      });
+    }
+  },
+
+  createRoom: (name: string, task: string, sessionId: string) => {
+    zeusWs.send({
+      channel: 'room',
+      sessionId: '',
+      payload: { type: 'create_room', name, task, sessionId },
+      auth: '',
+    });
+  },
+
+  spawnRoomAgent: (
+    roomId: string,
+    role: string,
+    prompt: string,
+    model?: string,
+    roomAware?: boolean,
+  ) => {
+    zeusWs.send({
+      channel: 'room',
+      sessionId: roomId,
+      payload: { type: 'spawn_agent', roomId, role, prompt, model, roomAware },
+      auth: '',
+    });
+  },
+
+  dismissRoomAgent: (roomId: string, agentId: string) => {
+    zeusWs.send({
+      channel: 'room',
+      sessionId: roomId,
+      payload: { type: 'dismiss_agent', roomId, agentId },
+      auth: '',
+    });
+  },
+
+  postRoomMessage: (
+    roomId: string,
+    message: string,
+    msgType?: string,
+  ) => {
+    zeusWs.send({
+      channel: 'room',
+      sessionId: roomId,
+      payload: {
+        type: 'post_message',
+        roomId,
+        message,
+        messageType: msgType || 'directive',
+      },
+      auth: '',
+    });
+  },
+
+  fetchRooms: () => {
+    zeusWs.send({
+      channel: 'room',
+      sessionId: '',
+      payload: { type: 'list_rooms' },
+      auth: '',
     });
   },
 }));
