@@ -87,7 +87,10 @@ Add the following variants to the existing `McpPayload` discriminated union in `
 
 // New response variants
 | { type: 'discovery_result'; serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[] }
-| { type: 'discovery_all_result'; results: Array<{ serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[]; error?: string }> }
+| { type: 'discovery_all_result'; results: Array<
+    | { serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[] }
+    | { serverId: string; error: string }
+  > }
 | { type: 'cached_tools'; servers: Array<{ serverId: string; serverName: string; metadata?: McpServerMetadata; tools: McpToolEntry[] }> }
 ```
 
@@ -128,6 +131,7 @@ This utility is reusable for future interactive mode.
 ### `discoverAllServerTools(): Promise<Array<{ serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[]; error?: string }>>`
 
 - Runs `discoverServerTools()` on all **enabled** servers in parallel via `Promise.allSettled`
+- `discover_all` skips disabled servers for efficiency; use per-server `discover_server` for disabled servers
 - One failing server does not block others
 - Returns results array with per-server error field for failures
 
@@ -233,8 +237,14 @@ Add `'mcp-playground'` to the `ViewMode` union type (currently `'terminal' | 'cl
 **Schema version:** v15
 
 1. Add `PRAGMA foreign_keys = ON` to `initDatabase()` (before migrations run)
-2. Create `mcp_tool_cache` table with composite PK `(server_id, tool_name)`
-3. Create `mcp_server_metadata` table with PK `server_id`
+2. Clean up pre-existing orphaned rows from before FK enforcement:
+   ```sql
+   DELETE FROM mcp_profile_servers WHERE server_id NOT IN (SELECT id FROM mcp_servers);
+   DELETE FROM mcp_profile_servers WHERE profile_id NOT IN (SELECT id FROM mcp_profiles);
+   DELETE FROM session_mcps WHERE server_id NOT IN (SELECT id FROM mcp_servers);
+   ```
+3. Create `mcp_tool_cache` table with composite PK `(server_id, tool_name)`
+4. Create `mcp_server_metadata` table with PK `server_id`
 
 ## Testing
 
