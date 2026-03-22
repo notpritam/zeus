@@ -3,6 +3,7 @@ import fs from 'fs';
 import { stat as fsStat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import sirv from 'sirv';
 import { app, Notification as ElectronNotification, shell } from 'electron';
@@ -92,6 +93,8 @@ import type { McpPayload } from '../../shared/types';
 import type { PermissionsPayload, PermissionRule } from '../../shared/permission-types';
 import { PERMISSION_TEMPLATES } from './permission-evaluator';
 import { TaskManager } from './task-manager';
+import * as roomManager from './room-manager';
+// Room types are accessed transitively through roomManager functions
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
@@ -162,6 +165,9 @@ interface SubagentRecord {
   collectedTextEntries: string[];
 }
 const subagentSessions = new Map<string, SubagentRecord>();
+
+// Room agent sessions — keyed by agentId
+const roomAgentSessions = new Map<string, { session: ClaudeSession; agentId: string; roomId: string }>();
 
 // Track parentSessionId for external subagents (registered via zeus-bridge MCP)
 const externalSubagentParentMap = new Map<string, string>();
@@ -3670,6 +3676,371 @@ async function handlePermissions(
   }
 }
 
+// ─── Agent Room Handlers ───
+
+function wireRoomAgent(
+  agentId: string,
+  roomId: string,
+  session: ClaudeSession,
+  roomAware: boolean,
+  zeusSessionId: string,
+): void {
+  // Track the session
+  roomAgentSessions.set(agentId, { session, agentId, roomId });
+
+  session.on('session_id', (claudeSessionId: string) => {
+    roomManager.linkAgentSession(agentId, claudeSessionId);
+    roomManager.updateAgentStatus(agentId, 'running');
+  });
+
+  session.on('entry', (entry: NormalizedEntry) => {
+    roomManager.setAgentActivity(agentId);
+
+    // Track token usage
+    if (entry.entryType.type === 'token_usage') {
+      const tokenEntry = entry.entryType as { type: 'token_usage'; totalTokens: number };
+      roomManager.addAgentTokens(agentId, tokenEntry.totalTokens);
+    }
+
+    // Broadcast entries for the agent's individual session view
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: zeusSessionId,
+      payload: { type: 'claude_entry_added', sessionId: zeusSessionId, entry },
+      auth: '',
+    });
+
+    // Also persist to DB
+    upsertClaudeEntry(zeusSessionId, entry);
+  });
+
+  session.on('activity', (activity: unknown) => {
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: zeusSessionId,
+      payload: { type: 'claude_activity', sessionId: zeusSessionId, activity },
+      auth: '',
+    });
+  });
+
+  session.on('result', () => {
+    // Layer 2 nudge: check for unread directed messages at turn boundary
+    if (roomAware && roomManager.hasUnreadDirected(roomId, agentId)) {
+      setTimeout(() => {
+        session.sendMessage('You have unread room messages directed at you. Call room_read_messages() before continuing.');
+      }, 500);
+    }
+  });
+
+  session.on('done', () => {
+    const agent = roomManager.getAgentState(agentId);
+    if (agent && ['running', 'spawning'].includes(agent.status)) {
+      if (!roomAware) {
+        // Isolated agent — capture result from last assistant entry
+        const entries = getClaudeEntries(zeusSessionId);
+        const lastAssistant = [...entries].reverse().find(
+          (e) => e.entryType.type === 'assistant_message'
+        );
+        if (lastAssistant) {
+          roomManager.setAgentResult(agentId, lastAssistant.content);
+        }
+        roomManager.postMessage({
+          roomId,
+          type: 'system',
+          content: `Isolated agent '${agent.role}' finished.`,
+        });
+      }
+      roomManager.updateAgentStatus(agentId, 'done');
+    }
+    roomAgentSessions.delete(agentId);
+  });
+
+  session.on('error', (err: Error) => {
+    roomManager.updateAgentStatus(agentId, 'dead');
+    roomManager.setAgentResult(agentId, `Error: ${err.message}`);
+    const agent = roomManager.getAgentState(agentId);
+    roomManager.postMessage({
+      roomId,
+      type: 'error',
+      content: `Agent '${agent?.role || agentId}' crashed: ${err.message}`,
+    });
+    roomAgentSessions.delete(agentId);
+  });
+}
+
+async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
+  const payload = envelope.payload as Record<string, unknown>;
+  const type = payload.type as string;
+  const responseId = payload.responseId as string | undefined;
+
+  // Helper to send response (for MCP tool calls that expect a response)
+  const sendResponse = (data: unknown): void => {
+    if (responseId) {
+      sendEnvelope(ws, {
+        channel: 'room',
+        sessionId: envelope.sessionId,
+        payload: { ...(data as Record<string, unknown>), responseId },
+        auth: '',
+      });
+    }
+  };
+
+  try {
+    switch (type) {
+      // --- Room CRUD ---
+      case 'room_create':
+      case 'create_room': {
+        const { roomId, agentId } = roomManager.createRoom({
+          name: payload.name as string,
+          task: payload.task as string,
+          pmPrompt: payload.pmPrompt as string | undefined,
+        });
+        sendResponse({ roomId, agentId });
+        break;
+      }
+
+      case 'list_rooms': {
+        const rooms = roomManager.listRooms();
+        sendEnvelope(ws, {
+          channel: 'room',
+          sessionId: '',
+          payload: { type: 'room_list', rooms },
+          auth: '',
+        });
+        break;
+      }
+
+      case 'get_room': {
+        const detail = roomManager.getRoomDetail(payload.roomId as string);
+        if (detail) {
+          sendEnvelope(ws, {
+            channel: 'room',
+            sessionId: payload.roomId as string,
+            payload: { type: 'room_detail', ...detail },
+            auth: '',
+          });
+        }
+        break;
+      }
+
+      // --- Agent Lifecycle ---
+      case 'room_spawn_agent':
+      case 'spawn_agent': {
+        const rId = (payload.roomId as string) || envelope.sessionId;
+        const callerAgentId = payload.agentId as string | undefined;
+        const callerAgent = callerAgentId ? roomManager.getAgentState(callerAgentId) : null;
+        const room = roomManager.getRoomDetail(rId);
+        if (!room) {
+          sendResponse({ error: 'Room not found' });
+          break;
+        }
+
+        const role = payload.role as string;
+        const prompt = payload.prompt as string;
+        const model = (payload.model as string) || 'claude-sonnet-4-6';
+        const roomAware = payload.roomAware !== false;
+        const permissionMode = (payload.permissionMode as string) || 'bypassPermissions';
+        const workingDir = (payload.workingDir as string) || callerAgent?.workingDir || process.cwd();
+
+        // Register agent
+        const { agentId: newAgentId } = roomManager.registerAgent({
+          roomId: rId,
+          role,
+          model,
+          prompt,
+          roomAware,
+          spawnedBy: callerAgentId,
+          workingDir,
+        });
+
+        // Build room system prompt
+        const roomPrompt = roomAware
+          ? roomManager.buildRoomSystemPrompt({
+              roomId: rId,
+              role,
+              agentId: newAgentId,
+              task: room.room.task,
+              isPm: role === 'pm',
+              agents: [...room.agents, roomManager.getAgentState(newAgentId)!],
+            })
+          : undefined;
+
+        // Create Claude session
+        const zeusSessionId = crypto.randomUUID();
+        const session = new ClaudeSession({
+          workingDir,
+          permissionMode: permissionMode as any,
+          model,
+          zeusSessionId,
+          roomId: rId,
+          agentId: newAgentId,
+          agentRole: 'worker',
+          roomAware,
+          systemPromptAppend: roomPrompt,
+        });
+
+        // Persist to DB
+        insertClaudeSession({
+          id: zeusSessionId,
+          claudeSessionId: null,
+          status: 'running',
+          prompt,
+          name: `[Room] ${role}`,
+          icon: null,
+          color: null,
+          notificationSound: false,
+          workingDir,
+          qaTargetUrl: null,
+          permissionMode,
+          model,
+          startedAt: Date.now(),
+          endedAt: null,
+          deletedAt: null,
+        });
+
+        // Wire and start
+        wireRoomAgent(newAgentId, rId, session, roomAware, zeusSessionId);
+        await session.start(prompt);
+
+        sendResponse({ agentId: newAgentId, status: 'spawning' });
+        break;
+      }
+
+      case 'room_dismiss_agent':
+      case 'dismiss_agent': {
+        const dismissAgentId = payload.agentId as string;
+        const agent = roomManager.getAgentState(dismissAgentId);
+        if (!agent) {
+          sendResponse({ error: 'Agent not found' });
+          break;
+        }
+
+        // Kill the session
+        const record = roomAgentSessions.get(dismissAgentId);
+        if (record) {
+          record.session.kill();
+        }
+
+        roomManager.updateAgentStatus(dismissAgentId, 'dismissed');
+        roomManager.postMessage({
+          roomId: agent.roomId,
+          type: 'system',
+          content: `Agent '${agent.role}' (${dismissAgentId}) dismissed.`,
+        });
+        roomAgentSessions.delete(dismissAgentId);
+
+        sendResponse({ dismissed: true });
+        break;
+      }
+
+      case 'room_signal_done': {
+        const signalAgentId = payload.agentId as string;
+        const summary = payload.summary as string;
+        const agent = roomManager.getAgentState(signalAgentId);
+        if (!agent) {
+          sendResponse({ error: 'Agent not found' });
+          break;
+        }
+
+        roomManager.updateAgentStatus(signalAgentId, 'done');
+        roomManager.setAgentResult(signalAgentId, summary);
+        roomManager.postMessage({
+          roomId: agent.roomId,
+          fromAgentId: signalAgentId,
+          type: 'signal_done',
+          content: summary,
+        });
+
+        sendResponse({ signaled: true });
+        break;
+      }
+
+      // --- Messages ---
+      case 'room_post_message':
+      case 'post_message': {
+        const msgRoomId = (payload.roomId as string) || envelope.sessionId;
+        const msgAgentId = payload.agentId as string | undefined;
+        const msgType = (payload.messageType as string) || (payload.type === 'post_message' ? 'directive' : undefined) || 'finding';
+
+        const message = roomManager.postMessage({
+          roomId: msgRoomId,
+          fromAgentId: msgAgentId || undefined,
+          toAgentId: (payload.to as string) || undefined,
+          type: msgType as any,
+          content: payload.message as string,
+          metadata: payload.metadata,
+        });
+
+        sendResponse({ messageId: message.messageId, seq: message.seq });
+        break;
+      }
+
+      case 'room_read_messages': {
+        const readRoomId = (payload.roomId as string) || envelope.sessionId;
+        const readAgentId = payload.agentId as string;
+        const messages = roomManager.readMessages(
+          readRoomId,
+          readAgentId,
+          payload.since as number | undefined,
+          payload.limit as number | undefined,
+        );
+        sendResponse({ messages });
+        break;
+      }
+
+      // --- Queries ---
+      case 'room_list_agents': {
+        const listRoomId = (payload.roomId as string) || envelope.sessionId;
+        const agents = roomManager.listAgents(listRoomId);
+        sendResponse({ agents });
+        break;
+      }
+
+      case 'room_get_agent_state': {
+        const agentState = roomManager.getAgentState(payload.agentId as string);
+        sendResponse(agentState || { error: 'Agent not found' });
+        break;
+      }
+
+      case 'room_get_agent_log': {
+        const logAgent = roomManager.getAgentState(payload.agentId as string);
+        if (!logAgent || !logAgent.claudeSessionId) {
+          sendResponse({ entries: [] });
+          break;
+        }
+        const entries = getClaudeEntries(logAgent.claudeSessionId);
+        const limit = (payload.limit as number) || 50;
+        sendResponse({ entries: entries.slice(-limit) });
+        break;
+      }
+
+      // --- Room Completion ---
+      case 'room_complete': {
+        const completeRoomId = (payload.roomId as string) || envelope.sessionId;
+        roomManager.completeRoom(completeRoomId, payload.summary as string);
+
+        // Kill all active sessions
+        for (const [aid, sessionRecord] of roomAgentSessions) {
+          if (roomManager.getAgentState(aid)?.roomId === completeRoomId) {
+            sessionRecord.session.kill();
+            roomAgentSessions.delete(aid);
+          }
+        }
+
+        sendResponse({ completed: true });
+        break;
+      }
+
+      default:
+        console.warn(`[room] Unknown room message type: ${type}`);
+        sendResponse({ error: `Unknown type: ${type}` });
+    }
+  } catch (err) {
+    console.error(`[room] Error handling ${type}:`, err);
+    sendResponse({ error: (err as Error).message });
+  }
+}
+
 function handleMessage(ws: WebSocket, raw: string): void {
   let envelope: WsEnvelope;
   try {
@@ -3749,6 +4120,15 @@ function handleMessage(ws: WebSocket, raw: string): void {
         sendEnvelope(ws, {
           channel: 'permissions', sessionId: envelope.sessionId, auth: '',
           payload: { type: 'permissions_error', message: (err as Error).message },
+        });
+      });
+      break;
+    case 'room':
+      handleRoom(ws, envelope).catch((err) => {
+        console.error('[Room] Unhandled error in handleRoom:', err);
+        sendEnvelope(ws, {
+          channel: 'room', sessionId: envelope.sessionId, auth: '',
+          payload: { type: 'room_error', message: (err as Error).message },
         });
       });
       break;
@@ -3834,6 +4214,16 @@ export async function startWebSocketServer(port = 8888): Promise<void> {
     httpServer.listen(port, '0.0.0.0', () => {
       server = httpServer;
       wss = wsServer;
+
+      // Wire room event handler — broadcasts room events to all connected clients
+      roomManager.setRoomEventHandler((event) => {
+        broadcastEnvelope({
+          channel: 'room',
+          sessionId: '',
+          payload: { type: event.type, ...(event.data as Record<string, unknown>) },
+          auth: '',
+        });
+      });
 
       console.log(`[Zeus] Server listening on http://127.0.0.1:${port}`);
       resolve();
