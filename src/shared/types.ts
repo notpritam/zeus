@@ -688,6 +688,22 @@ export interface McpHealthResult {
   latencyMs: number;
 }
 
+export interface McpToolEntry {
+  serverId: string;
+  toolName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface McpServerMetadata {
+  serverId: string;
+  protocolVersion: string;
+  serverName: string;
+  serverVersion: string;
+  capabilities: Record<string, unknown>;
+  discoveredAt: string;
+}
+
 export type McpPayload =
   // Client → Server
   | { type: 'get_servers' }
@@ -703,6 +719,9 @@ export type McpPayload =
   | { type: 'delete_profile'; id: string }
   | { type: 'set_default_profile'; id: string }
   | { type: 'get_session_mcps'; sessionId: string }
+  | { type: 'discover_server'; serverId: string }
+  | { type: 'discover_all' }
+  | { type: 'get_cached_tools'; serverId?: string }
   // Server → Client
   | { type: 'servers_list'; servers: McpServerRecord[] }
   | { type: 'server_added'; server: McpServerRecord }
@@ -717,6 +736,9 @@ export type McpPayload =
   | { type: 'profile_deleted'; id: string }
   | { type: 'session_mcps'; sessionId: string; mcps: SessionMcpRecord[] }
   | { type: 'session_mcp_status'; sessionId: string; serverId: string; status: 'attached' | 'active' | 'failed' }
+  | { type: 'discovery_result'; serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[] }
+  | { type: 'discovery_all_result'; results: Array<{ serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[] } | { serverId: string; error: string }> }
+  | { type: 'cached_tools'; servers: Array<{ serverId: string; serverName: string; metadata?: McpServerMetadata; tools: McpToolEntry[] }> }
   | { type: 'mcp_error'; message: string; serverId?: string };
 
 // ─── Task / Worktree Types ───
