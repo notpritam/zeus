@@ -171,7 +171,7 @@ export interface SessionRecord {
 // ─── WebSocket Envelope ───
 
 export interface WsEnvelope {
-  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp' | 'task' | 'permissions';
+  channel: 'terminal' | 'git' | 'control' | 'qa' | 'status' | 'claude' | 'settings' | 'files' | 'perf' | 'subagent' | 'android' | 'mcp' | 'task' | 'permissions' | 'room';
   sessionId: string;
   payload: unknown;
   auth: string;
