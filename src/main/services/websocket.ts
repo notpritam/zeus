@@ -94,6 +94,7 @@ import type { PermissionsPayload, PermissionRule } from '../../shared/permission
 import { PERMISSION_TEMPLATES } from './permission-evaluator';
 import { TaskManager } from './task-manager';
 import * as roomManager from './room-manager';
+import * as roomInjection from './room-injection';
 // Room types are accessed transitively through roomManager functions
 
 let server: http.Server | null = null;
@@ -3764,6 +3765,7 @@ function wireRoomAgent(
       type: 'error',
       content: `Agent '${agent?.role || agentId}' crashed: ${err.message}`,
     });
+    roomInjection.onAgentStatusChange(roomId, agentId, 'dead', err.message);
     roomAgentSessions.delete(agentId);
   });
 }
@@ -3795,6 +3797,20 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           task: payload.task as string,
           pmPrompt: payload.pmPrompt as string | undefined,
         });
+
+        // Register the PM's ClaudeSession for injection.
+        // The PM is the calling session — its zeusSessionId arrives in payload.sessionId
+        // (set by zeus-bridge MCP from ZEUS_SESSION_ID env var).
+        const pmZeusSessionId = (payload.sessionId as string) || envelope.sessionId;
+        if (pmZeusSessionId) {
+          const pmSession = claudeManager.getSession(pmZeusSessionId);
+          if (pmSession) {
+            roomInjection.registerPmSession(roomId, pmSession);
+          } else {
+            console.warn(`[room] PM session not found for zeusSessionId=${pmZeusSessionId}, injection disabled`);
+          }
+        }
+
         sendResponse({ roomId, agentId });
         break;
       }
@@ -4027,6 +4043,9 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           }
         }
 
+        // Unregister PM session from injection service
+        roomInjection.unregisterPmSession(completeRoomId);
+
         sendResponse({ completed: true });
         break;
       }
@@ -4223,7 +4242,30 @@ export async function startWebSocketServer(port = 8888): Promise<void> {
           payload: { type: event.type, ...(event.data as Record<string, unknown>) },
           auth: '',
         });
+
+        // Trigger PM injection for room messages
+        if (event.type === 'room_message') {
+          const { message } = event.data as { message: import('../../shared/room-types').RoomMessage };
+          roomInjection.onRoomMessage(message);
+        }
+
+        // Trigger injection for agent status changes (e.g. agent died)
+        if (event.type === 'room_agent_updated') {
+          const { agent } = event.data as { agent: import('../../shared/room-types').RoomAgent };
+          if (agent.status === 'dead') {
+            roomInjection.onAgentStatusChange(agent.roomId, agent.agentId, 'dead');
+          }
+        }
       });
+
+      // Reconcile orphaned room agents from previous Zeus run
+      const { count } = roomManager.reconcileOrphanedAgents();
+      if (count > 0) {
+        console.log(`[rooms] Reconciled ${count} orphaned agents after restart`);
+      }
+
+      // Start periodic zombie detection for idle agents/PM
+      roomInjection.startZombieDetection();
 
       console.log(`[Zeus] Server listening on http://127.0.0.1:${port}`);
       resolve();
@@ -4234,8 +4276,9 @@ export async function startWebSocketServer(port = 8888): Promise<void> {
 export async function stopWebSocketServer(): Promise<void> {
   if (!wss || !server) return;
 
-  // Kill all Claude sessions, git watchers, file tree watchers, and QA service
+  // Kill all Claude sessions, git watchers, file tree watchers, QA service, and room injection
   claudeManager.killAll();
+  roomInjection.stopZombieDetection();
   await gitManager.stopAll();
   await fileTreeManager.stopAll();
   if (qaService) {
