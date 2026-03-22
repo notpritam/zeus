@@ -10,7 +10,7 @@ Currently Zeus can register, health-check, enable/disable, and attach MCP server
 
 ## Architecture
 
-**Approach:** Master-detail single-page explorer as a new top-level view (`/mcp-playground`).
+**Approach:** Master-detail single-page explorer as a new top-level view.
 
 - Left panel: server list with discover actions
 - Right panel: selected server's metadata + expandable tool list with input schemas
@@ -18,18 +18,23 @@ Currently Zeus can register, health-check, enable/disable, and attach MCP server
 
 ## Data Model
 
+### Prerequisite: Enable Foreign Key Enforcement
+
+The existing codebase never enables `PRAGMA foreign_keys`. This means all existing `ON DELETE CASCADE` clauses (on `mcp_profile_servers`, `session_mcps`) are silently not enforced. The migration must add `db.pragma('foreign_keys = ON')` in `initDatabase()` before running migrations. This fixes both the new tables and the pre-existing orphan issue.
+
 ### New Table: `mcp_tool_cache`
 
 ```sql
 CREATE TABLE mcp_tool_cache (
-  id            TEXT PRIMARY KEY,
   server_id     TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
   tool_name     TEXT NOT NULL,
   description   TEXT NOT NULL DEFAULT '',
   input_schema  TEXT NOT NULL DEFAULT '{}',
-  UNIQUE(server_id, tool_name)
+  PRIMARY KEY (server_id, tool_name)
 );
 ```
+
+Uses a composite primary key `(server_id, tool_name)` — no surrogate `id` needed for a cache table.
 
 ### New Table: `mcp_server_metadata`
 
@@ -44,9 +49,9 @@ CREATE TABLE mcp_server_metadata (
 );
 ```
 
-**Cascade behavior:** When an MCP server is removed via Settings, both `mcp_tool_cache` and `mcp_server_metadata` rows for that server are automatically deleted.
+**Cascade behavior:** When an MCP server is removed via Settings, both `mcp_tool_cache` and `mcp_server_metadata` rows for that server are automatically deleted (enforced by `PRAGMA foreign_keys = ON`).
 
-**Refresh strategy:** Discovering a server deletes its existing cache rows and reinserts fresh data.
+**Refresh strategy:** Discovering a server deletes its existing cache rows and reinserts fresh data, all within a single `db.transaction()`.
 
 ### New Shared Types
 
@@ -54,7 +59,6 @@ CREATE TABLE mcp_server_metadata (
 // In src/shared/types.ts
 
 interface McpToolEntry {
-  id: string;
   serverId: string;
   toolName: string;
   description: string;
@@ -71,23 +75,55 @@ interface McpServerMetadata {
 }
 ```
 
+### McpPayload Union Additions
+
+Add the following variants to the existing `McpPayload` discriminated union in `src/shared/types.ts`:
+
+```typescript
+// New request variants
+| { type: 'discover_server'; serverId: string }
+| { type: 'discover_all' }
+| { type: 'get_cached_tools'; serverId?: string }
+
+// New response variants
+| { type: 'discovery_result'; serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[] }
+| { type: 'discovery_all_result'; results: Array<{ serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[]; error?: string }> }
+| { type: 'cached_tools'; servers: Array<{ serverId: string; serverName: string; metadata?: McpServerMetadata; tools: McpToolEntry[] }> }
+```
+
+The existing `mcp_error` response type (with optional `serverId`) is reused for discovery failures.
+
 ## Discovery Service
 
 New functions added to `mcp-registry.ts`:
 
+### JSON-RPC Stdio Transport
+
+Discovery communicates with MCP servers over stdio using newline-delimited JSON. A `JsonRpcStdioReader` utility is needed to handle:
+- Buffering incoming `data` events (chunks may not align to message boundaries)
+- Splitting on `\n` to extract complete lines
+- Parsing each line as JSON and matching on `id` field for request/response correlation
+
+This utility is reusable for future interactive mode.
+
 ### `discoverServerTools(serverId: string): Promise<{ metadata: McpServerMetadata; tools: McpToolEntry[] }>`
 
 1. Look up server config from DB (command, args, env)
-2. Spawn the MCP server process with stdio piping
+2. Spawn the MCP server process with `stdio: ['pipe', 'pipe', 'pipe']`
 3. Send JSON-RPC `initialize` request (protocol version `2024-11-05`)
 4. Read `initialize` response → extract `serverInfo` and `capabilities`
-5. Send JSON-RPC `tools/list` request
-6. Read response → array of `{ name, description, inputSchema }`
-7. Kill the spawned process
-8. Delete existing `mcp_tool_cache` rows for this server
-9. Delete existing `mcp_server_metadata` row for this server
-10. Insert fresh metadata + tool rows
-11. Return `{ metadata, tools }`
+5. Send JSON-RPC `notifications/initialized` notification (no `id` field — required by MCP protocol before further requests)
+6. Send JSON-RPC `tools/list` request
+7. Read response → array of `{ name, description, inputSchema }`
+8. Kill the spawned process
+9. **In a single `db.transaction()`:**
+   - Delete existing `mcp_tool_cache` rows for this server
+   - Delete existing `mcp_server_metadata` row for this server
+   - Insert fresh metadata row
+   - Insert fresh tool rows
+10. Return `{ metadata, tools }`
+
+**Works on both enabled and disabled servers** — the goal is inspection, not session attachment.
 
 ### `discoverAllServerTools(): Promise<Array<{ serverId: string; metadata: McpServerMetadata; tools: McpToolEntry[]; error?: string }>>`
 
@@ -105,7 +141,7 @@ New functions added to `mcp-registry.ts`:
 
 ## WebSocket Channel
 
-Extend the existing `mcp` channel with new payload types:
+Extend the existing `mcp` channel with new payload types (as defined in the McpPayload Union Additions above).
 
 ### New Request Types
 
@@ -119,9 +155,11 @@ Extend the existing `mcp` channel with new payload types:
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `discovery_result` | `{ serverId, metadata: McpServerMetadata, tools: McpToolEntry[] }` | Single server discovery result |
+| `discovery_result` | `{ serverId, metadata, tools }` | Single server discovery result |
 | `discovery_all_result` | `{ results: Array<{ serverId, metadata, tools, error? }> }` | Bulk discovery results |
 | `cached_tools` | `{ servers: Array<{ serverId, serverName, metadata?, tools }> }` | Cached data from DB |
+
+**Error handling:** `discover_server` failures respond with the existing `mcp_error` type including `serverId`, so the frontend can show per-server error state and clear the loading spinner.
 
 ### Usage Pattern
 
@@ -145,9 +183,11 @@ discoverServer(serverId: string): void; // sends discover_server, sets discoveri
 discoverAllServers(): void;             // sends discover_all, sets all discovering=true
 ```
 
-### New Route
+**Error handling:** The `mcp_error` handler (when `serverId` is present) must set `mcpDiscovering[serverId] = false` to clear the loading spinner on failure. The `discovery_result` and `discovery_all_result` handlers also clear discovering state on success.
 
-`/mcp-playground` — accessible from sidebar with a new icon.
+### Navigation
+
+Add `'mcp-playground'` to the `ViewMode` union type (currently `'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room'`). Add a new branch in `App.tsx`'s conditional rendering to render `McpPlaygroundView`. Add a sidebar entry with an icon to navigate to this view mode. This follows the same pattern as `'room'`, `'settings'`, and `'new-session'`.
 
 ### Component Breakdown
 
@@ -192,14 +232,18 @@ discoverAllServers(): void;             // sends discover_all, sets all discover
 
 **Schema version:** v15
 
-Adds `mcp_tool_cache` and `mcp_server_metadata` tables as defined in the Data Model section.
+1. Add `PRAGMA foreign_keys = ON` to `initDatabase()` (before migrations run)
+2. Create `mcp_tool_cache` table with composite PK `(server_id, tool_name)`
+3. Create `mcp_server_metadata` table with PK `server_id`
 
 ## Testing
 
 - Validator tests for `McpToolEntry` and `McpServerMetadata` types
 - DB CRUD tests: insert, read, cascade delete for both new tables
-- Discovery service: mock process spawning, verify JSON-RPC request/response parsing
+- Verify `PRAGMA foreign_keys = ON` is active and cascades work
+- Discovery service: mock process spawning, verify JSON-RPC request/response parsing including `notifications/initialized` step
 - WebSocket: verify new payload types route correctly
+- Zustand: verify `mcpDiscovering` resets on both success and error
 
 ## Future Extensions
 
@@ -208,3 +252,4 @@ This design intentionally supports future growth:
 - **Interactive mode:** Add an "Execute" button per tool in `McpToolAccordion` → renders a form from `inputSchema` → sends the tool call → shows JSON response
 - **Live mode:** Show tool calls happening in real-time during active Claude sessions
 - **Resource/prompt inspection:** The `capabilities` field already captures whether a server supports resources/prompts — future tabs can discover those too
+- **Combined health+discovery:** Extend health check to optionally call `tools/list` too, avoiding spawning the same server twice
