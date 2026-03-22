@@ -651,6 +651,179 @@ server.tool(
   }
 );
 
+// ═══════════════════════════════════════════
+// ─── Agent Room Proxy Tools ───
+// ═══════════════════════════════════════════
+
+server.tool(
+  'room_create',
+  'Create a new agent room. You become the PM (project manager) who orchestrates worker agents.',
+  {
+    name: z.string().describe('Display name for the room (e.g. "Refactor Auth Module")'),
+    task: z.string().describe('High-level task description for the room'),
+  },
+  async ({ name, task }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_create',
+        name,
+        task,
+        sessionId,
+      }, 15_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to create room: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_spawn_agent',
+  'Spawn a new worker agent in your room. Returns immediately with the agentId.',
+  {
+    role: z.string().describe('Role label for the agent (e.g. "backend-dev", "test-writer")'),
+    prompt: z.string().describe('Initial prompt / task for the agent'),
+    model: z.string().optional().describe('Model to use (default: same as parent)'),
+    roomAware: z.boolean().optional().describe('Whether agent gets zeus-room MCP (default: true)'),
+    permissionMode: z.string().optional().describe('Permission mode for the agent'),
+    workingDir: z.string().optional().describe('Working directory for the agent'),
+  },
+  async ({ role, prompt, model, roomAware, permissionMode, workingDir }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_spawn_agent',
+        role,
+        prompt,
+        model,
+        roomAware: roomAware ?? true,
+        permissionMode,
+        workingDir: workingDir ?? process.cwd(),
+        sessionId,
+      }, 30_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to spawn agent: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_post_message',
+  'Post a message to the room group chat. Visible to all agents in the room.',
+  {
+    message: z.string().describe('Message content'),
+    type: z.enum(['directive', 'finding', 'question', 'status_update', 'error']).optional().describe('Message type (default: directive)'),
+    to: z.string().optional().describe('Target agentId for directed messages'),
+  },
+  async ({ message, type, to }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_post_message',
+        message,
+        messageType: type,
+        to,
+        sessionId,
+      }, 10_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to post message: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_read_messages',
+  'Read messages from the room group chat.',
+  {
+    since: z.number().optional().describe('Timestamp (ms) to read messages after'),
+    limit: z.number().optional().describe('Max number of messages to return'),
+  },
+  async ({ since, limit }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_read_messages',
+        since,
+        limit,
+        sessionId,
+      }, 10_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to read messages: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_list_agents',
+  'List all agents currently in the room with their status.',
+  {},
+  async () => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_list_agents',
+        sessionId,
+      }, 10_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to list agents: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_dismiss_agent',
+  'Dismiss (stop) an agent in the room.',
+  {
+    agentId: z.string().describe('ID of the agent to dismiss'),
+  },
+  async ({ agentId }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_dismiss_agent',
+        agentId,
+        sessionId,
+      }, 15_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to dismiss agent: ${(err as Error).message}`);
+    }
+  },
+);
+
+server.tool(
+  'room_complete',
+  'Mark the room as complete. All remaining agents will be stopped.',
+  {
+    summary: z.string().describe('Summary of what was accomplished in the room'),
+  },
+  async ({ summary }) => {
+    try {
+      await connectWs();
+      const sessionId = process.env.ZEUS_SESSION_ID ?? '';
+      const response = await sendAndWait('room', {
+        type: 'room_complete',
+        summary,
+        sessionId,
+      }, 15_000);
+      return textResult(response);
+    } catch (err) {
+      return errorResult(`Failed to complete room: ${(err as Error).message}`);
+    }
+  },
+);
+
 // ─── Helpers ───
 
 function buildActionType(action: string, detail: string): Record<string, unknown> {
