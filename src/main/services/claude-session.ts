@@ -36,6 +36,11 @@ export interface SessionOptions {
   mcpServers?: Array<{ name: string; command: string; args?: string[]; env?: Record<string, string> }>;
   permissionRules?: PermissionRule[];  // glob-based rules
   projectId?: string;                 // for audit logging
+  roomId?: string;
+  agentId?: string;
+  agentRole?: string;                 // 'pm' | 'worker'
+  roomAware?: boolean;                // default true
+  systemPromptAppend?: string;        // room context to append
 }
 
 export interface ApprovalRequest {
@@ -54,6 +59,7 @@ export class ClaudeSession extends EventEmitter {
   private _lastMessageId: string | null = null;
   private _pendingAssistantUuid: string | null = null;
   private _isRunning = false;
+  private _turnState: 'idle' | 'processing' | 'waiting_approval' = 'idle';
   private pendingApprovals = new Map<string, { requestId: string; toolInput: unknown }>();
   private permissionRules: PermissionRule[];
   private projectId: string | null;
@@ -66,6 +72,9 @@ export class ClaudeSession extends EventEmitter {
   }
   get isRunning(): boolean {
     return this._isRunning;
+  }
+  get turnState() {
+    return this._turnState;
   }
   get pid(): number | undefined {
     return this.child?.pid;
@@ -105,6 +114,7 @@ export class ClaudeSession extends EventEmitter {
       console.log(`[Claude] Process exited: code=${code} signal=${signal}`);
       if (this._isRunning) {
         this._isRunning = false;
+        this._turnState = 'idle';
         if (code !== 0 && code !== null) {
           this.emit('error', new Error(`Claude CLI exited with code ${code}`));
         }
@@ -115,6 +125,7 @@ export class ClaudeSession extends EventEmitter {
     this.child.on('error', (err) => {
       console.error('[Claude] Process error:', err.message);
       this._isRunning = false;
+      this._turnState = 'idle';
       this.emit('error', err);
     });
 
@@ -138,15 +149,20 @@ export class ClaudeSession extends EventEmitter {
       }
       // result = end of one turn, NOT end of session.
       // The process stays alive for follow-ups via stdin.
+      this._turnState = 'idle';
       this.emit('result');
     });
 
-    this.protocol.on('error', (err) => this.emit('error', err));
+    this.protocol.on('error', (err) => {
+      this._turnState = 'idle';
+      this.emit('error', err);
+    });
 
     this.protocol.on('close', () => {
       // Process stdout closed — session is truly done
       if (this._isRunning) {
         this._isRunning = false;
+        this._turnState = 'idle';
         this.emit('done', null);
       }
     });
@@ -157,13 +173,19 @@ export class ClaudeSession extends EventEmitter {
     const hooks = this.buildHooks(mode);
     await this.protocol.initialize(hooks);
     await this.protocol.setPermissionMode(mode);
-    await this.protocol.sendUserMessage(prompt);
+
+    const fullPrompt = this.options.systemPromptAppend
+      ? `${prompt}\n\n${this.options.systemPromptAppend}`
+      : prompt;
+    await this.protocol.sendUserMessage(fullPrompt);
+    this._turnState = 'processing';
   }
 
   /** Send a follow-up message to an active session */
   async sendMessage(content: string | import('./claude-types').ContentBlock[]): Promise<void> {
     if (!this.protocol) throw new Error('Session not started');
     await this.protocol.sendUserMessage(content);
+    this._turnState = 'processing';
   }
 
   /** Approve a pending tool use */
@@ -180,6 +202,7 @@ export class ClaudeSession extends EventEmitter {
     };
     await this.protocol.sendPermissionResponse(pending.requestId, result);
     this.pendingApprovals.delete(approvalId);
+    this._turnState = 'processing';
   }
 
   /** Deny a pending tool use */
@@ -193,6 +216,7 @@ export class ClaudeSession extends EventEmitter {
     };
     await this.protocol.sendPermissionResponse(pending.requestId, result);
     this.pendingApprovals.delete(approvalId);
+    this._turnState = 'processing';
   }
 
   /** Interrupt the current operation */
@@ -283,6 +307,22 @@ export class ClaudeSession extends EventEmitter {
       }
     }
 
+    // Room MCP injection for room-aware agents
+    if (this.options.roomId && this.options.roomAware !== false && !this.options.subagentId) {
+      const wsUrl = process.env.ZEUS_WS_URL ?? 'ws://127.0.0.1:8888';
+      const roomPath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-room.mjs');
+      mcpServers['zeus-room'] = {
+        command: 'node',
+        args: [roomPath],
+        env: {
+          ZEUS_ROOM_ID: this.options.roomId,
+          ZEUS_AGENT_ID: this.options.agentId || '',
+          ZEUS_AGENT_ROLE: this.options.agentRole || 'worker',
+          ZEUS_WS_URL: wsUrl,
+        },
+      };
+    }
+
     args.push('--mcp-config', JSON.stringify({ mcpServers }));
 
     return args;
@@ -364,6 +404,7 @@ export class ClaudeSession extends EventEmitter {
       if (tool_name === 'AskUserQuestion') {
         const approvalId = crypto.randomUUID();
         this.pendingApprovals.set(approvalId, { requestId, toolInput: input });
+        this._turnState = 'waiting_approval';
         this.emit('approval_needed', {
           approvalId,
           requestId,
@@ -424,6 +465,7 @@ export class ClaudeSession extends EventEmitter {
       // Regular tool — emit for user approval
       const approvalId = crypto.randomUUID();
       this.pendingApprovals.set(approvalId, { requestId, toolInput: input });
+      this._turnState = 'waiting_approval';
       this.emit('approval_needed', {
         approvalId,
         requestId,
