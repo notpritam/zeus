@@ -72,7 +72,7 @@ function useLongPress(onLongPress: () => void, delay = 500) {
 
 // ─── Icon name → component map ───
 
-const ICON_MAP: Record<SessionIconName, React.ComponentType<{ className?: string }>> = {
+const ICON_MAP: Record<SessionIconName, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   sparkles: Sparkles, star: Star, flame: Flame, gem: Gem,
   hexagon: Hexagon, pentagon: Pentagon, triangle: Triangle, orbit: Orbit,
   atom: Atom, rocket: Rocket, leaf: Leaf, moon: Moon,

@@ -433,8 +433,8 @@ export interface ClaudeSessionRow {
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
@@ -450,6 +450,7 @@ export function insertClaudeSession(info: ClaudeSessionRow): void {
     info.model,
     info.startedAt,
     info.endedAt,
+    info.deletedAt ?? null,
   );
 }
 

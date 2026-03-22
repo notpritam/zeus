@@ -2,7 +2,7 @@ import { ChevronRight, ChevronDown, RefreshCw, ChevronsDownUp } from 'lucide-rea
 import { useZeusStore } from '@/stores/useZeusStore';
 import { zeusWs } from '@/lib/ws';
 import { getFileIcon, getFolderIcon } from '@/lib/file-icons';
-import type { FileTreeEntry, GitFileStatus } from '../../../../shared/types';
+import type { FileTreeEntry, GitFileStatus } from '../../../shared/types';
 
 const GIT_STATUS_DOT: Record<string, string> = {
   M: 'bg-yellow-400',

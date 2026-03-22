@@ -983,7 +983,7 @@ function adoptClaudeSession(ws: WebSocket, sessionId: string): void {
 }
 
 async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
-  const payload = envelope.payload as { type: string };
+  const payload = envelope.payload as Record<string, unknown> & { type: string };
   if (payload.type === 'start_claude') {
     const opts = envelope.payload as ClaudeStartPayload;
     const workingDir = opts.workingDir || process.env.HOME || '/';
@@ -1072,6 +1072,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         model: opts.model ?? null,
         startedAt: Date.now(),
         endedAt: null,
+        deletedAt: null,
       });
 
       // Persist initial user message
@@ -1208,6 +1209,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         model: null,
         startedAt: Date.now(),
         endedAt: null,
+        deletedAt: null,
       });
 
       // Copy history entries from previous sessions sharing the same Claude session ID
@@ -1396,8 +1398,8 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     }
   } else if (payload.type === 'update_claude_session') {
     const updates: { name?: string; color?: string | null } = {};
-    if (payload.name !== undefined) updates.name = payload.name;
-    if (payload.color !== undefined) updates.color = payload.color;
+    if (payload.name !== undefined) updates.name = payload.name as string;
+    if (payload.color !== undefined) updates.color = payload.color as string | null;
     updateClaudeSessionMeta(envelope.sessionId, updates);
     broadcastEnvelope({
       channel: 'claude',
@@ -1528,24 +1530,25 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       id: sessionId,
       claudeSessionId: null,
       status: 'running',
-      prompt: payload.prompt || 'External session',
-      name: payload.name || null,
+      prompt: (payload.prompt as string) || 'External session',
+      name: (payload.name as string) || null,
       icon: SESSION_ICON_NAMES[Math.floor(Math.random() * SESSION_ICON_NAMES.length)],
       color: null,
       notificationSound: true,
-      workingDir: payload.workingDir || process.env.HOME || '/',
+      workingDir: (payload.workingDir as string) || process.env.HOME || '/',
       qaTargetUrl: null,
       permissionMode: 'bypassPermissions',
       model: null,
       startedAt: now,
       endedAt: null,
+      deletedAt: null,
     });
 
     // Persist initial user message entry
     upsertClaudeEntry(sessionId, {
       id: `user-${now}`,
       entryType: { type: 'user_message' },
-      content: payload.prompt || 'External session',
+      content: (payload.prompt as string) || 'External session',
     });
 
     broadcastEnvelope({
@@ -1559,15 +1562,16 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
     sendEnvelope(ws, {
       channel: 'claude',
       sessionId,
-      payload: { type: 'register_external_session_response', responseId: payload.responseId, sessionId },
+      payload: { type: 'register_external_session_response', responseId: payload.responseId as string, sessionId },
       auth: '',
     });
 
-    console.log(`[Claude] External session registered: ${sessionId} — ${payload.name}`);
+    console.log(`[Claude] External session registered: ${sessionId} — ${payload.name as string}`);
 
   } else if (payload.type === 'external_session_entry') {
     // External agent adds an entry to a session
-    const { sessionId: extSessionId, entry } = payload as { sessionId: string; entry: NormalizedEntry };
+    const extSessionId = payload.sessionId as string;
+    const entry = payload.entry as NormalizedEntry;
     if (!extSessionId || !entry) return;
 
     upsertClaudeEntry(extSessionId, entry);
@@ -1580,33 +1584,35 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
 
   } else if (payload.type === 'external_session_activity') {
     // External agent updates activity state
-    const { sessionId: extSessionId, activity } = payload as { sessionId: string; activity: unknown };
-    if (!extSessionId || !activity) return;
+    const extSessionId2 = payload.sessionId as string;
+    const activity = payload.activity;
+    if (!extSessionId2 || !activity) return;
 
     broadcastEnvelope({
       channel: 'claude',
-      sessionId: extSessionId,
+      sessionId: extSessionId2,
       payload: { type: 'session_activity', activity },
       auth: '',
     });
 
   } else if (payload.type === 'external_session_done') {
     // External agent ends a session
-    const { sessionId: extSessionId, status } = payload as { sessionId: string; status: string };
-    if (!extSessionId) return;
+    const extSessionId3 = payload.sessionId as string;
+    const status = payload.status as string;
+    if (!extSessionId3) return;
 
     const finalStatus = status === 'error' ? 'error' : 'done';
-    finalizeCreatedToolEntries(extSessionId);
-    updateClaudeSessionStatus(extSessionId, finalStatus, Date.now());
+    finalizeCreatedToolEntries(extSessionId3);
+    updateClaudeSessionStatus(extSessionId3, finalStatus, Date.now());
 
     broadcastEnvelope({
       channel: 'claude',
-      sessionId: extSessionId,
+      sessionId: extSessionId3,
       payload: { type: finalStatus === 'error' ? 'error' : 'done', message: finalStatus === 'error' ? 'External session errored' : undefined },
       auth: '',
     });
 
-    console.log(`[Claude] External session ended: ${extSessionId} (${finalStatus})`);
+    console.log(`[Claude] External session ended: ${extSessionId3} (${finalStatus})`);
 
   } else {
     sendError(ws, envelope.sessionId, `Unknown claude type: ${payload.type}`);
@@ -2142,7 +2148,7 @@ async function handleFiles(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
 }
 
 async function handleQA(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
-  const payload = envelope.payload as QaBrowserPayload;
+  const payload = envelope.payload as QaBrowserPayload & { responseId?: string };
 
   if (payload.type === 'start_qa') {
     try {
@@ -4047,6 +4053,100 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         roomInjection.unregisterPmSession(completeRoomId);
 
         sendResponse({ completed: true });
+        break;
+      }
+
+      case 'room_replace_pm': {
+        // Replace the PM session for a room with a new model/prompt
+        const replaceRoomId = (payload.roomId as string) || envelope.sessionId;
+        const room = roomManager.getRoomDetail(replaceRoomId);
+        if (!room) {
+          sendResponse({ error: 'Room not found' });
+          break;
+        }
+
+        // Find the current PM agent
+        const pmAgent = room.agents.find((a) => a.role === 'pm');
+        if (!pmAgent) {
+          sendResponse({ error: 'No PM agent found in room' });
+          break;
+        }
+
+        // Kill the old PM session
+        const oldRecord = roomAgentSessions.get(pmAgent.agentId);
+        if (oldRecord) {
+          oldRecord.session.kill();
+          roomAgentSessions.delete(pmAgent.agentId);
+        }
+        roomInjection.unregisterPmSession(replaceRoomId);
+        roomManager.updateAgentStatus(pmAgent.agentId, 'dismissed');
+
+        // Create new PM agent
+        const newModel = (payload.newModel as string) || pmAgent.model || undefined;
+        const newPrompt = (payload.newPrompt as string) || room.room.task;
+        const newWorkingDir = pmAgent.workingDir || process.cwd();
+
+        const { agentId: newPmAgentId } = roomManager.registerAgent({
+          roomId: replaceRoomId,
+          role: 'pm',
+          model: newModel,
+          prompt: newPrompt,
+          roomAware: true,
+          spawnedBy: undefined,
+          workingDir: newWorkingDir,
+        });
+
+        const roomPrompt = roomManager.buildRoomSystemPrompt({
+          roomId: replaceRoomId,
+          role: 'pm',
+          agentId: newPmAgentId,
+          task: room.room.task,
+          isPm: true,
+          agents: [...room.agents.filter((a) => a.agentId !== pmAgent.agentId), roomManager.getAgentState(newPmAgentId)!],
+        });
+
+        const newZeusSessionId = crypto.randomUUID();
+        const newSession = new ClaudeSession({
+          workingDir: newWorkingDir,
+          permissionMode: 'bypassPermissions' as any,
+          model: newModel,
+          zeusSessionId: newZeusSessionId,
+          roomId: replaceRoomId,
+          agentId: newPmAgentId,
+          agentRole: 'pm',
+          roomAware: true,
+          systemPromptAppend: roomPrompt,
+        });
+
+        insertClaudeSession({
+          id: newZeusSessionId,
+          claudeSessionId: null,
+          status: 'running',
+          prompt: newPrompt,
+          name: '[Room] pm',
+          icon: null,
+          color: null,
+          notificationSound: false,
+          workingDir: newWorkingDir,
+          qaTargetUrl: null,
+          permissionMode: 'bypassPermissions',
+          model: newModel ?? null,
+          startedAt: Date.now(),
+          endedAt: null,
+          deletedAt: null,
+        });
+
+        wireRoomAgent(newPmAgentId, replaceRoomId, newSession, true, newZeusSessionId);
+        roomInjection.registerPmSession(replaceRoomId, newSession);
+        await newSession.start(newPrompt);
+
+        roomManager.postMessage({
+          roomId: replaceRoomId,
+          type: 'system',
+          content: `PM replaced: new agent ${newPmAgentId} (model: ${newModel})`,
+        });
+
+        sendResponse({ newAgentId: newPmAgentId, replaced: pmAgent.agentId });
         break;
       }
 

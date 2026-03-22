@@ -20,7 +20,7 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 
 export class GitWatcher extends EventEmitter {
   private workingDir: string;
-  private watcher: chokidar.FSWatcher | null = null;
+  private watcher: ReturnType<typeof chokidar.watch> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;

@@ -509,7 +509,7 @@ export async function detectDevServerUrlDetailed(workingDir: string): Promise<De
         detail: `Port ${scriptPort} from package.json scripts — server not running yet`,
         configFile: 'package.json',
         port: scriptPort,
-        framework: framework?.name,
+        framework: (framework as { name: string } | null)?.name,
         verification: 'none',
       };
     }

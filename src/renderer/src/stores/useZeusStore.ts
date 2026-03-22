@@ -619,7 +619,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   connect: () => {
     // Subscribe to status channel
     const unsubStatus = zeusWs.on('status', (envelope: WsEnvelope) => {
-      const payload = envelope.payload as StatusPayload & { type: string };
+      const payload = envelope.payload as (StatusPayload | { type: '_connected' | '_disconnected' }) & { type: string };
 
       if (payload.type === '_connected') {
         set({ connected: true });
@@ -1507,12 +1507,17 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
     // Subscribe to subagent channel
     const unsubSubagent = zeusWs.on('subagent', (envelope: WsEnvelope) => {
-      const payload = envelope.payload as { type: string; [key: string]: unknown };
+      const payload = envelope.payload as Record<string, unknown> & { type: string };
 
       if (payload.type === 'subagent_started') {
-        const { subagentId, subagentType, cli, parentSessionId, parentSessionType, name, task, targetUrl } = payload as {
-          subagentId: string; subagentType?: string; cli?: string; parentSessionId: string; parentSessionType: 'terminal' | 'claude'; name?: string; task: string; targetUrl?: string;
-        };
+        const subagentId = payload.subagentId as string;
+        const subagentType = payload.subagentType as string | undefined;
+        const cli = payload.cli as string | undefined;
+        const parentSessionId = payload.parentSessionId as string;
+        const parentSessionType = payload.parentSessionType as 'terminal' | 'claude';
+        const name = payload.name as string | undefined;
+        const task = payload.task as string;
+        const targetUrl = payload.targetUrl as string | undefined;
         set((state) => {
           const existing = (state.subagents[parentSessionId] ?? []).find((a) => a.info.subagentId === subagentId);
           let agents: SubagentClient[];
@@ -1536,7 +1541,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'subagent_stopped') {
-        const { subagentId, parentSessionId } = payload as { subagentId: string; parentSessionId: string };
+        const subagentId = payload.subagentId as string;
+        const parentSessionId = payload.parentSessionId as string;
         set((state) => {
           const agents = (state.subagents[parentSessionId] ?? []).map((a) =>
             a.info.subagentId === subagentId ? { ...a, info: { ...a.info, status: 'stopped' as const } } : a,
@@ -1545,7 +1551,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'subagent_deleted') {
-        const { subagentId, parentSessionId } = payload as { subagentId: string; parentSessionId: string };
+        const subagentId = payload.subagentId as string;
+        const parentSessionId = payload.parentSessionId as string;
         set((state) => {
           const agents = (state.subagents[parentSessionId] ?? []).filter((a) => a.info.subagentId !== subagentId);
           const activeId = state.activeSubagentId[parentSessionId];
@@ -1559,7 +1566,9 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'subagent_entry') {
-        const { subagentId, parentSessionId, entry } = payload as { subagentId: string; parentSessionId: string; entry: NormalizedEntry };
+        const subagentId = payload.subagentId as string;
+        const parentSessionId = payload.parentSessionId as string;
+        const entry = payload.entry as NormalizedEntry;
         set((state) => {
           const agents = (state.subagents[parentSessionId] ?? []).map((a) =>
             a.info.subagentId === subagentId
@@ -1570,7 +1579,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'subagent_list') {
-        const { parentSessionId, agents } = payload as { parentSessionId: string; agents: SubagentSessionInfo[] };
+        const parentSessionId = payload.parentSessionId as string;
+        const agents = payload.agents as SubagentSessionInfo[];
         set((state) => {
           // Merge server list with any existing entries we may have
           const existing = state.subagents[parentSessionId] ?? [];
@@ -1582,7 +1592,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         });
       }
       if (payload.type === 'subagent_entries') {
-        const { subagentId, entries: dbEntries } = payload as { subagentId: string; entries: NormalizedEntry[] };
+        const subagentId = payload.subagentId as string;
+        const dbEntries = payload.entries as NormalizedEntry[];
         set((state) => {
           const updated = { ...state.subagents };
           for (const parentId of Object.keys(updated)) {
@@ -2203,7 +2214,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         auth: '',
       });
       zeusWs.send({
-        channel: 'filetree',
+        channel: 'files',
         sessionId: newId,
         payload: { type: 'start_watching', workingDir: session.workingDir || '/' },
         auth: '',

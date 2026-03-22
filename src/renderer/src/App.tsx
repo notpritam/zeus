@@ -432,8 +432,10 @@ function App() {
                     powerBlock={powerBlock}
                     websocket={websocket}
                     tunnel={tunnel}
+                    autoTunnel={autoTunnel}
                     onTogglePower={togglePower}
                     onToggleTunnel={toggleTunnel}
+                    onSetAutoTunnel={setAutoTunnel}
                   />
                 ) : viewMode === 'new-session' ? (
                   <NewSessionView />

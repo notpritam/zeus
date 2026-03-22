@@ -374,7 +374,7 @@ export type ClaudePayload =
 
 // ─── Claude UI Types (renderer-side) ───
 
-export type ClaudeSessionStatus = 'running' | 'done' | 'error' | 'archived' | 'deleted';
+export type ClaudeSessionStatus = 'running' | 'done' | 'completed' | 'error' | 'archived' | 'deleted';
 
 // Fine-grained activity state for a running session
 export type SessionActivity =
