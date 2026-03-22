@@ -41,6 +41,7 @@ export function useNewSessionForm() {
   const [enableGitWatcher, setEnableGitWatcher] = useState(true);
   const [enableQA, setEnableQA] = useState(false);
   const [qaTargetUrl, setQaTargetUrl] = useState(window.location.origin);
+  const [roomMode, setRoomMode] = useState(true);
 
   // MCP config
   const [mcpProfileId, setMcpProfileId] = useState<string | undefined>(undefined);
@@ -179,6 +180,7 @@ export function useNewSessionForm() {
       mcpServerIds: mcpServerIds.length > 0 ? mcpServerIds : undefined,
       mcpExcludeIds: mcpExcludeIds.length > 0 ? mcpExcludeIds : undefined,
       projectId: selectedProjectId ?? undefined,
+      roomMode,
     };
 
     startClaudeSession(config);
@@ -195,7 +197,7 @@ export function useNewSessionForm() {
     }
   }, [
     canSubmit, isTaskMode, taskName, baseBranch, prompt, workingDir, sessionName, permissionMode, model,
-    notificationSound, enableGitWatcher, enableQA, qaTargetUrl,
+    notificationSound, enableGitWatcher, enableQA, qaTargetUrl, roomMode,
     mcpProfileId, mcpServerOverrides, startClaudeSession, savedProjects, selectedProjectId,
   ]);
 
@@ -255,6 +257,8 @@ export function useNewSessionForm() {
     setEnableQA,
     qaTargetUrl,
     setQaTargetUrl,
+    roomMode,
+    setRoomMode,
 
     // MCP config
     mcpProfileId,

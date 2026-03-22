@@ -659,6 +659,11 @@ server.tool(
 let activeRoomId: string | null = null;
 let activePmAgentId: string | null = null;
 
+const roomEnabled = process.env.ZEUS_ROOM_ENABLED !== 'false';
+
+if (roomEnabled) {
+// Room tools only registered when ZEUS_ROOM_ENABLED !== 'false'
+
 server.tool(
   'room_create',
   'Create a new agent room. You become the PM (project manager) who orchestrates worker agents.',
@@ -841,6 +846,8 @@ server.tool(
     }
   },
 );
+
+} // end if (roomEnabled)
 
 // ─── Helpers ───
 

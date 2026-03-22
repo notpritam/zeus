@@ -1045,6 +1045,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         mcpServers: mcpServersForSession.length > 0 ? mcpServersForSession : undefined,
         permissionRules,
         projectId: projectId ?? undefined,
+        roomMode: opts.roomMode,
       });
 
       // Track attached MCPs in session_mcps table
@@ -1073,6 +1074,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         startedAt: Date.now(),
         endedAt: null,
         deletedAt: null,
+        roomId: null,
       });
 
       // Persist initial user message
@@ -1210,6 +1212,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         startedAt: Date.now(),
         endedAt: null,
         deletedAt: null,
+        roomId: null,
       });
 
       // Copy history entries from previous sessions sharing the same Claude session ID
@@ -1542,6 +1545,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       startedAt: now,
       endedAt: null,
       deletedAt: null,
+      roomId: null,
     });
 
     // Persist initial user message entry
@@ -3382,6 +3386,7 @@ async function handleTask(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         startedAt: Date.now(),
         endedAt: null,
         deletedAt: null,
+        roomId: null,
       });
 
       // Link task to session
@@ -3552,7 +3557,7 @@ async function handleTask(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         icon: randomIcon, color: null, notificationSound: true,
         workingDir: task.worktreeDir, qaTargetUrl: null,
         permissionMode: 'bypassPermissions', model: null,
-        startedAt: Date.now(), endedAt: null, deletedAt: null,
+        startedAt: Date.now(), endedAt: null, deletedAt: null, roomId: null,
       });
 
       const updatedTask = TaskManager.markRunning(task.id, sessionId);
@@ -3709,11 +3714,11 @@ function wireRoomAgent(
       roomManager.addAgentTokens(agentId, tokenEntry.totalTokens);
     }
 
-    // Broadcast entries for the agent's individual session view
+    // Broadcast entries on room channel (not claude — room agents are not regular sessions)
     broadcastEnvelope({
-      channel: 'claude',
-      sessionId: zeusSessionId,
-      payload: { type: 'claude_entry_added', sessionId: zeusSessionId, entry },
+      channel: 'room',
+      sessionId: roomId,
+      payload: { type: 'room_agent_entry', roomId, agentId, zeusSessionId, entry },
       auth: '',
     });
 
@@ -3723,9 +3728,9 @@ function wireRoomAgent(
 
   session.on('activity', (activity: unknown) => {
     broadcastEnvelope({
-      channel: 'claude',
-      sessionId: zeusSessionId,
-      payload: { type: 'claude_activity', sessionId: zeusSessionId, activity },
+      channel: 'room',
+      sessionId: roomId,
+      payload: { type: 'room_agent_activity', roomId, agentId, activity },
       auth: '',
     });
   });
@@ -3901,7 +3906,7 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           systemPromptAppend: roomPrompt,
         });
 
-        // Persist to DB
+        // Persist to DB — mark as room session so it's excluded from main session list
         insertClaudeSession({
           id: zeusSessionId,
           claudeSessionId: null,
@@ -3918,6 +3923,7 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           startedAt: Date.now(),
           endedAt: null,
           deletedAt: null,
+          roomId: rId,
         });
 
         // Wire and start
@@ -4134,6 +4140,7 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           startedAt: Date.now(),
           endedAt: null,
           deletedAt: null,
+          roomId: replaceRoomId,
         });
 
         wireRoomAgent(newPmAgentId, replaceRoomId, newSession, true, newZeusSessionId);

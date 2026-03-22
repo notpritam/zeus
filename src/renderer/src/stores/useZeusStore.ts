@@ -188,6 +188,8 @@ interface ZeusState {
   activeRoomId: string | null;
   roomMessages: Record<string, RoomMessage[]>;
   roomAgents: Record<string, RoomAgent[]>;
+  roomAgentEntries: Record<string, NormalizedEntry[]>; // agentId → entries
+  roomAgentActivity: Record<string, unknown>; // agentId → last activity
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null;
@@ -232,6 +234,7 @@ interface ZeusState {
     mcpServerIds?: string[];
     mcpExcludeIds?: string[];
     projectId?: string;
+    roomMode?: boolean;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
@@ -595,6 +598,8 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   activeRoomId: null as string | null,
   roomMessages: {} as Record<string, RoomMessage[]>,
   roomAgents: {} as Record<string, RoomAgent[]>,
+  roomAgentEntries: {} as Record<string, NormalizedEntry[]>,
+  roomAgentActivity: {} as Record<string, unknown>,
 
   savedProjects: [],
   claudeDefaults: {
@@ -1854,6 +1859,27 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           }));
           break;
         }
+        case 'room_agent_entry': {
+          const { agentId, entry } = payload;
+          set((s) => {
+            const existing = s.roomAgentEntries[agentId] ?? [];
+            const idx = existing.findIndex((e) => e.id === entry.id);
+            const updated = idx >= 0
+              ? [...existing.slice(0, idx), entry, ...existing.slice(idx + 1)]
+              : [...existing, entry];
+            return {
+              roomAgentEntries: { ...s.roomAgentEntries, [agentId]: updated },
+            };
+          });
+          break;
+        }
+        case 'room_agent_activity': {
+          const { agentId, activity } = payload;
+          set((s) => ({
+            roomAgentActivity: { ...s.roomAgentActivity, [agentId]: activity },
+          }));
+          break;
+        }
       }
     });
 
@@ -1962,6 +1988,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       mcpServerIds,
       mcpExcludeIds,
       projectId,
+      roomMode,
     } = config;
     const id = `claude-${Date.now()}-${++claudeIdCounter}`;
     const session: ClaudeSessionInfo = {
@@ -2015,6 +2042,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
         mcpServerIds,
         mcpExcludeIds,
         projectId,
+        roomMode,
       },
       auth: '',
     });

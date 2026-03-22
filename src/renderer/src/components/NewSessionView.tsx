@@ -766,6 +766,20 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
           </div>
         )}
 
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="ns-room-mode" className="text-xs font-semibold">
+              Agent Rooms
+            </Label>
+            <p className="text-muted-foreground text-[10px]">Enable multi-agent room orchestration tools</p>
+          </div>
+          <Switch
+            id="ns-room-mode"
+            checked={form.roomMode}
+            onCheckedChange={form.setRoomMode}
+          />
+        </div>
+
         <Separator />
 
         {/* Task Mode */}

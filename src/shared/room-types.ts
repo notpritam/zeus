@@ -1,7 +1,7 @@
 // src/shared/room-types.ts
 // All Agent Room types — single source of truth for the multi-agent coordination layer
 
-import type { PermissionMode } from './types';
+import type { NormalizedEntry, PermissionMode } from './types';
 
 // ─── Core Data Types ───
 
@@ -175,6 +175,21 @@ export interface RoomDetailPayload {
   messages: RoomMessage[];
 }
 
+export interface RoomAgentEntryPayload {
+  type: 'room_agent_entry';
+  roomId: string;
+  agentId: string;
+  zeusSessionId: string;
+  entry: NormalizedEntry;
+}
+
+export interface RoomAgentActivityPayload {
+  type: 'room_agent_activity';
+  roomId: string;
+  agentId: string;
+  activity: unknown;
+}
+
 export type RoomWsPayload =
   | RoomCreatedPayload
   | RoomUpdatedPayload
@@ -183,7 +198,9 @@ export type RoomWsPayload =
   | RoomMessagePayload
   | RoomCompletedPayload
   | RoomListPayload
-  | RoomDetailPayload;
+  | RoomDetailPayload
+  | RoomAgentEntryPayload
+  | RoomAgentActivityPayload;
 
 // ─── WebSocket Payloads (Client → Server) ───
 

@@ -40,6 +40,7 @@ export interface SessionOptions {
   agentId?: string;
   agentRole?: string;                 // 'pm' | 'worker'
   roomAware?: boolean;                // default true
+  roomMode?: boolean;                 // default true — enables room tools in zeus-bridge
   systemPromptAppend?: string;        // room context to append
 }
 
@@ -289,7 +290,8 @@ export class ClaudeSession extends EventEmitter {
       }
     } else if (!isSubagent) {
       const bridgePath = path.resolve(app.getAppPath(), 'out/main/mcp-zeus-bridge.mjs');
-      mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath] };
+      const roomEnabled = this.options.roomMode !== false ? 'true' : 'false';
+      mcpServers['zeus-bridge'] = { command: 'node', args: [bridgePath], env: { ZEUS_ROOM_ENABLED: roomEnabled } };
 
       const bridgePrompt = [
         'You have access to Zeus orchestration tools via the zeus-bridge MCP server.',

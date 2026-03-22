@@ -15,7 +15,7 @@ export function getDb(): Database.Database {
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -347,6 +347,16 @@ function runMigrations(database: Database.Database): void {
     migrate14();
   }
 
+  if (currentVersion < 15) {
+    const migrate15 = database.transaction(() => {
+      database.exec(`
+        ALTER TABLE claude_sessions ADD COLUMN room_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_claude_sessions_room ON claude_sessions(room_id);
+      `);
+    });
+    migrate15();
+  }
+
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -356,6 +366,7 @@ export function initDatabase(): void {
   const dbPath = zeusEnv.dbPath();
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
   runMigrations(db);
   console.log(`[Zeus DB] Opened ${dbPath}`);
 }
@@ -428,13 +439,14 @@ export interface ClaudeSessionRow {
   startedAt: number;
   endedAt: number | null;
   deletedAt: number | null;
+  roomId: string | null;
 }
 
 export function insertClaudeSession(info: ClaudeSessionRow): void {
   if (!db) return;
   db.prepare(
-    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO claude_sessions (id, claude_session_id, status, prompt, name, icon, color, notification_sound, working_dir, qa_target_url, permission_mode, model, started_at, ended_at, deleted_at, room_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     info.id,
     info.claudeSessionId,
@@ -451,6 +463,7 @@ export function insertClaudeSession(info: ClaudeSessionRow): void {
     info.startedAt,
     info.endedAt,
     info.deletedAt ?? null,
+    info.roomId ?? null,
   );
 }
 
@@ -500,12 +513,13 @@ interface ClaudeSessionDbRow {
   started_at: number;
   ended_at: number | null;
   deleted_at: number | null;
+  room_id: string | null;
 }
 
 export function getAllClaudeSessions(): ClaudeSessionRow[] {
   if (!db) return [];
   const rows = db
-    .prepare(`SELECT * FROM claude_sessions WHERE status != 'deleted' ORDER BY started_at DESC`)
+    .prepare(`SELECT * FROM claude_sessions WHERE status != 'deleted' AND room_id IS NULL ORDER BY started_at DESC`)
     .all() as ClaudeSessionDbRow[];
   return rows.map(mapClaudeRow);
 }
@@ -535,6 +549,7 @@ function mapClaudeRow(r: ClaudeSessionDbRow): ClaudeSessionRow {
     startedAt: r.started_at,
     endedAt: r.ended_at,
     deletedAt: r.deleted_at,
+    roomId: r.room_id,
   };
 }
 

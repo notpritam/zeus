@@ -281,6 +281,7 @@ export interface ClaudeStartPayload {
   mcpServerIds?: string[];
   mcpExcludeIds?: string[];
   projectId?: string;  // for loading permission rules
+  roomMode?: boolean;  // default true — set false to disable room MCP tools
 }
 
 export interface ClaudeResumePayload {
