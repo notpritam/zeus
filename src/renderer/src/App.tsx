@@ -9,6 +9,7 @@ import RightPanel from '@/components/RightPanel';
 import DiffTabBar from '@/components/DiffTabBar';
 import DiffView from '@/components/DiffView';
 import NewSessionView from '@/components/NewSessionView';
+import { RoomView } from '@/components/RoomView';
 import CommandPalette, { buildCommands } from '@/components/CommandPalette';
 import SettingsView from '@/components/SettingsView';
 import {
@@ -309,6 +310,8 @@ function App() {
               }}
               connected={connected}
             />
+          ) : viewMode === 'room' ? (
+            <RoomView />
           ) : (
             <TerminalView sessionId={activeSessionId} />
           )}
@@ -454,6 +457,8 @@ function App() {
                     onEditQueued={editQueuedMessage}
                     onRemoveQueued={removeQueuedMessage}
                   />
+                ) : viewMode === 'room' ? (
+                  <RoomView />
                 ) : (
                   <TerminalView sessionId={activeSessionId} />
                 )}

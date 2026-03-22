@@ -48,7 +48,7 @@ import type { PermissionRule, PermissionTemplate, PermissionAuditEntry, Permissi
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 import type { Room, RoomAgent, RoomMessage, RoomWsPayload } from '../../../shared/room-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
 
 interface SubagentClient {
   info: SubagentSessionInfo;

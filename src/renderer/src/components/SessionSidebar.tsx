@@ -6,7 +6,7 @@ import {
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
   Crown, Diamond, Target, Compass, Anchor, Feather, Ghost,
-  Terminal as TerminalIcon, Square,
+  Terminal as TerminalIcon, Square, Users,
 } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import {
@@ -107,7 +107,7 @@ interface SessionSidebarProps {
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onNewSession: () => void;
@@ -341,7 +341,7 @@ function CollapsedSidebar({
   claudeSessions: ClaudeSessionInfo[];
   activeSessionId: string | null;
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onExpandSidebar?: () => void;
@@ -558,6 +558,64 @@ function RecentlyDeletedSection() {
   );
 }
 
+// ─── Rooms Section ───
+
+function RoomsSection({ viewMode }: { viewMode: string }) {
+  const rooms = useZeusStore((s) => s.rooms);
+  const activeRoomId = useZeusStore((s) => s.activeRoomId);
+  const roomAgents = useZeusStore((s) => s.roomAgents);
+  const selectRoom = useZeusStore((s) => s.selectRoom);
+  const setViewMode = useZeusStore((s) => s.setViewMode);
+
+  const activeRooms = useMemo(
+    () => rooms.filter((r) => r.status === 'active'),
+    [rooms],
+  );
+
+  if (activeRooms.length === 0) return null;
+
+  return (
+    <>
+      <SectionHeader label="Rooms" />
+      <div className="flex flex-col gap-0.5">
+        {activeRooms.map((room) => {
+          const agents = roomAgents[room.roomId] ?? [];
+          const activeAgentCount = agents.filter((a) => a.status === 'running' || a.status === 'spawning' || a.status === 'idle').length;
+          const isActive = viewMode === 'room' && room.roomId === activeRoomId;
+
+          return (
+            <button
+              key={room.roomId}
+              className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
+                isActive
+                  ? 'bg-primary/10 text-foreground'
+                  : 'text-foreground/80 hover:bg-secondary/60'
+              }`}
+              onClick={() => {
+                selectRoom(room.roomId);
+                setViewMode('room');
+              }}
+            >
+              <Users className="size-4 shrink-0 text-indigo-400" />
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <span className={`block truncate text-xs leading-tight ${isActive ? 'font-medium' : ''}`}>
+                  {room.name}
+                </span>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <span className="inline-block size-1.5 shrink-0 rounded-full bg-green-400" />
+                  <span className="text-muted-foreground truncate text-[10px]">
+                    {activeAgentCount} agent{activeAgentCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function SessionSidebar({
   collapsed,
   sessions,
@@ -723,6 +781,9 @@ function SessionSidebar({
               No terminal sessions
             </p>
           )}
+
+          {/* Rooms Section */}
+          <RoomsSection viewMode={viewMode} />
 
           {/* Recently Deleted Section */}
           <RecentlyDeletedSection />
