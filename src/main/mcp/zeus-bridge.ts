@@ -655,6 +655,9 @@ server.tool(
 // ─── Agent Room Proxy Tools ───
 // ═══════════════════════════════════════════
 
+// Track the active room created by this PM session
+let activeRoomId: string | null = null;
+
 server.tool(
   'room_create',
   'Create a new agent room. You become the PM (project manager) who orchestrates worker agents.',
@@ -671,7 +674,10 @@ server.tool(
         name,
         task,
         sessionId,
-      }, 15_000);
+      }, 15_000) as { roomId?: string };
+      if (response.roomId) {
+        activeRoomId = response.roomId;
+      }
       return textResult(response);
     } catch (err) {
       return errorResult(`Failed to create room: ${(err as Error).message}`);
@@ -696,6 +702,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_spawn_agent',
+        roomId: activeRoomId,
         role,
         prompt,
         model,
@@ -725,6 +732,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_post_message',
+        roomId: activeRoomId,
         message,
         messageType: type,
         to,
@@ -750,6 +758,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_read_messages',
+        roomId: activeRoomId,
         since,
         limit,
         sessionId,
@@ -771,6 +780,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_list_agents',
+        roomId: activeRoomId,
         sessionId,
       }, 10_000);
       return textResult(response);
@@ -792,6 +802,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_dismiss_agent',
+        roomId: activeRoomId,
         agentId,
         sessionId,
       }, 15_000);
@@ -814,6 +825,7 @@ server.tool(
       const sessionId = process.env.ZEUS_SESSION_ID ?? '';
       const response = await sendAndWait('room', {
         type: 'room_complete',
+        roomId: activeRoomId,
         summary,
         sessionId,
       }, 15_000);
