@@ -8,7 +8,7 @@ import { zeusEnv } from './env';
 
 let db: Database.Database | null = null;
 
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (!db) throw new Error('[Zeus DB] Database not initialized');
   return db;
 }
