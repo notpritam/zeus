@@ -15,7 +15,7 @@ function getDb(): Database.Database {
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -283,6 +283,68 @@ function runMigrations(database: Database.Database): void {
       `);
     });
     migrate13();
+  }
+
+  if (currentVersion < 14) {
+    const migrate14 = database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS rooms (
+          room_id      TEXT PRIMARY KEY,
+          name         TEXT NOT NULL,
+          task         TEXT NOT NULL,
+          pm_agent_id  TEXT,
+          status       TEXT NOT NULL DEFAULT 'active',
+          token_budget INTEGER,
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS room_agents (
+          agent_id          TEXT PRIMARY KEY,
+          room_id           TEXT NOT NULL,
+          role              TEXT NOT NULL,
+          claude_session_id TEXT,
+          model             TEXT,
+          status            TEXT NOT NULL DEFAULT 'spawning',
+          room_aware        INTEGER NOT NULL DEFAULT 1,
+          prompt            TEXT NOT NULL,
+          result            TEXT,
+          tokens_used       INTEGER NOT NULL DEFAULT 0,
+          spawned_by        TEXT,
+          working_dir       TEXT,
+          last_activity_at  TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS room_messages (
+          message_id    TEXT PRIMARY KEY,
+          room_id       TEXT NOT NULL,
+          from_agent_id TEXT,
+          to_agent_id   TEXT,
+          type          TEXT NOT NULL,
+          content       TEXT NOT NULL,
+          mentions      TEXT NOT NULL DEFAULT '[]',
+          metadata      TEXT,
+          seq           INTEGER NOT NULL,
+          timestamp     TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS room_read_cursors (
+          agent_id    TEXT NOT NULL,
+          room_id     TEXT NOT NULL,
+          last_seq    INTEGER NOT NULL DEFAULT 0,
+          updated_at  TEXT NOT NULL,
+          PRIMARY KEY (agent_id, room_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_room_agents_room ON room_agents(room_id);
+        CREATE INDEX IF NOT EXISTS idx_room_agents_session ON room_agents(claude_session_id);
+        CREATE INDEX IF NOT EXISTS idx_room_messages_room_seq ON room_messages(room_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_room_messages_to ON room_messages(to_agent_id);
+      `);
+    });
+    migrate14();
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -1564,4 +1626,260 @@ export function pruneOldAuditLogs(maxAgeDays = 30): void {
   const database = getDb();
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   database.prepare('DELETE FROM permission_audit_log WHERE timestamp < ?').run(cutoff);
+}
+
+// ─── Agent Rooms CRUD ───
+
+export function insertRoom(room: {
+  room_id: string;
+  name: string;
+  task: string;
+  pm_agent_id?: string | null;
+  status?: string;
+  token_budget?: number | null;
+  created_at: string;
+  updated_at: string;
+}): void {
+  const database = getDb();
+  database.prepare(
+    `INSERT INTO rooms (room_id, name, task, pm_agent_id, status, token_budget, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    room.room_id,
+    room.name,
+    room.task,
+    room.pm_agent_id ?? null,
+    room.status ?? 'active',
+    room.token_budget ?? null,
+    room.created_at,
+    room.updated_at,
+  );
+}
+
+export function updateRoomPmAgent(roomId: string, pmAgentId: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE rooms SET pm_agent_id = ?, updated_at = ? WHERE room_id = ?'
+  ).run(pmAgentId, now, roomId);
+}
+
+export function updateRoomStatus(roomId: string, status: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE rooms SET status = ?, updated_at = ? WHERE room_id = ?'
+  ).run(status, now, roomId);
+}
+
+export function getRoom(roomId: string): Record<string, unknown> | null {
+  const database = getDb();
+  const row = database.prepare('SELECT * FROM rooms WHERE room_id = ?').get(roomId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
+export function getAllRooms(): Record<string, unknown>[] {
+  const database = getDb();
+  return database.prepare('SELECT * FROM rooms ORDER BY created_at DESC').all() as Record<string, unknown>[];
+}
+
+// ─── Room Agents CRUD ───
+
+export function insertRoomAgent(agent: {
+  agent_id: string;
+  room_id: string;
+  role: string;
+  claude_session_id?: string | null;
+  model?: string | null;
+  status?: string;
+  room_aware?: number;
+  prompt: string;
+  result?: string | null;
+  tokens_used?: number;
+  spawned_by?: string | null;
+  working_dir?: string | null;
+  last_activity_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}): void {
+  const database = getDb();
+  database.prepare(
+    `INSERT INTO room_agents (agent_id, room_id, role, claude_session_id, model, status, room_aware, prompt, result, tokens_used, spawned_by, working_dir, last_activity_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    agent.agent_id,
+    agent.room_id,
+    agent.role,
+    agent.claude_session_id ?? null,
+    agent.model ?? null,
+    agent.status ?? 'spawning',
+    agent.room_aware ?? 1,
+    agent.prompt,
+    agent.result ?? null,
+    agent.tokens_used ?? 0,
+    agent.spawned_by ?? null,
+    agent.working_dir ?? null,
+    agent.last_activity_at ?? null,
+    agent.created_at,
+    agent.updated_at,
+  );
+}
+
+export function updateRoomAgentStatus(agentId: string, status: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE room_agents SET status = ?, updated_at = ? WHERE agent_id = ?'
+  ).run(status, now, agentId);
+}
+
+export function updateRoomAgentSession(agentId: string, claudeSessionId: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE room_agents SET claude_session_id = ?, updated_at = ? WHERE agent_id = ?'
+  ).run(claudeSessionId, now, agentId);
+}
+
+export function updateRoomAgentResult(agentId: string, result: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE room_agents SET result = ?, updated_at = ? WHERE agent_id = ?'
+  ).run(result, now, agentId);
+}
+
+export function updateRoomAgentActivity(agentId: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE room_agents SET last_activity_at = ?, updated_at = ? WHERE agent_id = ?'
+  ).run(now, now, agentId);
+}
+
+export function updateRoomAgentTokens(agentId: string, tokensUsed: number): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    'UPDATE room_agents SET tokens_used = ?, updated_at = ? WHERE agent_id = ?'
+  ).run(tokensUsed, now, agentId);
+}
+
+export function getRoomAgent(agentId: string): Record<string, unknown> | null {
+  const database = getDb();
+  const row = database.prepare('SELECT * FROM room_agents WHERE agent_id = ?').get(agentId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
+export function getRoomAgents(roomId: string): Record<string, unknown>[] {
+  const database = getDb();
+  return database.prepare('SELECT * FROM room_agents WHERE room_id = ? ORDER BY created_at ASC').all(roomId) as Record<string, unknown>[];
+}
+
+export function getRoomAgentBySession(claudeSessionId: string): Record<string, unknown> | null {
+  const database = getDb();
+  const row = database.prepare('SELECT * FROM room_agents WHERE claude_session_id = ?').get(claudeSessionId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
+export function getOrphanedRoomAgents(): Record<string, unknown>[] {
+  const database = getDb();
+  return database.prepare(
+    "SELECT * FROM room_agents WHERE status IN ('running', 'spawning')"
+  ).all() as Record<string, unknown>[];
+}
+
+// ─── Room Messages CRUD ───
+
+export function insertRoomMessage(msg: {
+  message_id: string;
+  room_id: string;
+  from_agent_id?: string | null;
+  to_agent_id?: string | null;
+  type: string;
+  content: string;
+  mentions?: string;
+  metadata?: string | null;
+  timestamp: string;
+}): { seq: number } {
+  const database = getDb();
+  let seq = 0;
+
+  const insertTx = database.transaction(() => {
+    const maxRow = database.prepare(
+      'SELECT MAX(seq) as max_seq FROM room_messages WHERE room_id = ?'
+    ).get(msg.room_id) as { max_seq: number | null } | undefined;
+    seq = (maxRow?.max_seq ?? 0) + 1;
+
+    database.prepare(
+      `INSERT INTO room_messages (message_id, room_id, from_agent_id, to_agent_id, type, content, mentions, metadata, seq, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      msg.message_id,
+      msg.room_id,
+      msg.from_agent_id ?? null,
+      msg.to_agent_id ?? null,
+      msg.type,
+      msg.content,
+      msg.mentions ?? '[]',
+      msg.metadata ?? null,
+      seq,
+      msg.timestamp,
+    );
+  });
+
+  insertTx();
+  return { seq };
+}
+
+export function getRoomMessages(roomId: string, since?: number, limit = 50): Record<string, unknown>[] {
+  const database = getDb();
+  if (since !== undefined) {
+    return database.prepare(
+      'SELECT * FROM room_messages WHERE room_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?'
+    ).all(roomId, since, limit) as Record<string, unknown>[];
+  }
+  return database.prepare(
+    'SELECT * FROM room_messages WHERE room_id = ? ORDER BY seq ASC LIMIT ?'
+  ).all(roomId, limit) as Record<string, unknown>[];
+}
+
+export function getUnreadMessagesForAgent(roomId: string, agentId: string): number {
+  const database = getDb();
+  const cursor = getReadCursor(agentId, roomId);
+  const row = database.prepare(
+    'SELECT COUNT(*) as cnt FROM room_messages WHERE room_id = ? AND seq > ?'
+  ).get(roomId, cursor) as { cnt: number };
+  return row.cnt;
+}
+
+export function getDirectedUnreadForAgent(roomId: string, agentId: string): number {
+  const database = getDb();
+  const cursor = getReadCursor(agentId, roomId);
+  const row = database.prepare(
+    `SELECT COUNT(*) as cnt FROM room_messages
+     WHERE room_id = ? AND seq > ?
+     AND (to_agent_id = ? OR mentions LIKE ?)`
+  ).get(roomId, cursor, agentId, `%${agentId}%`) as { cnt: number };
+  return row.cnt;
+}
+
+// ─── Room Read Cursors ───
+
+export function updateReadCursor(agentId: string, roomId: string, lastSeq: number): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    `INSERT INTO room_read_cursors (agent_id, room_id, last_seq, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (agent_id, room_id) DO UPDATE SET last_seq = ?, updated_at = ?`
+  ).run(agentId, roomId, lastSeq, now, lastSeq, now);
+}
+
+export function getReadCursor(agentId: string, roomId: string): number {
+  const database = getDb();
+  const row = database.prepare(
+    'SELECT last_seq FROM room_read_cursors WHERE agent_id = ? AND room_id = ?'
+  ).get(agentId, roomId) as { last_seq: number } | undefined;
+  return row?.last_seq ?? 0;
 }
