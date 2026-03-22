@@ -421,6 +421,7 @@ export interface ClaudeSessionInfo {
   permissionMode?: PermissionMode;
   model?: string;
   deletedAt?: number; // timestamp when soft-deleted (null if active)
+  roomId?: string; // non-null when this session is a room agent
 }
 
 export interface ClaudeApprovalInfo {

@@ -13,6 +13,7 @@ import {
   BellOff,
   Eye,
   EyeOff,
+  Users,
   Wrench,
   AlertCircle,
   Bot,
@@ -369,6 +370,7 @@ function SessionInfoPanel() {
   const updateQaTargetUrl = useZeusStore((s) => s.updateQaTargetUrl);
   const detectQaTargetUrl = useZeusStore((s) => s.detectQaTargetUrl);
   const queue = useZeusStore((s) => activeClaudeId ? (s.messageQueue[activeClaudeId] ?? EMPTY_QUEUE) : EMPTY_QUEUE);
+  const room = useZeusStore((s) => session?.roomId ? s.rooms.find((r) => r.roomId === session.roomId) : undefined);
 
   const stats = useMemo(() => countEntries(entries), [entries]);
 
@@ -432,6 +434,13 @@ function SessionInfoPanel() {
         {session.claudeSessionId && (
           <InfoRow icon={Bot} label="Session ID" value={
             <span className="font-mono max-w-[100px] truncate block text-[10px]" title={session.claudeSessionId}>{session.claudeSessionId.slice(0, 12)}...</span>
+          } />
+        )}
+        {session.roomId && (
+          <InfoRow icon={Users} label="Room" value={
+            <span className="font-mono max-w-[140px] truncate block text-[10px]" title={session.roomId}>
+              {room?.name || session.roomId.slice(0, 12)}
+            </span>
           } />
         )}
 

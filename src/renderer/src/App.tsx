@@ -10,6 +10,7 @@ import DiffTabBar from '@/components/DiffTabBar';
 import DiffView from '@/components/DiffView';
 import NewSessionView from '@/components/NewSessionView';
 import { RoomView } from '@/components/RoomView';
+import McpPlaygroundView from '@/components/McpPlaygroundView';
 import CommandPalette, { buildCommands } from '@/components/CommandPalette';
 import SettingsView from '@/components/SettingsView';
 import {
@@ -312,6 +313,8 @@ function App() {
             />
           ) : viewMode === 'room' ? (
             <RoomView />
+          ) : viewMode === 'mcp-playground' ? (
+            <McpPlaygroundView />
           ) : (
             <TerminalView sessionId={activeSessionId} />
           )}
@@ -461,6 +464,8 @@ function App() {
                   />
                 ) : viewMode === 'room' ? (
                   <RoomView />
+                ) : viewMode === 'mcp-playground' ? (
+                  <McpPlaygroundView />
                 ) : (
                   <TerminalView sessionId={activeSessionId} />
                 )}

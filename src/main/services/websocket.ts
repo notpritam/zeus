@@ -1363,6 +1363,7 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         qaTargetUrl: s.qaTargetUrl ?? undefined,
         startedAt: s.startedAt,
         subagentCount: countSubagentsByParent(s.id),
+        roomId: s.roomId ?? undefined,
       };
     });
     sendEnvelope(ws, {
@@ -3331,6 +3332,25 @@ async function handleMcp(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
       case 'get_session_mcps': {
         const mcps = mcpRegistry.getSessionMcps(payload.sessionId);
         sendMcp({ type: 'session_mcps', sessionId: payload.sessionId, mcps });
+        break;
+      }
+      case 'discover_server': {
+        try {
+          const result = await mcpRegistry.discoverServerTools(payload.serverId);
+          sendMcp({ type: 'discovery_result', serverId: payload.serverId, metadata: result.metadata, tools: result.tools });
+        } catch (err) {
+          sendMcp({ type: 'mcp_error', message: (err as Error).message, serverId: payload.serverId });
+        }
+        break;
+      }
+      case 'discover_all': {
+        const results = await mcpRegistry.discoverAllServerTools();
+        sendMcp({ type: 'discovery_all_result', results });
+        break;
+      }
+      case 'get_cached_tools': {
+        const servers = mcpRegistry.getCachedToolsGrouped(payload.serverId);
+        sendMcp({ type: 'cached_tools', servers });
         break;
       }
     }

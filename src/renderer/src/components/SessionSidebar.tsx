@@ -6,7 +6,7 @@ import {
   Sparkles, Star, Flame, Gem, Hexagon, Pentagon, Triangle, Orbit,
   Atom, Rocket, Leaf, Moon, Sun, Waves, Wind, Snowflake,
   Crown, Diamond, Target, Compass, Anchor, Feather, Ghost,
-  Terminal as TerminalIcon, Square, Users,
+  Terminal as TerminalIcon, Square, Users, Puzzle,
 } from 'lucide-react';
 import SessionCard from '@/components/SessionCard';
 import {
@@ -107,7 +107,7 @@ interface SessionSidebarProps {
   activeSessionId: string | null;
   claudeSessions: ClaudeSessionInfo[];
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room' | 'mcp-playground';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onNewSession: () => void;
@@ -341,7 +341,7 @@ function CollapsedSidebar({
   claudeSessions: ClaudeSessionInfo[];
   activeSessionId: string | null;
   activeClaudeId: string | null;
-  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
+  viewMode: 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room' | 'mcp-playground';
   sessionActivity: Record<string, SessionActivity>;
   lastActivityAt: Record<string, number>;
   onExpandSidebar?: () => void;
@@ -919,13 +919,24 @@ function SessionSidebar({
         <span className="text-muted-foreground/50 text-sm">
           {allClaude.length + allTerminal.length} session{allClaude.length + allTerminal.length !== 1 ? 's' : ''}
         </span>
-        <button
-          className="text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded transition-colors [-webkit-app-region:no-drag]"
-          onClick={onOpenSettings}
-          title="Settings"
-        >
-          <Settings className="size-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className={`flex size-8 items-center justify-center rounded transition-colors [-webkit-app-region:no-drag] ${
+              viewMode === 'mcp-playground' ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => { useZeusStore.getState().setViewMode('mcp-playground'); }}
+            title="MCP Playground"
+          >
+            <Puzzle className="size-4" />
+          </button>
+          <button
+            className="text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded transition-colors [-webkit-app-region:no-drag]"
+            onClick={onOpenSettings}
+            title="Settings"
+          >
+            <Settings className="size-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

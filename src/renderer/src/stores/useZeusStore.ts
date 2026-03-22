@@ -39,6 +39,8 @@ import type {
   McpServerRecord,
   McpProfileRecord,
   McpHealthResult,
+  McpToolEntry,
+  McpServerMetadata,
   SessionMcpRecord,
   McpPayload,
   TaskRecord,
@@ -48,7 +50,7 @@ import type { PermissionRule, PermissionTemplate, PermissionAuditEntry, Permissi
 import type { FlowSummary } from '../../../shared/qa-flow-types';
 import type { Room, RoomAgent, RoomMessage, RoomWsPayload } from '../../../shared/room-types';
 
-type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room';
+type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room' | 'mcp-playground';
 
 interface SubagentClient {
   info: SubagentSessionInfo;
@@ -162,6 +164,11 @@ interface ZeusState {
   mcpHealthResults: Record<string, McpHealthResult>;
   sessionMcps: Record<string, SessionMcpRecord[]>;
   mcpImportResult: { imported: string[]; skipped: string[] } | null;
+
+  // MCP Playground
+  mcpToolCache: Record<string, McpToolEntry[]>;
+  mcpServerMetadata: Record<string, McpServerMetadata>;
+  mcpDiscovering: Record<string, boolean>;
 
   // Subagents — keyed by parentSessionId → multiple agents
   subagents: Record<string, SubagentClient[]>;        // parentSessionId → agents
@@ -343,6 +350,9 @@ interface ZeusState {
   setDefaultMcpProfile: (id: string) => void;
   fetchSessionMcps: (sessionId: string) => void;
   clearMcpImportResult: () => void;
+  fetchCachedTools: (serverId?: string) => void;
+  discoverServer: (serverId: string) => void;
+  discoverAllServers: () => void;
 
   // Right panel actions
   setActiveRightTab: (tab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null) => void;
@@ -574,6 +584,10 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   mcpHealthResults: {},
   sessionMcps: {},
   mcpImportResult: null,
+
+  mcpToolCache: {},
+  mcpServerMetadata: {},
+  mcpDiscovering: {},
 
   subagents: {},
   activeSubagentId: {},
@@ -1717,8 +1731,51 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           });
           break;
         }
+        case 'discovery_result':
+          set({
+            mcpToolCache: { ...get().mcpToolCache, [payload.serverId]: payload.tools },
+            mcpServerMetadata: { ...get().mcpServerMetadata, [payload.serverId]: payload.metadata },
+            mcpDiscovering: { ...get().mcpDiscovering, [payload.serverId]: false },
+          });
+          break;
+        case 'discovery_all_result':
+          {
+            const toolCache = { ...get().mcpToolCache };
+            const metadataMap = { ...get().mcpServerMetadata };
+            const discovering = { ...get().mcpDiscovering };
+            for (const entry of payload.results) {
+              discovering[entry.serverId] = false;
+              if ('error' in entry) continue;
+              toolCache[entry.serverId] = entry.tools;
+              metadataMap[entry.serverId] = entry.metadata;
+            }
+            set({ mcpToolCache: toolCache, mcpServerMetadata: metadataMap, mcpDiscovering: discovering });
+          }
+          break;
+        case 'cached_tools':
+          {
+            const toolCache: Record<string, McpToolEntry[]> = {};
+            const metadataMap: Record<string, McpServerMetadata> = {};
+            for (const server of payload.servers) {
+              toolCache[server.serverId] = server.tools;
+              if (server.metadata) metadataMap[server.serverId] = server.metadata;
+            }
+            set({ mcpToolCache: { ...get().mcpToolCache, ...toolCache }, mcpServerMetadata: { ...get().mcpServerMetadata, ...metadataMap } });
+          }
+          break;
         case 'mcp_error':
           console.error('[MCP]', payload.message);
+          if (payload.serverId) {
+            set({ mcpDiscovering: { ...get().mcpDiscovering, [payload.serverId]: false } });
+          } else {
+            // Generic error (e.g. discover_all failure) — clear all discovering spinners
+            const current = get().mcpDiscovering;
+            if (Object.values(current).some(Boolean)) {
+              const cleared: Record<string, boolean> = {};
+              for (const id of Object.keys(current)) cleared[id] = false;
+              set({ mcpDiscovering: cleared });
+            }
+          }
           break;
       }
     });
@@ -3419,6 +3476,23 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
 
   clearMcpImportResult: () => {
     set({ mcpImportResult: null });
+  },
+
+  fetchCachedTools: (serverId) => {
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'get_cached_tools', serverId }, auth: '' });
+  },
+
+  discoverServer: (serverId) => {
+    set({ mcpDiscovering: { ...get().mcpDiscovering, [serverId]: true } });
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'discover_server', serverId }, auth: '' });
+  },
+
+  discoverAllServers: () => {
+    const allServers = get().mcpServers.filter((s) => s.enabled);
+    const discovering: Record<string, boolean> = {};
+    for (const s of allServers) discovering[s.id] = true;
+    set({ mcpDiscovering: { ...get().mcpDiscovering, ...discovering } });
+    zeusWs.send({ channel: 'mcp', sessionId: '', payload: { type: 'discover_all' }, auth: '' });
   },
 
   // --- Task actions ---

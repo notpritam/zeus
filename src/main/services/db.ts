@@ -15,7 +15,7 @@ export function getDb(): Database.Database {
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -355,6 +355,37 @@ function runMigrations(database: Database.Database): void {
       `);
     });
     migrate15();
+  }
+
+  if (currentVersion < 16) {
+    const migrate16 = database.transaction(() => {
+      // Clean up orphaned rows from before FK enforcement
+      database.exec(`
+        DELETE FROM mcp_profile_servers WHERE server_id NOT IN (SELECT id FROM mcp_servers);
+        DELETE FROM mcp_profile_servers WHERE profile_id NOT IN (SELECT id FROM mcp_profiles);
+        DELETE FROM session_mcps WHERE server_id NOT IN (SELECT id FROM mcp_servers);
+      `);
+
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS mcp_tool_cache (
+          server_id     TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+          tool_name     TEXT NOT NULL,
+          description   TEXT NOT NULL DEFAULT '',
+          input_schema  TEXT NOT NULL DEFAULT '{}',
+          PRIMARY KEY (server_id, tool_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS mcp_server_metadata (
+          server_id         TEXT PRIMARY KEY REFERENCES mcp_servers(id) ON DELETE CASCADE,
+          protocol_version  TEXT NOT NULL DEFAULT '',
+          server_name       TEXT NOT NULL DEFAULT '',
+          server_version    TEXT NOT NULL DEFAULT '',
+          capabilities      TEXT NOT NULL DEFAULT '{}',
+          discovered_at     TEXT NOT NULL
+        );
+      `);
+    });
+    migrate16();
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -1489,6 +1520,92 @@ export function getSessionMcps(sessionId: string) {
     env: JSON.parse(r.env || '{}') as Record<string, string>,
     status: r.status as 'attached' | 'active' | 'failed',
     attachedAt: r.attached_at,
+  }));
+}
+
+// ─── MCP Tool Cache & Metadata CRUD ───
+
+export function saveMcpDiscovery(
+  serverId: string,
+  metadata: { protocolVersion: string; serverName: string; serverVersion: string; capabilities: Record<string, unknown> },
+  tools: Array<{ toolName: string; description: string; inputSchema: Record<string, unknown> }>,
+): void {
+  if (!db) return;
+  const tx = db.transaction(() => {
+    const now = new Date().toISOString();
+    db!.prepare(`
+      INSERT OR REPLACE INTO mcp_server_metadata
+        (server_id, protocol_version, server_name, server_version, capabilities, discovered_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(serverId, metadata.protocolVersion, metadata.serverName, metadata.serverVersion, JSON.stringify(metadata.capabilities), now);
+    db!.prepare(`DELETE FROM mcp_tool_cache WHERE server_id = ?`).run(serverId);
+    const insertStmt = db!.prepare(`
+      INSERT INTO mcp_tool_cache (server_id, tool_name, description, input_schema)
+      VALUES (?, ?, ?, ?)
+    `);
+    for (const tool of tools) {
+      insertStmt.run(serverId, tool.toolName, tool.description, JSON.stringify(tool.inputSchema));
+    }
+  });
+  tx();
+}
+
+export function getMcpCachedTools(serverId?: string): Array<{
+  serverId: string;
+  toolName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}> {
+  if (!db) return [];
+  const rows = serverId
+    ? db.prepare(`SELECT server_id, tool_name, description, input_schema FROM mcp_tool_cache WHERE server_id = ?`).all(serverId) as Array<{ server_id: string; tool_name: string; description: string; input_schema: string }>
+    : db.prepare(`SELECT server_id, tool_name, description, input_schema FROM mcp_tool_cache`).all() as Array<{ server_id: string; tool_name: string; description: string; input_schema: string }>;
+  return rows.map((r) => ({
+    serverId: r.server_id,
+    toolName: r.tool_name,
+    description: r.description,
+    inputSchema: JSON.parse(r.input_schema),
+  }));
+}
+
+export function getMcpServerMetadataById(serverId: string): {
+  serverId: string;
+  protocolVersion: string;
+  serverName: string;
+  serverVersion: string;
+  capabilities: Record<string, unknown>;
+  discoveredAt: string;
+} | null {
+  if (!db) return null;
+  const row = db.prepare(`SELECT * FROM mcp_server_metadata WHERE server_id = ?`).get(serverId) as { server_id: string; protocol_version: string; server_name: string; server_version: string; capabilities: string; discovered_at: string } | undefined;
+  if (!row) return null;
+  return {
+    serverId: row.server_id,
+    protocolVersion: row.protocol_version,
+    serverName: row.server_name,
+    serverVersion: row.server_version,
+    capabilities: JSON.parse(row.capabilities),
+    discoveredAt: row.discovered_at,
+  };
+}
+
+export function getAllMcpServerMetadata(): Array<{
+  serverId: string;
+  protocolVersion: string;
+  serverName: string;
+  serverVersion: string;
+  capabilities: Record<string, unknown>;
+  discoveredAt: string;
+}> {
+  if (!db) return [];
+  const rows = db.prepare(`SELECT * FROM mcp_server_metadata`).all() as Array<{ server_id: string; protocol_version: string; server_name: string; server_version: string; capabilities: string; discovered_at: string }>;
+  return rows.map((row) => ({
+    serverId: row.server_id,
+    protocolVersion: row.protocol_version,
+    serverName: row.server_name,
+    serverVersion: row.server_version,
+    capabilities: JSON.parse(row.capabilities),
+    discoveredAt: row.discovered_at,
   }));
 }
 
