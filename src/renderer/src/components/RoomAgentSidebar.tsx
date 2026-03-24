@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
-import { X, Plus, ChevronDown } from 'lucide-react';
+import { X, Plus, ChevronDown, Settings } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
+import { PersonaManager } from './PersonaManager';
 import type { Room, RoomAgent, RoomAgentStatus } from '../../../shared/room-types';
 
 // ─── Role emoji mapping (matches RoomMessage) ───
@@ -55,15 +56,19 @@ interface RoomAgentSidebarProps {
   room: Room;
   agents: RoomAgent[];
   onAgentClick?: (agent: RoomAgent) => void;
+  selectedAgentId?: string | null;
 }
 
 // ─── Component ───
 
-export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSidebarProps) {
+export function RoomAgentSidebar({ room, agents, onAgentClick, selectedAgentId }: RoomAgentSidebarProps) {
   const spawnRoomAgent = useZeusStore((s) => s.spawnRoomAgent);
   const dismissRoomAgent = useZeusStore((s) => s.dismissRoomAgent);
+  const personas = useZeusStore((s) => s.agentPersonas);
 
   const [showSpawnForm, setShowSpawnForm] = useState(false);
+  const [showPersonaManager, setShowPersonaManager] = useState(false);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [spawnRole, setSpawnRole] = useState('');
   const [spawnPrompt, setSpawnPrompt] = useState('');
   const [spawnModel, setSpawnModel] = useState(MODEL_OPTIONS[0].value);
@@ -75,7 +80,19 @@ export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSideba
     [agents],
   );
 
-  const canSpawn = spawnRole.trim().length > 0 && spawnPrompt.trim().length > 0;
+  const canSpawn = spawnRole.trim().length > 0 && (spawnPrompt.trim().length > 0 || !!selectedPersonaId);
+
+  const handlePersonaSelect = useCallback((personaId: string) => {
+    const persona = personas.find((p) => p.id === personaId);
+    if (persona) {
+      setSelectedPersonaId(personaId);
+      setSpawnRole(persona.role);
+      setSpawnPrompt(persona.systemPrompt);
+      if (persona.model) setSpawnModel(persona.model);
+    } else {
+      setSelectedPersonaId(null);
+    }
+  }, [personas]);
 
   const handleSpawn = useCallback(() => {
     if (!canSpawn) return;
@@ -84,6 +101,7 @@ export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSideba
     setSpawnPrompt('');
     setSpawnModel(MODEL_OPTIONS[0].value);
     setSpawnRoomAware(true);
+    setSelectedPersonaId(null);
     setShowSpawnForm(false);
   }, [canSpawn, room.roomId, spawnRole, spawnPrompt, spawnModel, spawnRoomAware, spawnRoomAgent]);
 
@@ -123,7 +141,9 @@ export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSideba
           return (
             <div
               key={agent.agentId}
-              className="group flex cursor-pointer items-center gap-2 border-b border-zinc-800/50 px-3 py-2 transition-colors hover:bg-zinc-800/40"
+              className={`group flex cursor-pointer items-center gap-2 border-b border-zinc-800/50 px-3 py-2 transition-colors hover:bg-zinc-800/40 ${
+                agent.agentId === selectedAgentId ? 'bg-primary/10 border-l-2 border-l-primary' : ''
+              }`}
               onClick={() => onAgentClick?.(agent)}
               title={`${agent.role} — ${agent.agentId}`}
             >
@@ -169,9 +189,35 @@ export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSideba
         })}
       </div>
 
+      {/* ─── Persona Manager (toggleable) ─── */}
+      {showPersonaManager && (
+        <div className="border-t border-zinc-800">
+          <PersonaManager onClose={() => setShowPersonaManager(false)} />
+        </div>
+      )}
+
       {/* ─── Spawn Form (toggleable) ─── */}
-      {showSpawnForm && (
+      {showSpawnForm && !showPersonaManager && (
         <div className="border-t border-zinc-800 px-3 py-2 space-y-2">
+          {/* Persona selector */}
+          {personas.length > 0 && (
+            <div className="relative">
+              <select
+                value={selectedPersonaId ?? ''}
+                onChange={(e) => e.target.value ? handlePersonaSelect(e.target.value) : setSelectedPersonaId(null)}
+                className="w-full appearance-none rounded bg-zinc-800 px-2 py-1 pr-6 text-xs text-zinc-200 outline-none ring-1 ring-zinc-700 focus:ring-zinc-500"
+              >
+                <option value="">Custom (no persona)</option>
+                {personas.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.icon ?? '\uD83E\uDD16'} {p.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 size-3 -translate-y-1/2 text-zinc-500" />
+            </div>
+          )}
+
           {/* Role */}
           <input
             type="text"
@@ -237,14 +283,21 @@ export function RoomAgentSidebar({ room, agents, onAgentClick }: RoomAgentSideba
       )}
 
       {/* ─── Footer ─── */}
-      {room.status === 'active' && !showSpawnForm && (
-        <div className="border-t border-zinc-800 px-3 py-2">
+      {room.status === 'active' && !showSpawnForm && !showPersonaManager && (
+        <div className="border-t border-zinc-800 px-3 py-2 space-y-1.5">
           <button
             onClick={() => setShowSpawnForm(true)}
             className="flex w-full items-center justify-center gap-1.5 rounded bg-zinc-800 px-2 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-zinc-100"
           >
             <Plus className="size-3" />
             Spawn Agent
+          </button>
+          <button
+            onClick={() => setShowPersonaManager(true)}
+            className="flex w-full items-center justify-center gap-1.5 rounded px-2 py-1 text-[10px] text-zinc-500 transition-colors hover:text-zinc-300"
+          >
+            <Settings className="size-2.5" />
+            Manage Personas
           </button>
         </div>
       )}

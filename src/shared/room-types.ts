@@ -3,6 +3,19 @@
 
 import type { NormalizedEntry, PermissionMode } from './types';
 
+// ─── Agent Persona ───
+
+export interface AgentPersona {
+  id: string;
+  name: string;
+  role: string;
+  systemPrompt: string;
+  model: string | null;
+  icon: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Core Data Types ───
 
 export type RoomStatus = 'active' | 'paused' | 'completed';
@@ -77,7 +90,8 @@ export interface RoomCreateInput {
 export interface RoomSpawnAgentInput {
   role: string;
   model?: string;
-  prompt: string;
+  prompt?: string;              // optional if personaId provided
+  personaId?: string;           // reference to AgentPersona template
   roomAware?: boolean;          // default true
   permissionMode?: PermissionMode;
   workingDir?: string;
@@ -190,6 +204,11 @@ export interface RoomAgentActivityPayload {
   activity: unknown;
 }
 
+export interface RoomAutoNavigatePayload {
+  type: 'room_auto_navigate';
+  roomId: string;
+}
+
 export type RoomWsPayload =
   | RoomCreatedPayload
   | RoomUpdatedPayload
@@ -200,7 +219,8 @@ export type RoomWsPayload =
   | RoomListPayload
   | RoomDetailPayload
   | RoomAgentEntryPayload
-  | RoomAgentActivityPayload;
+  | RoomAgentActivityPayload
+  | RoomAutoNavigatePayload;
 
 // ─── WebSocket Payloads (Client → Server) ───
 

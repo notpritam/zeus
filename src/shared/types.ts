@@ -1,4 +1,5 @@
 // Shared types — used by both main process and renderer
+import type { AgentPersona } from './room-types';
 
 // ─── Permission Mode ───
 
@@ -57,7 +58,15 @@ export type SettingsPayload =
   | { type: 'theme_colors'; theme: ThemeFile }
   | { type: 'refresh_themes' }
   | { type: 'open_themes_folder' }
-  | { type: 'set_auto_tunnel'; enabled: boolean };
+  | { type: 'set_auto_tunnel'; enabled: boolean }
+  | { type: 'list_personas' }
+  | { type: 'personas_list'; personas: AgentPersona[] }
+  | { type: 'create_persona'; id: string; name: string; role: string; systemPrompt: string; model?: string; icon?: string }
+  | { type: 'persona_created'; persona: AgentPersona }
+  | { type: 'update_persona'; id: string; name?: string; role?: string; systemPrompt?: string; model?: string | null; icon?: string | null }
+  | { type: 'persona_updated'; persona: AgentPersona }
+  | { type: 'delete_persona'; id: string }
+  | { type: 'persona_deleted'; id: string };
 
 // ─── File Tree Types ───
 

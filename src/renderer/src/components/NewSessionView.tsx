@@ -16,6 +16,9 @@ import {
   Check,
   GitBranch,
   Shield,
+  Users,
+  Bot,
+  Hash,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -211,6 +214,102 @@ function TaskModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> 
   );
 }
 
+function RoomModeSection({ form }: { form: ReturnType<typeof useNewSessionForm> }) {
+  const rooms = useZeusStore((s) => s.rooms);
+  const roomAgents = useZeusStore((s) => s.roomAgents);
+  const activeRooms = rooms.filter((r) => r.status === 'active');
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Users className="size-3.5 text-primary" />
+          <div>
+            <Label htmlFor="ns-room-toggle" className="text-xs font-semibold">
+              Agent Rooms
+            </Label>
+            <p className="text-muted-foreground text-[10px]">Enable multi-agent room orchestration tools</p>
+          </div>
+        </div>
+        <Switch
+          id="ns-room-toggle"
+          checked={form.roomMode}
+          onCheckedChange={form.setRoomMode}
+        />
+      </div>
+
+      {/* Active rooms summary */}
+      {form.roomMode && activeRooms.length > 0 && (
+        <div className="space-y-1.5 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Active Rooms
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1 py-0">
+              {activeRooms.length}
+            </Badge>
+          </div>
+          {activeRooms.map((room) => {
+            const agents = roomAgents[room.roomId] ?? [];
+            const runningAgents = agents.filter((a) => a.status === 'running' || a.status === 'spawning');
+            return (
+              <div key={room.roomId} className="space-y-1 rounded-md bg-secondary/30 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-foreground truncate">{room.name}</span>
+                  <Badge
+                    variant={room.status === 'active' ? 'default' : 'secondary'}
+                    className="text-[9px] px-1 py-0 shrink-0"
+                  >
+                    {room.status}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Hash className="size-2.5" />
+                    <span className="font-mono">{room.roomId.slice(0, 8)}</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Bot className="size-2.5" />
+                    {agents.length} agent{agents.length !== 1 ? 's' : ''}
+                    {runningAgents.length > 0 && (
+                      <span className="text-green-400">({runningAgents.length} running)</span>
+                    )}
+                  </span>
+                </div>
+                {agents.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {agents.map((agent) => (
+                      <Badge
+                        key={agent.agentId}
+                        variant="outline"
+                        className={`text-[9px] px-1.5 py-0 ${
+                          agent.status === 'running' || agent.status === 'spawning'
+                            ? 'border-green-500/30 text-green-400'
+                            : agent.status === 'done'
+                              ? 'border-muted text-muted-foreground'
+                              : ''
+                        }`}
+                      >
+                        {agent.role}{agent.model ? ` (${agent.model})` : ''}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {form.roomMode && activeRooms.length === 0 && (
+        <p className="text-[10px] text-muted-foreground pl-6">
+          No active rooms. Claude will get room tools to create and manage rooms.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function QuickStartTab({
   form,
   onSwitchTab,
@@ -299,6 +398,9 @@ function QuickStartTab({
 
       {/* Task Mode Toggle */}
       <TaskModeSection form={form} />
+
+      {/* Agent Rooms Toggle */}
+      <RoomModeSection form={form} />
 
       {/* Quick Settings */}
       <div className="space-y-3">
@@ -766,19 +868,7 @@ function ConfigureTab({ form }: { form: ReturnType<typeof useNewSessionForm> }) 
           </div>
         )}
 
-        <div className="flex items-center justify-between">
-          <div>
-            <Label htmlFor="ns-room-mode" className="text-xs font-semibold">
-              Agent Rooms
-            </Label>
-            <p className="text-muted-foreground text-[10px]">Enable multi-agent room orchestration tools</p>
-          </div>
-          <Switch
-            id="ns-room-mode"
-            checked={form.roomMode}
-            onCheckedChange={form.setRoomMode}
-          />
-        </div>
+        <RoomModeSection form={form} />
 
         <Separator />
 

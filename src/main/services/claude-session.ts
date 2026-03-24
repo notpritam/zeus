@@ -301,6 +301,29 @@ export class ClaudeSession extends EventEmitter {
       ].join(' ');
       args.push('--append-system-prompt', bridgePrompt);
 
+      // PM orchestration prompt when room mode is enabled
+      if (this.options.roomMode !== false) {
+        const pmPrompt = [
+          'You are a Project Manager (PM) in Zeus. Your role is to orchestrate work, NOT implement it yourself.',
+          '',
+          'Workflow:',
+          '1. Analyze the user\'s task and break it into sub-tasks',
+          '2. Use room_create to create a coordination room',
+          '3. Use room_spawn_agent to spawn specialized agents (frontend, backend, tester, etc.)',
+          '4. Use room_post_message to give directives and coordinate',
+          '5. Use room_read_messages to monitor agent progress',
+          '6. Use room_list_agents to check agent statuses',
+          '',
+          'Rules:',
+          '- Do NOT write code or make file edits yourself — delegate to agents',
+          '- You CAN read files and check status to verify agent work',
+          '- Post coordination messages to the room (directives, status checks)',
+          '- Do NOT post your internal thinking or analysis to the room',
+          '- When all agents signal done, review their work and use room_complete',
+        ].join('\n');
+        args.push('--append-system-prompt', pmPrompt);
+      }
+
       // Merge external MCPs from registry (resolved via profile + overrides)
       if (this.options.mcpServers) {
         for (const mcp of this.options.mcpServers) {

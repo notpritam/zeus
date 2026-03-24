@@ -517,13 +517,17 @@ export function buildRoomSystemPrompt(params: {
     `### Available Room Tools`,
     ...tools.map((t) => `  - ${t}`),
     ``,
-    `### Communication Guidelines`,
-    `- Use @role to mention specific agents in messages.`,
-    `- Check for unread messages periodically with room_read_messages.`,
-    `- Post findings, status updates, and questions to keep the team informed.`,
+    `### Communication Rules`,
+    `- Use room_post_message to share findings, ask questions, and report progress`,
+    `- Use room_read_messages regularly to stay in sync with other agents`,
+    `- Use room_signal_done when your task is complete, with a summary of what you did`,
+    `- Message types: 'finding' for discoveries, 'question' for help, 'status_update' for progress, 'error' for problems`,
+    `- Use @role to mention specific agents when your message is directed at someone`,
+    `- Keep messages concise and actionable`,
+    ``,
     params.isPm
-      ? `- As PM, coordinate the team: assign tasks, review results, and decide when to complete the room.`
-      : `- Report your findings back to the PM when done.`,
+      ? `As PM, coordinate the team: assign tasks via directives, review results, and use room_complete when all work is done.`
+      : `Focus on your assigned task. Report findings to the PM. Ask questions if requirements are unclear.`,
   ].join('\n');
 }
 

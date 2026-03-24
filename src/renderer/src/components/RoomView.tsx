@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, PanelRightClose, PanelRightOpen, ArrowDown, MessageSquare } from 'lucide-react';
+import { Send, PanelRightClose, PanelRightOpen, ArrowDown, MessageSquare, Terminal } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { RoomMessageItem } from './RoomMessage';
 import { RoomAgentSidebar } from './RoomAgentSidebar';
+import { RoomAgentLogPanel } from './RoomAgentLogPanel';
 import type { Room, RoomStatus, RoomAgent } from '../../../shared/room-types';
 
 // ─── Status badge config ───
@@ -21,8 +22,14 @@ export function RoomView() {
   const roomMessages = useZeusStore((s) => s.roomMessages);
   const roomAgents = useZeusStore((s) => s.roomAgents);
   const postRoomMessage = useZeusStore((s) => s.postRoomMessage);
+  const selectClaudeSession = useZeusStore((s) => s.selectClaudeSession);
+  const setViewMode = useZeusStore((s) => s.setViewMode);
+  const pmSession = useZeusStore((s) =>
+    s.claudeSessions.find((cs) => cs.roomId === activeRoomId),
+  );
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
 
@@ -106,10 +113,20 @@ export function RoomView() {
     ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
   }, []);
 
-  // Agent click handler (placeholder for Task 15)
-  const handleAgentClick = useCallback((_agent: RoomAgent) => {
-    // Will be wired in Task 15 to navigate to the agent's individual session
+  // Toggle agent log panel on click
+  const handleAgentClick = useCallback((agent: RoomAgent) => {
+    setSelectedAgentId((prev) => (prev === agent.agentId ? null : agent.agentId));
   }, []);
+
+  const selectedAgent = useMemo(
+    () => (selectedAgentId ? agents.find((a) => a.agentId === selectedAgentId) : undefined),
+    [agents, selectedAgentId],
+  );
+
+  // Reset selected agent when room changes
+  useEffect(() => {
+    setSelectedAgentId(null);
+  }, [activeRoomId]);
 
   // ─── No room selected: placeholder ───
 
@@ -148,6 +165,21 @@ export function RoomView() {
         <span className="shrink-0 text-xs text-zinc-500">
           {activeAgentCount} agent{activeAgentCount !== 1 ? 's' : ''} active
         </span>
+
+        {/* PM Log button */}
+        {pmSession && (
+          <button
+            onClick={() => {
+              selectClaudeSession(pmSession.id);
+              setViewMode('claude');
+            }}
+            className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            title="View PM's internal session log"
+          >
+            <Terminal className="size-3" />
+            PM Log
+          </button>
+        )}
 
         {/* Toggle sidebar */}
         <button
@@ -202,10 +234,14 @@ export function RoomView() {
           )}
         </div>
 
-        {/* Agent Sidebar */}
+        {/* Agent Sidebar / Agent Log Panel */}
         {sidebarOpen && (
-          <div className="w-56 shrink-0 border-l border-zinc-800">
-            <RoomAgentSidebar room={room} agents={agents} onAgentClick={handleAgentClick} />
+          <div className={`${selectedAgent ? 'w-80' : 'w-56'} shrink-0 border-l border-zinc-800`}>
+            {selectedAgent ? (
+              <RoomAgentLogPanel agent={selectedAgent} onClose={() => setSelectedAgentId(null)} />
+            ) : (
+              <RoomAgentSidebar room={room} agents={agents} onAgentClick={handleAgentClick} selectedAgentId={selectedAgentId} />
+            )}
           </div>
         )}
       </div>

@@ -301,13 +301,34 @@ function ClaudeCard({
 
 // ─── Section Header ───
 
-function SectionHeader({ label, action }: { label: string; action?: { icon: React.ReactNode; onClick: () => void; title: string } }) {
+function SectionHeader({ label, action, collapsed, onToggle, count }: {
+  label: string;
+  action?: { icon: React.ReactNode; onClick: () => void; title: string };
+  collapsed?: boolean;
+  onToggle?: () => void;
+  count?: number;
+}) {
   return (
     <div className="flex items-center justify-between px-2 pt-3 pb-1.5">
-      <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
-        {label}
-      </span>
-      {action && (
+      <button
+        className="text-muted-foreground flex items-center gap-1 [-webkit-app-region:no-drag]"
+        onClick={onToggle}
+      >
+        {onToggle && (
+          collapsed
+            ? <ChevronRight className="size-3" />
+            : <ChevronDown className="size-3" />
+        )}
+        <span className="text-[10px] font-semibold uppercase tracking-wider">
+          {label}
+        </span>
+        {collapsed && count != null && count > 0 && (
+          <span className="text-muted-foreground/60 text-[10px] font-normal normal-case tracking-normal">
+            ({count})
+          </span>
+        )}
+      </button>
+      {action && !collapsed && (
         <button
           className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
           onClick={action.onClick}
@@ -560,7 +581,7 @@ function RecentlyDeletedSection() {
 
 // ─── Rooms Section ───
 
-function RoomsSection({ viewMode }: { viewMode: string }) {
+function RoomsSection({ viewMode, collapsed, onToggle }: { viewMode: string; collapsed: boolean; onToggle: () => void }) {
   const rooms = useZeusStore((s) => s.rooms);
   const activeRoomId = useZeusStore((s) => s.activeRoomId);
   const roomAgents = useZeusStore((s) => s.roomAgents);
@@ -576,42 +597,44 @@ function RoomsSection({ viewMode }: { viewMode: string }) {
 
   return (
     <>
-      <SectionHeader label="Rooms" />
-      <div className="flex flex-col gap-0.5">
-        {activeRooms.map((room) => {
-          const agents = roomAgents[room.roomId] ?? [];
-          const activeAgentCount = agents.filter((a) => a.status === 'running' || a.status === 'spawning' || a.status === 'idle').length;
-          const isActive = viewMode === 'room' && room.roomId === activeRoomId;
+      <SectionHeader label="Rooms" collapsed={collapsed} onToggle={onToggle} count={activeRooms.length} />
+      {!collapsed && (
+        <div className="flex flex-col gap-0.5">
+          {activeRooms.map((room) => {
+            const agents = roomAgents[room.roomId] ?? [];
+            const activeAgentCount = agents.filter((a) => a.status === 'running' || a.status === 'spawning' || a.status === 'idle').length;
+            const isActive = viewMode === 'room' && room.roomId === activeRoomId;
 
-          return (
-            <button
-              key={room.roomId}
-              className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
-                isActive
-                  ? 'bg-primary/10 text-foreground'
-                  : 'text-foreground/80 hover:bg-secondary/60'
-              }`}
-              onClick={() => {
-                selectRoom(room.roomId);
-                setViewMode('room');
-              }}
-            >
-              <Users className="size-4 shrink-0 text-indigo-400" />
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <span className={`block truncate text-xs leading-tight ${isActive ? 'font-medium' : ''}`}>
-                  {room.name}
-                </span>
-                <div className="mt-0.5 flex items-center gap-1.5">
-                  <span className="inline-block size-1.5 shrink-0 rounded-full bg-green-400" />
-                  <span className="text-muted-foreground truncate text-[10px]">
-                    {activeAgentCount} agent{activeAgentCount !== 1 ? 's' : ''}
+            return (
+              <button
+                key={room.roomId}
+                className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all [-webkit-app-region:no-drag] ${
+                  isActive
+                    ? 'bg-primary/10 text-foreground'
+                    : 'text-foreground/80 hover:bg-secondary/60'
+                }`}
+                onClick={() => {
+                  selectRoom(room.roomId);
+                  setViewMode('room');
+                }}
+              >
+                <Users className="size-4 shrink-0 text-indigo-400" />
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <span className={`block truncate text-xs leading-tight ${isActive ? 'font-medium' : ''}`}>
+                    {room.name}
                   </span>
+                  <div className="mt-0.5 flex items-center gap-1.5">
+                    <span className="inline-block size-1.5 shrink-0 rounded-full bg-green-400" />
+                    <span className="text-muted-foreground truncate text-[10px]">
+                      {activeAgentCount} agent{activeAgentCount !== 1 ? 's' : ''}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }
@@ -639,6 +662,11 @@ function SessionSidebar({
   onCloseSidebar,
   onExpandSidebar,
 }: SessionSidebarProps) {
+  // ─── Section collapse state ───
+  const [roomsCollapsed, setRoomsCollapsed] = useState(false);
+  const [claudeCollapsed, setClaudeCollapsed] = useState(false);
+  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+
   // ─── Bottom sheet / edit modal state ───
   type SheetTarget =
     | { type: 'claude'; session: ClaudeSessionInfo }
@@ -729,12 +757,18 @@ function SessionSidebar({
       {/* Session List */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-1.5 pb-3">
+          {/* Rooms Section — above Claude */}
+          <RoomsSection viewMode={viewMode} collapsed={roomsCollapsed} onToggle={() => setRoomsCollapsed(!roomsCollapsed)} />
+
           {/* Claude Section */}
           <SectionHeader
             label="Claude"
+            collapsed={claudeCollapsed}
+            onToggle={() => setClaudeCollapsed(!claudeCollapsed)}
+            count={allClaude.length}
             action={{ icon: <Plus className="size-3.5" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
           />
-          {allClaude.length > 0 ? (
+          {!claudeCollapsed && (allClaude.length > 0 ? (
             <div className="flex flex-col gap-0.5">
               {allClaude.map((s) => (
                 <ClaudeCard
@@ -754,14 +788,17 @@ function SessionSidebar({
             <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
               No Claude sessions
             </p>
-          )}
+          ))}
 
           {/* Terminal Section */}
           <SectionHeader
             label="Terminal"
+            collapsed={terminalCollapsed}
+            onToggle={() => setTerminalCollapsed(!terminalCollapsed)}
+            count={allTerminal.length}
             action={{ icon: <Plus className="size-3.5" />, onClick: onNewSession, title: 'New terminal session' }}
           />
-          {allTerminal.length > 0 ? (
+          {!terminalCollapsed && (allTerminal.length > 0 ? (
             <div className="flex flex-col gap-0.5">
               {allTerminal.map((s) => (
                 <SessionCard
@@ -780,10 +817,7 @@ function SessionSidebar({
             <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
               No terminal sessions
             </p>
-          )}
-
-          {/* Rooms Section */}
-          <RoomsSection viewMode={viewMode} />
+          ))}
 
           {/* Recently Deleted Section */}
           <RecentlyDeletedSection />

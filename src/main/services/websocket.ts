@@ -77,6 +77,11 @@ import {
   setPermissionRules,
   clearPermissionRules,
   getAuditLog,
+  getAllPersonas,
+  getPersona,
+  insertPersona,
+  updatePersona,
+  deletePersona,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName, AndroidPayload, TaskPayload, GitStatusData } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
@@ -3210,6 +3215,43 @@ function handleSettings(ws: WebSocket, envelope: WsEnvelope): void {
       payload: { type: 'settings_update', settings: getSettings() },
       auth: '',
     });
+  } else if (payload.type === 'list_personas') {
+    const personas = getAllPersonas();
+    sendEnvelope(ws, {
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'personas_list', personas },
+      auth: '',
+    });
+  } else if (payload.type === 'create_persona') {
+    const p = payload as unknown as { id: string; name: string; role: string; systemPrompt: string; model?: string; icon?: string };
+    insertPersona({ id: p.id, name: p.name, role: p.role, systemPrompt: p.systemPrompt, model: p.model, icon: p.icon });
+    const persona = getPersona(p.id);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'persona_created', persona },
+      auth: '',
+    });
+  } else if (payload.type === 'update_persona') {
+    const p = payload as unknown as { id: string; name?: string; role?: string; systemPrompt?: string; model?: string | null; icon?: string | null };
+    updatePersona(p.id, { name: p.name, role: p.role, systemPrompt: p.systemPrompt, model: p.model, icon: p.icon });
+    const persona = getPersona(p.id);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'persona_updated', persona },
+      auth: '',
+    });
+  } else if (payload.type === 'delete_persona') {
+    const p = payload as unknown as { id: string };
+    deletePersona(p.id);
+    broadcastEnvelope({
+      channel: 'settings',
+      sessionId: '',
+      payload: { type: 'persona_deleted', id: p.id },
+      auth: '',
+    });
   } else {
     sendError(ws, '', `Unknown settings type: ${(payload as { type: string }).type}`);
   }
@@ -3843,6 +3885,14 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
         }
 
         sendResponse({ roomId, agentId });
+
+        // Auto-navigate frontend to the new room view
+        broadcastEnvelope({
+          channel: 'room',
+          sessionId: roomId,
+          payload: { type: 'room_auto_navigate', roomId },
+          auth: '',
+        });
         break;
       }
 
@@ -3882,9 +3932,23 @@ async function handleRoom(ws: WebSocket, envelope: WsEnvelope): Promise<void> {
           break;
         }
 
-        const role = payload.role as string;
-        const prompt = payload.prompt as string;
-        const model = (payload.model as string) || 'claude-sonnet-4-6';
+        // Resolve persona if provided
+        let role = payload.role as string;
+        let prompt = payload.prompt as string | undefined;
+        let model = (payload.model as string) || 'claude-sonnet-4-6';
+        const personaId = payload.personaId as string | undefined;
+        if (personaId) {
+          const persona = getPersona(personaId);
+          if (persona) {
+            role = role || persona.role;
+            prompt = prompt || persona.systemPrompt;
+            model = (payload.model as string) || persona.model || model;
+          }
+        }
+        if (!prompt) {
+          sendResponse({ error: 'Either prompt or personaId is required' });
+          break;
+        }
         const roomAware = payload.roomAware !== false;
         const permissionMode = (payload.permissionMode as string) || 'bypassPermissions';
         const workingDir = (payload.workingDir as string) || callerAgent?.workingDir || process.cwd();

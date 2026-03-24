@@ -15,7 +15,7 @@ export function getDb(): Database.Database {
 
 // ─── Schema & Migrations ───
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 function runMigrations(database: Database.Database): void {
   const currentVersion = database.pragma('user_version', { simple: true }) as number;
@@ -386,6 +386,160 @@ function runMigrations(database: Database.Database): void {
       `);
     });
     migrate16();
+  }
+
+  if (currentVersion < 17) {
+    const migrate17 = database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS agent_personas (
+          id            TEXT PRIMARY KEY,
+          name          TEXT NOT NULL,
+          role          TEXT NOT NULL,
+          system_prompt TEXT NOT NULL,
+          model         TEXT,
+          icon          TEXT,
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+
+      // Seed default personas
+      const insert = database.prepare(
+        `INSERT OR IGNORE INTO agent_personas (id, name, role, system_prompt, model, icon) VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      const defaults: [string, string, string, string, string | null, string][] = [
+        [
+          'persona-frontend',
+          'Frontend Dev',
+          'frontend',
+          `You are a Frontend Developer agent. Your job is to implement UI components, pages, and visual features.
+
+Responsibilities:
+- Build React components, pages, and layouts
+- Write CSS/Tailwind styles for pixel-perfect UI
+- Handle client-side state management and hooks
+- Implement responsive design and accessibility
+
+Communication:
+- Use room_post_message with type 'status_update' to report progress
+- Use room_post_message with type 'finding' when you discover issues or make decisions
+- Use room_post_message with type 'question' when you need clarification
+- Use room_read_messages regularly to stay in sync with the team
+- Use room_signal_done with a summary when your task is complete
+- Keep messages concise and actionable`,
+          null,
+          '\uD83C\uDFA8',
+        ],
+        [
+          'persona-backend',
+          'Backend Dev',
+          'backend',
+          `You are a Backend Developer agent. Your job is to implement server-side logic, APIs, and data layers.
+
+Responsibilities:
+- Build API endpoints, services, and middleware
+- Implement database queries and migrations
+- Handle authentication, validation, and error handling
+- Write server-side business logic
+
+Communication:
+- Use room_post_message with type 'status_update' to report progress
+- Use room_post_message with type 'finding' when you discover issues or make decisions
+- Use room_post_message with type 'question' when you need clarification
+- Use room_read_messages regularly to stay in sync with the team
+- Use room_signal_done with a summary when your task is complete
+- Keep messages concise and actionable`,
+          null,
+          '\u2699\uFE0F',
+        ],
+        [
+          'persona-tester',
+          'Tester',
+          'tester',
+          `You are a Tester agent. Your job is to write and run tests to verify code correctness.
+
+Responsibilities:
+- Write unit tests, integration tests, and e2e tests
+- Verify that features work as specified
+- Test edge cases and error scenarios
+- Report test results and failures
+
+Communication:
+- Use room_post_message with type 'finding' to report test results and bugs
+- Use room_post_message with type 'question' when specs are unclear
+- Use room_post_message with type 'error' when you find critical bugs
+- Use room_read_messages to understand what was implemented
+- Use room_signal_done with a test summary when complete`,
+          null,
+          '\uD83E\uDDEA',
+        ],
+        [
+          'persona-qa',
+          'QA Engineer',
+          'qa',
+          `You are a QA Engineer agent. Your job is to perform browser-based quality assurance testing.
+
+Responsibilities:
+- Test the application in a real browser via PinchTab tools
+- Verify visual appearance, interactions, and user flows
+- Take screenshots to document issues
+- Report UI bugs, broken flows, and visual regressions
+
+Communication:
+- Use room_post_message with type 'finding' to report QA results with screenshots
+- Use room_post_message with type 'error' for critical UI bugs
+- Use room_post_message with type 'status_update' for testing progress
+- Use room_read_messages to understand what to test
+- Use room_signal_done with a QA summary when complete`,
+          null,
+          '\uD83D\uDD0D',
+        ],
+        [
+          'persona-reviewer',
+          'Code Reviewer',
+          'reviewer',
+          `You are a Code Reviewer agent. Your job is to review code quality, patterns, and correctness.
+
+Responsibilities:
+- Review code changes for bugs, security issues, and anti-patterns
+- Check adherence to project conventions and best practices
+- Suggest improvements and refactoring opportunities
+- Verify error handling and edge cases
+
+Communication:
+- Use room_post_message with type 'finding' to share review feedback
+- Use room_post_message with type 'error' for critical issues that must be fixed
+- Use room_post_message with type 'question' when intent is unclear
+- Use room_read_messages to understand context
+- Use room_signal_done with a review summary when complete`,
+          null,
+          '\uD83D\uDCCB',
+        ],
+        [
+          'persona-architect',
+          'Architect',
+          'architect',
+          `You are an Architect agent. Your job is to design systems, plan architecture, and coordinate technical decisions.
+
+Responsibilities:
+- Design system architecture and component structure
+- Plan data models, APIs, and service boundaries
+- Make technology and pattern decisions
+- Create technical plans for other agents to implement
+
+Communication:
+- Use room_post_message with type 'directive' to share architectural decisions
+- Use room_post_message with type 'finding' for technical analysis
+- Use room_post_message with type 'question' to gather requirements
+- Use room_read_messages to monitor implementation progress
+- Use room_signal_done with an architecture summary when complete`,
+          null,
+          '\uD83C\uDFD7\uFE0F',
+        ],
+      ];
+      for (const d of defaults) insert.run(...d);
+    });
+    migrate17();
   }
 
   database.pragma(`user_version = ${SCHEMA_VERSION}`);
@@ -2015,4 +2169,70 @@ export function getReadCursor(agentId: string, roomId: string): number {
     'SELECT last_seq FROM room_read_cursors WHERE agent_id = ? AND room_id = ?'
   ).get(agentId, roomId) as { last_seq: number } | undefined;
   return row?.last_seq ?? 0;
+}
+
+// ─── Agent Personas CRUD ───
+
+interface AgentPersonaRow {
+  id: string;
+  name: string;
+  role: string;
+  system_prompt: string;
+  model: string | null;
+  icon: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapPersonaRow(r: AgentPersonaRow) {
+  return {
+    id: r.id,
+    name: r.name,
+    role: r.role,
+    systemPrompt: r.system_prompt,
+    model: r.model,
+    icon: r.icon,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function getAllPersonas() {
+  const database = getDb();
+  const rows = database.prepare('SELECT * FROM agent_personas ORDER BY role, name').all() as AgentPersonaRow[];
+  return rows.map(mapPersonaRow);
+}
+
+export function getPersona(id: string) {
+  const database = getDb();
+  const row = database.prepare('SELECT * FROM agent_personas WHERE id = ?').get(id) as AgentPersonaRow | undefined;
+  return row ? mapPersonaRow(row) : null;
+}
+
+export function insertPersona(persona: { id: string; name: string; role: string; systemPrompt: string; model?: string | null; icon?: string | null }) {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare(
+    `INSERT INTO agent_personas (id, name, role, system_prompt, model, icon, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(persona.id, persona.name, persona.role, persona.systemPrompt, persona.model ?? null, persona.icon ?? null, now, now);
+}
+
+export function updatePersona(id: string, updates: { name?: string; role?: string; systemPrompt?: string; model?: string | null; icon?: string | null }) {
+  const database = getDb();
+  const now = new Date().toISOString();
+  const sets: string[] = ['updated_at = ?'];
+  const params: unknown[] = [now];
+  if (updates.name !== undefined) { sets.push('name = ?'); params.push(updates.name); }
+  if (updates.role !== undefined) { sets.push('role = ?'); params.push(updates.role); }
+  if (updates.systemPrompt !== undefined) { sets.push('system_prompt = ?'); params.push(updates.systemPrompt); }
+  if (updates.model !== undefined) { sets.push('model = ?'); params.push(updates.model); }
+  if (updates.icon !== undefined) { sets.push('icon = ?'); params.push(updates.icon); }
+  params.push(id);
+  database.prepare(`UPDATE agent_personas SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function deletePersona(id: string) {
+  const database = getDb();
+  database.prepare('DELETE FROM agent_personas WHERE id = ?').run(id);
 }

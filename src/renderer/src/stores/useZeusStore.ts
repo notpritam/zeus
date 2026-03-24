@@ -48,7 +48,7 @@ import type {
 } from '../../../shared/types';
 import type { PermissionRule, PermissionTemplate, PermissionAuditEntry, PermissionsPayload } from '../../../shared/permission-types';
 import type { FlowSummary } from '../../../shared/qa-flow-types';
-import type { Room, RoomAgent, RoomMessage, RoomWsPayload } from '../../../shared/room-types';
+import type { Room, RoomAgent, RoomMessage, RoomWsPayload, AgentPersona } from '../../../shared/room-types';
 
 type ViewMode = 'terminal' | 'claude' | 'diff' | 'settings' | 'new-session' | 'room' | 'mcp-playground';
 
@@ -197,6 +197,9 @@ interface ZeusState {
   roomAgents: Record<string, RoomAgent[]>;
   roomAgentEntries: Record<string, NormalizedEntry[]>; // agentId → entries
   roomAgentActivity: Record<string, unknown>; // agentId → last activity
+
+  // Agent Personas
+  agentPersonas: AgentPersona[];
 
   // Right panel
   activeRightTab: 'source-control' | 'explorer' | 'subagents' | 'browser' | 'info' | 'settings' | 'android' | 'mcp' | 'tasks' | null;
@@ -410,6 +413,12 @@ interface ZeusState {
   dismissRoomAgent: (roomId: string, agentId: string) => void;
   postRoomMessage: (roomId: string, message: string, msgType?: string) => void;
   fetchRooms: () => void;
+
+  // Persona actions
+  fetchPersonas: () => void;
+  createPersona: (persona: { id: string; name: string; role: string; systemPrompt: string; model?: string; icon?: string }) => void;
+  updatePersona: (id: string, updates: { name?: string; role?: string; systemPrompt?: string; model?: string | null; icon?: string | null }) => void;
+  deletePersona: (id: string) => void;
 }
 
 const ENTRIES_PAGE_SIZE = 50;
@@ -614,6 +623,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
   roomAgents: {} as Record<string, RoomAgent[]>,
   roomAgentEntries: {} as Record<string, NormalizedEntry[]>,
   roomAgentActivity: {} as Record<string, unknown>,
+  agentPersonas: [] as AgentPersona[],
 
   savedProjects: [],
   claudeDefaults: {
@@ -671,6 +681,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           channel: 'task', sessionId: '', auth: '', payload: { type: 'list_tasks' },
         });
         zeusWs.send({ channel: 'room', sessionId: '', payload: { type: 'list_rooms' }, auth: '' });
+        zeusWs.send({ channel: 'settings', sessionId: '', payload: { type: 'list_personas' }, auth: '' });
         return;
       }
 
@@ -1137,6 +1148,25 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       if (payload.type === 'settings_error') {
         const { message } = payload as { message: string };
         set({ settingsError: message });
+      }
+      // Persona responses
+      if (payload.type === 'personas_list') {
+        const { personas } = payload as { personas: AgentPersona[] };
+        set({ agentPersonas: personas });
+      }
+      if (payload.type === 'persona_created') {
+        const { persona } = payload as { persona: AgentPersona };
+        set((s) => ({ agentPersonas: [...s.agentPersonas, persona] }));
+      }
+      if (payload.type === 'persona_updated') {
+        const { persona } = payload as { persona: AgentPersona };
+        set((s) => ({
+          agentPersonas: s.agentPersonas.map((p) => (p.id === persona.id ? persona : p)),
+        }));
+      }
+      if (payload.type === 'persona_deleted') {
+        const { id } = payload as { id: string };
+        set((s) => ({ agentPersonas: s.agentPersonas.filter((p) => p.id !== id) }));
       }
     });
 
@@ -1937,6 +1967,11 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
           }));
           break;
         }
+        case 'room_auto_navigate': {
+          const { roomId } = payload;
+          set({ activeRoomId: roomId as string, viewMode: 'room' });
+          break;
+        }
       }
     });
 
@@ -2078,7 +2113,7 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       lastUserMessagePreview: { ...state.lastUserMessagePreview, [id]: truncatePreview(prompt) },
       sessionActivity: { ...state.sessionActivity, [id]: { state: 'starting' } },
       lastActivityAt: { ...state.lastActivityAt, [id]: Date.now() },
-      viewMode: 'claude',
+      viewMode: roomMode ? 'room' : 'claude',
     }));
 
     zeusWs.send({
@@ -3668,5 +3703,20 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       payload: { type: 'list_rooms' },
       auth: '',
     });
+  },
+
+  // ─── Persona Actions ───
+
+  fetchPersonas: () => {
+    zeusWs.send({ channel: 'settings', sessionId: '', payload: { type: 'list_personas' }, auth: '' });
+  },
+  createPersona: (persona) => {
+    zeusWs.send({ channel: 'settings', sessionId: '', payload: { type: 'create_persona', ...persona }, auth: '' });
+  },
+  updatePersona: (id, updates) => {
+    zeusWs.send({ channel: 'settings', sessionId: '', payload: { type: 'update_persona', id, ...updates }, auth: '' });
+  },
+  deletePersona: (id) => {
+    zeusWs.send({ channel: 'settings', sessionId: '', payload: { type: 'delete_persona', id }, auth: '' });
   },
 }));
