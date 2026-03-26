@@ -305,6 +305,23 @@ export interface ClaudeSendMessagePayload {
   images?: ImageAttachment[];
 }
 
+export interface ClaudeQueueMessagePayload {
+  type: 'queue_message';
+  id: string;
+  content: string;
+}
+
+export interface ClaudeEditQueuedMessagePayload {
+  type: 'edit_queued_message';
+  msgId: string;
+  content: string;
+}
+
+export interface ClaudeRemoveQueuedMessagePayload {
+  type: 'remove_queued_message';
+  msgId: string;
+}
+
 export interface ClaudeApproveToolPayload {
   type: 'approve_tool';
   approvalId: string;
@@ -360,6 +377,9 @@ export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
   | ClaudeSendMessagePayload
+  | ClaudeQueueMessagePayload
+  | ClaudeEditQueuedMessagePayload
+  | ClaudeRemoveQueuedMessagePayload
   | ClaudeApproveToolPayload
   | ClaudeDenyToolPayload
   | ClaudeInterruptPayload
