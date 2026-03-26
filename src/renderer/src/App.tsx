@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, Component, type ReactNode } 
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertTriangle, RotateCcw } from 'lucide-react';
 import Header from '@/components/Header';
-import SessionSidebar from '@/components/SessionSidebar';
+import SessionSidebar, { sortByActivity } from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
 import ClaudeView from '@/components/ClaudeView';
 import RightPanel from '@/components/RightPanel';
@@ -157,11 +157,7 @@ function App() {
 
   // Claude sessions sorted by last activity (matches SessionSidebar order)
   const sortedClaudeSessions = useMemo(() => {
-    return [...claudeSessions].sort((a, b) => {
-      const aTime = lastActivityAt[a.id] ?? a.startedAt;
-      const bTime = lastActivityAt[b.id] ?? b.startedAt;
-      return bTime - aTime;
-    });
+    return [...claudeSessions].sort(sortByActivity(lastActivityAt));
   }, [claudeSessions, lastActivityAt]);
 
   // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)

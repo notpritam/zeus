@@ -29,6 +29,18 @@ import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName
 import { SESSION_ICON_COLORS } from '../../../shared/types';
 import { useZeusStore } from '@/stores/useZeusStore';
 
+// ─── Sort comparator for sessions by last activity ───
+
+export function sortByActivity(
+  lastActivityAt: Record<string, number>
+): (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => number {
+  return (a, b) => {
+    const aTime = lastActivityAt[a.id] ?? a.startedAt;
+    const bTime = lastActivityAt[b.id] ?? b.startedAt;
+    return bTime - aTime;
+  };
+}
+
 // ─── Long press hook ───
 
 function useLongPress(onLongPress: () => void, delay = 500) {
@@ -385,15 +397,8 @@ function CollapsedSidebar({
   // Stable last user message previews (only updates when user sends a message)
   const lastUserMessages = useZeusStore((s) => s.lastUserMessagePreview);
 
-  // Sort by last activity (most recent first), fallback to startedAt
-  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
-    const aTime = lastActivityAt[a.id] ?? a.startedAt;
-    const bTime = lastActivityAt[b.id] ?? b.startedAt;
-    return bTime - aTime;
-  };
-
-  const allClaude = [...claudeSessions].sort(byActivity);
-  const allTerminal = [...sessions].sort(byActivity);
+  const allClaude = [...claudeSessions].sort(sortByActivity(lastActivityAt));
+  const allTerminal = [...sessions].sort(sortByActivity(lastActivityAt));
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -671,15 +676,8 @@ function SessionSidebar({
     );
   }
 
-  // Sort by last activity (most recent first), fallback to startedAt
-  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
-    const aTime = lastActivityAt[a.id] ?? a.startedAt;
-    const bTime = lastActivityAt[b.id] ?? b.startedAt;
-    return bTime - aTime;
-  };
-
-  const allClaude = [...claudeSessions].sort(byActivity);
-  const allTerminal = [...standaloneSessions].sort(byActivity);
+  const allClaude = [...claudeSessions].sort(sortByActivity(lastActivityAt));
+  const allTerminal = [...standaloneSessions].sort(sortByActivity(lastActivityAt));
 
   return (
     <div
