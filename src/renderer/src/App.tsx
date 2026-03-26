@@ -155,6 +155,15 @@ function App() {
     [powerBlock, tunnel, togglePower, startSession, setViewMode, toggleRightPanel, openSettings],
   );
 
+  // Claude sessions sorted by last activity (matches SessionSidebar order)
+  const sortedClaudeSessions = useMemo(() => {
+    return [...claudeSessions].sort((a, b) => {
+      const aTime = lastActivityAt[a.id] ?? a.startedAt;
+      const bTime = lastActivityAt[b.id] ?? b.startedAt;
+      return bTime - aTime;
+    });
+  }, [claudeSessions, lastActivityAt]);
+
   // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -182,9 +191,16 @@ function App() {
         if (viewMode === 'claude' && activeClaudeId) {
           toggleSessionTerminalPanel(activeClaudeId);
         }
+      } else if (e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key, 10) - 1;
+        const target = sortedClaudeSessions[idx];
+        if (target && target.id !== activeClaudeId) {
+          e.preventDefault();
+          selectClaudeSession(target.id);
+        }
       }
     },
-    [startSession, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode, previousViewMode],
+    [startSession, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode, previousViewMode, sortedClaudeSessions, selectClaudeSession],
   );
 
   useEffect(() => {

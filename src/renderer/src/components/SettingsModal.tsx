@@ -33,6 +33,7 @@ const shortcuts = [
   ['⌘T', 'New Terminal'],
   ['⌘N', 'New Claude Session'],
   ['⌘B', 'Toggle Side Panel'],
+  ['⌘1–9', 'Switch Claude Session'],
 ] as const;
 
 type SettingsTab = 'general' | 'appearance' | 'performance' | 'shortcuts';

@@ -167,6 +167,7 @@ function ClaudeCard({
   active,
   activity,
   lastUserMessage,
+  shortcutIndex,
   onSelect,
   onUpdate,
   onDelete,
@@ -176,6 +177,7 @@ function ClaudeCard({
   active: boolean;
   activity: SessionActivity;
   lastUserMessage?: string;
+  shortcutIndex?: number;
   onSelect: () => void;
   onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
@@ -275,6 +277,13 @@ function ClaudeCard({
           </>
         )}
       </div>
+
+      {/* Shortcut badge — visible when not hovered */}
+      {shortcutIndex != null && !editing && (
+        <span className="text-muted-foreground/40 shrink-0 text-[9px] font-medium tabular-nums transition-opacity group-hover:opacity-0">
+          {shortcutIndex}
+        </span>
+      )}
 
       {/* Hover actions — overlaid on right side */}
       {!editing && (
@@ -678,13 +687,14 @@ function SessionSidebar({
           />
           {allClaude.length > 0 ? (
             <div className="flex flex-col gap-0.5">
-              {allClaude.map((s) => (
+              {allClaude.map((s, i) => (
                 <ClaudeCard
                   key={s.id}
                   session={s}
                   active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
                   activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
                   lastUserMessage={lastUserMessages[s.id]}
+                  shortcutIndex={i < 9 ? i + 1 : undefined}
                   onSelect={() => onSelectClaudeSession(s.id)}
                   onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
                   onDelete={() => setDeleteConfirm({ type: 'claude', session: s })}
