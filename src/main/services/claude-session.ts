@@ -46,6 +46,13 @@ export interface ApprovalRequest {
   toolUseId?: string;
 }
 
+export interface QueuedMessage {
+  id: string;
+  content: string | import('./claude-types').ContentBlock[];
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
 export class ClaudeSession extends EventEmitter {
   private child: ChildProcess | null = null;
   private protocol: ProtocolPeer | null = null;
@@ -57,6 +64,8 @@ export class ClaudeSession extends EventEmitter {
   private pendingApprovals = new Map<string, { requestId: string; toolInput: unknown }>();
   private permissionRules: PermissionRule[];
   private projectId: string | null;
+  private messageQueue: QueuedMessage[] = [];
+  private _isBusy = false;
 
   get sessionId(): string | null {
     return this._sessionId;
@@ -70,6 +79,12 @@ export class ClaudeSession extends EventEmitter {
   get pid(): number | undefined {
     return this.child?.pid;
   }
+  get isBusy(): boolean {
+    return this._isBusy;
+  }
+  get workingDir(): string {
+    return this.options.workingDir;
+  }
 
   constructor(private options: SessionOptions) {
     super();
@@ -77,6 +92,15 @@ export class ClaudeSession extends EventEmitter {
     this.permissionRules = options.permissionRules ?? [];
     this.projectId = options.projectId ?? null;
     this.logProcessor.onActivity((activity) => {
+      if (activity.state === 'idle') {
+        // Turn complete — try to drain queue before emitting idle
+        if (this.drainNext()) {
+          // Sent next queued message, stay busy. Don't emit idle to frontend.
+          return;
+        }
+        // Queue empty — truly idle
+        this._isBusy = false;
+      }
       this.emit('activity', activity);
     });
   }
@@ -105,6 +129,22 @@ export class ClaudeSession extends EventEmitter {
       console.log(`[Claude] Process exited: code=${code} signal=${signal}`);
       if (this._isRunning) {
         this._isRunning = false;
+        this._isBusy = false;
+
+        if (this.messageQueue.length > 0) {
+          // Queue has items — request resume instead of emitting done
+          const next = this.messageQueue.shift()!;
+          this.emit('queue_drained', { id: next.id, content: next.content });
+          this.emit('queue_updated', this.getQueueSnapshot());
+          this.emit('queue_needs_resume', {
+            content: next.content,
+            resolve: next.resolve,
+            reject: next.reject,
+            remaining: [...this.messageQueue],
+          });
+          return;
+        }
+
         if (code !== 0 && code !== null) {
           this.emit('error', new Error(`Claude CLI exited with code ${code}`));
         }
@@ -157,12 +197,28 @@ export class ClaudeSession extends EventEmitter {
     const hooks = this.buildHooks(mode);
     await this.protocol.initialize(hooks);
     await this.protocol.setPermissionMode(mode);
+    this._isBusy = true;
     await this.protocol.sendUserMessage(prompt);
   }
 
-  /** Send a follow-up message to an active session */
-  async sendMessage(content: string | import('./claude-types').ContentBlock[]): Promise<void> {
+  /** Send a follow-up message — queues automatically if session is busy */
+  async sendMessage(
+    content: string | import('./claude-types').ContentBlock[],
+    options?: { id?: string },
+  ): Promise<void> {
     if (!this.protocol) throw new Error('Session not started');
+
+    if (this._isBusy) {
+      // Queue it — return Promise that resolves when actually sent
+      return new Promise<void>((resolve, reject) => {
+        const id = options?.id ?? `q-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        this.messageQueue.push({ id, content, resolve, reject });
+        this.emit('queue_updated', this.getQueueSnapshot());
+      });
+    }
+
+    // Not busy — send immediately
+    this._isBusy = true;
     await this.protocol.sendUserMessage(content);
   }
 
@@ -200,12 +256,71 @@ export class ClaudeSession extends EventEmitter {
     await this.protocol?.interrupt();
   }
 
-  /** Kill the session process */
+  /** Kill the session process — rejects all queued messages */
   kill(): void {
+    for (const msg of this.messageQueue) {
+      msg.reject(new Error('Session killed'));
+    }
+    this.messageQueue = [];
+    this.emit('queue_updated', this.getQueueSnapshot());
     // Don't set _isRunning = false here — let the exit/close handler do it
     // so that the 'done' event is properly emitted and listeners (e.g. wireSubagent)
     // can run cleanup like broadcasting subagent_stopped.
     this.child?.kill('SIGTERM');
+  }
+
+  // --- Queue Management ---
+
+  /** Atomically pop next queued message and send it. Returns true if drained. */
+  private drainNext(): boolean {
+    if (this.messageQueue.length === 0) return false;
+
+    const next = this.messageQueue.shift()!;
+    this.emit('queue_drained', { id: next.id, content: next.content });
+    this.emit('queue_updated', this.getQueueSnapshot());
+
+    // Send to subprocess — resolve the caller's Promise
+    this._isBusy = true;
+    this.protocol!.sendUserMessage(next.content)
+      .then(() => next.resolve())
+      .catch((err) => next.reject(err));
+
+    return true;
+  }
+
+  /** Edit a queued message (if not yet drained). Returns false if already sent. */
+  editQueuedMessage(msgId: string, content: string): boolean {
+    const item = this.messageQueue.find((m) => m.id === msgId);
+    if (!item) return false;
+    item.content = content;
+    this.emit('queue_updated', this.getQueueSnapshot());
+    return true;
+  }
+
+  /** Remove a queued message (if not yet drained). Returns false if already sent. */
+  removeQueuedMessage(msgId: string): boolean {
+    const idx = this.messageQueue.findIndex((m) => m.id === msgId);
+    if (idx === -1) return false;
+    const [removed] = this.messageQueue.splice(idx, 1);
+    removed.reject(new Error('Removed from queue'));
+    this.emit('queue_updated', this.getQueueSnapshot());
+    return true;
+  }
+
+  /** Get a snapshot of the current queue for frontend display. */
+  getQueueSnapshot(): Array<{ id: string; content: string }> {
+    return this.messageQueue.map((m) => ({
+      id: m.id,
+      content: typeof m.content === 'string' ? m.content : '[multi-part content]',
+    }));
+  }
+
+  /** Transfer queued messages from another session (used during resume). */
+  transferQueue(queue: QueuedMessage[]): void {
+    this.messageQueue.push(...queue);
+    if (queue.length > 0) {
+      this.emit('queue_updated', this.getQueueSnapshot());
+    }
   }
 
   // --- Private ---
