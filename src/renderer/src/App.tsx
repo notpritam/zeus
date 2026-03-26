@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, Component, type ReactNode } 
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, AlertTriangle, RotateCcw } from 'lucide-react';
 import Header from '@/components/Header';
-import SessionSidebar from '@/components/SessionSidebar';
+import SessionSidebar, { sortByActivity } from '@/components/SessionSidebar';
 import TerminalView from '@/components/TerminalView';
 import ClaudeView from '@/components/ClaudeView';
 import RightPanel from '@/components/RightPanel';
@@ -155,6 +155,11 @@ function App() {
     [powerBlock, tunnel, togglePower, startSession, setViewMode, toggleRightPanel, openSettings],
   );
 
+  // Claude sessions sorted by last activity (matches SessionSidebar order)
+  const sortedClaudeSessions = useMemo(() => {
+    return [...claudeSessions].sort(sortByActivity(lastActivityAt));
+  }, [claudeSessions, lastActivityAt]);
+
   // Global keyboard shortcuts (except ⌘K which is handled in CommandPalette)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -182,9 +187,16 @@ function App() {
         if (viewMode === 'claude' && activeClaudeId) {
           toggleSessionTerminalPanel(activeClaudeId);
         }
+      } else if (e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key, 10) - 1;
+        const target = sortedClaudeSessions[idx];
+        if (target && target.id !== activeClaudeId) {
+          e.preventDefault();
+          selectClaudeSession(target.id);
+        }
       }
     },
-    [startSession, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode, previousViewMode],
+    [startSession, toggleRightPanel, toggleSessionTerminalPanel, activeClaudeId, viewMode, setViewMode, previousViewMode, sortedClaudeSessions, selectClaudeSession],
   );
 
   useEffect(() => {

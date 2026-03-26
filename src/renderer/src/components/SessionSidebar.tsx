@@ -29,6 +29,18 @@ import type { SessionRecord, ClaudeSessionInfo, SessionActivity, SessionIconName
 import { SESSION_ICON_COLORS } from '../../../shared/types';
 import { useZeusStore } from '@/stores/useZeusStore';
 
+// ─── Sort comparator for sessions by last activity ───
+
+export function sortByActivity(
+  lastActivityAt: Record<string, number>
+): (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => number {
+  return (a, b) => {
+    const aTime = lastActivityAt[a.id] ?? a.startedAt;
+    const bTime = lastActivityAt[b.id] ?? b.startedAt;
+    return bTime - aTime;
+  };
+}
+
 // ─── Long press hook ───
 
 function useLongPress(onLongPress: () => void, delay = 500) {
@@ -167,6 +179,7 @@ function ClaudeCard({
   active,
   activity,
   lastUserMessage,
+  shortcutIndex,
   onSelect,
   onUpdate,
   onDelete,
@@ -176,6 +189,7 @@ function ClaudeCard({
   active: boolean;
   activity: SessionActivity;
   lastUserMessage?: string;
+  shortcutIndex?: number;
   onSelect: () => void;
   onUpdate: (updates: { name?: string; color?: string | null }) => void;
   onDelete: () => void;
@@ -276,6 +290,13 @@ function ClaudeCard({
         )}
       </div>
 
+      {/* Shortcut badge — visible when not hovered */}
+      {shortcutIndex != null && !editing && (
+        <span className="text-muted-foreground/40 shrink-0 text-[9px] font-medium tabular-nums transition-opacity group-hover:opacity-0">
+          {shortcutIndex}
+        </span>
+      )}
+
       {/* Hover actions — overlaid on right side */}
       {!editing && (
         <div className="bg-inherit absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-md px-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -301,12 +322,34 @@ function ClaudeCard({
 
 // ─── Section Header ───
 
-function SectionHeader({ label, action }: { label: string; action?: { icon: React.ReactNode; onClick: () => void; title: string } }) {
+function SectionHeader({
+  label,
+  action,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  action?: { icon: React.ReactNode; onClick: () => void; title: string };
+  expanded?: boolean;
+  onToggle?: () => void;
+}) {
+  const isCollapsible = expanded !== undefined && onToggle !== undefined;
   return (
     <div className="flex items-center justify-between px-2 pt-3 pb-1.5">
-      <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
-        {label}
-      </span>
+      <button
+        className={`flex items-center gap-1 ${isCollapsible ? 'cursor-pointer select-none' : ''} [-webkit-app-region:no-drag]`}
+        onClick={isCollapsible ? onToggle : undefined}
+        type="button"
+      >
+        {isCollapsible && (
+          expanded
+            ? <ChevronDown className="text-muted-foreground size-3" />
+            : <ChevronRight className="text-muted-foreground size-3" />
+        )}
+        <span className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
+          {label}
+        </span>
+      </button>
       {action && (
         <button
           className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors [-webkit-app-region:no-drag]"
@@ -354,15 +397,8 @@ function CollapsedSidebar({
   // Stable last user message previews (only updates when user sends a message)
   const lastUserMessages = useZeusStore((s) => s.lastUserMessagePreview);
 
-  // Sort by last activity (most recent first), fallback to startedAt
-  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
-    const aTime = lastActivityAt[a.id] ?? a.startedAt;
-    const bTime = lastActivityAt[b.id] ?? b.startedAt;
-    return bTime - aTime;
-  };
-
-  const allClaude = [...claudeSessions].sort(byActivity);
-  const allTerminal = [...sessions].sort(byActivity);
+  const allClaude = [...claudeSessions].sort(sortByActivity(lastActivityAt));
+  const allTerminal = [...sessions].sort(sortByActivity(lastActivityAt));
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -581,6 +617,10 @@ function SessionSidebar({
   onCloseSidebar,
   onExpandSidebar,
 }: SessionSidebarProps) {
+  // ─── Section collapse state ───
+  const [claudeExpanded, setClaudeExpanded] = useState<boolean>(true);
+  const [terminalExpanded, setTerminalExpanded] = useState<boolean>(true);
+
   // ─── Bottom sheet / edit modal state ───
   type SheetTarget =
     | { type: 'claude'; session: ClaudeSessionInfo }
@@ -636,15 +676,8 @@ function SessionSidebar({
     );
   }
 
-  // Sort by last activity (most recent first), fallback to startedAt
-  const byActivity = (a: { id: string; startedAt: number }, b: { id: string; startedAt: number }) => {
-    const aTime = lastActivityAt[a.id] ?? a.startedAt;
-    const bTime = lastActivityAt[b.id] ?? b.startedAt;
-    return bTime - aTime;
-  };
-
-  const allClaude = [...claudeSessions].sort(byActivity);
-  const allTerminal = [...standaloneSessions].sort(byActivity);
+  const allClaude = [...claudeSessions].sort(sortByActivity(lastActivityAt));
+  const allTerminal = [...standaloneSessions].sort(sortByActivity(lastActivityAt));
 
   return (
     <div
@@ -675,53 +708,62 @@ function SessionSidebar({
           <SectionHeader
             label="Claude"
             action={{ icon: <Plus className="size-3.5" />, onClick: onNewClaudeSession, title: 'New Claude session' }}
+            expanded={claudeExpanded}
+            onToggle={() => setClaudeExpanded((v) => !v)}
           />
-          {allClaude.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
-              {allClaude.map((s) => (
-                <ClaudeCard
-                  key={s.id}
-                  session={s}
-                  active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
-                  activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
-                  lastUserMessage={lastUserMessages[s.id]}
-                  onSelect={() => onSelectClaudeSession(s.id)}
-                  onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
-                  onDelete={() => setDeleteConfirm({ type: 'claude', session: s })}
-                  onLongPress={() => setSheetTarget({ type: 'claude', session: s })}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
-              No Claude sessions
-            </p>
+          {claudeExpanded && (
+            allClaude.length > 0 ? (
+              <div className="flex flex-col gap-0.5">
+                {allClaude.map((s, i) => (
+                  <ClaudeCard
+                    key={s.id}
+                    session={s}
+                    active={(viewMode === 'claude' || viewMode === 'diff') && s.id === activeClaudeId}
+                    activity={sessionActivity[s.id] ?? { state: 'idle' as const }}
+                    lastUserMessage={lastUserMessages[s.id]}
+                    shortcutIndex={i < 9 ? i + 1 : undefined}
+                    onSelect={() => onSelectClaudeSession(s.id)}
+                    onUpdate={(updates) => onUpdateClaudeSession(s.id, updates)}
+                    onDelete={() => setDeleteConfirm({ type: 'claude', session: s })}
+                    onLongPress={() => setSheetTarget({ type: 'claude', session: s })}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
+                No Claude sessions
+              </p>
+            )
           )}
 
           {/* Terminal Section */}
           <SectionHeader
             label="Terminal"
             action={{ icon: <Plus className="size-3.5" />, onClick: onNewSession, title: 'New terminal session' }}
+            expanded={terminalExpanded}
+            onToggle={() => setTerminalExpanded((v) => !v)}
           />
-          {allTerminal.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
-              {allTerminal.map((s) => (
-                <SessionCard
-                  key={s.id}
-                  session={s}
-                  active={viewMode === 'terminal' && s.id === activeSessionId}
-                  onSelect={() => onSelectSession(s.id)}
-                  onStop={() => onStopSession(s.id)}
-                  onDelete={s.status !== 'active' ? () => onDeleteTerminalSession(s.id) : undefined}
-                  onArchive={s.status !== 'active' ? () => onArchiveTerminalSession(s.id) : undefined}
-                  onLongPress={() => setSheetTarget({ type: 'terminal', session: s })}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
-              No terminal sessions
-            </p>
+          {terminalExpanded && (
+            allTerminal.length > 0 ? (
+              <div className="flex flex-col gap-0.5">
+                {allTerminal.map((s) => (
+                  <SessionCard
+                    key={s.id}
+                    session={s}
+                    active={viewMode === 'terminal' && s.id === activeSessionId}
+                    onSelect={() => onSelectSession(s.id)}
+                    onStop={() => onStopSession(s.id)}
+                    onDelete={s.status !== 'active' ? () => onDeleteTerminalSession(s.id) : undefined}
+                    onArchive={s.status !== 'active' ? () => onArchiveTerminalSession(s.id) : undefined}
+                    onLongPress={() => setSheetTarget({ type: 'terminal', session: s })}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground/40 px-2 py-3 text-center text-[10px]">
+                No terminal sessions
+              </p>
+            )
           )}
 
           {/* Recently Deleted Section */}
