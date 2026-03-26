@@ -671,6 +671,77 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
     requestAttention('Task Failed', `Claude session encountered an error: ${err.message}`);
   });
+
+  // Forward queue state changes to frontend
+  session.on('queue_updated', (queue: Array<{ id: string; content: string }>) => {
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'queue_updated', queue },
+      auth: '',
+    });
+  });
+
+  // Persist drained message as user entry + notify frontend
+  session.on('queue_drained', ({ id, content }: { id: string; content: string | unknown }) => {
+    const textContent = typeof content === 'string' ? content : '[multi-part content]';
+    upsertClaudeEntry(envelope.sessionId, {
+      id: `user-${Date.now()}`,
+      entryType: { type: 'user_message' },
+      content: textContent,
+    });
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'queue_drained', msgId: id },
+      auth: '',
+    });
+  });
+
+  // Handle resume request when process exits with queued messages
+  session.on('queue_needs_resume', async (data: {
+    content: string | unknown;
+    resolve: () => void;
+    reject: (err: Error) => void;
+    remaining: import('./claude-session').QueuedMessage[];
+  }) => {
+    try {
+      const oldSessionId = session.sessionId;
+      const oldMessageId = session.lastMessageId;
+      if (!oldSessionId || !oldMessageId) {
+        data.reject(new Error('Cannot resume: missing session or message ID'));
+        return;
+      }
+
+      const promptText = typeof data.content === 'string' ? data.content : '[resume]';
+
+      const newSession = await claudeManager.resumeSession(
+        envelope.sessionId,
+        oldSessionId,
+        promptText,
+        { workingDir: session.workingDir, zeusSessionId: envelope.sessionId },
+      );
+
+      // Transfer remaining queue to new session
+      newSession.transferQueue(data.remaining);
+
+      // Re-wire events for the new session instance
+      wireClaudeSession(ws, newSession, envelope);
+
+      // Persist & broadcast
+      updateClaudeSessionStatus(envelope.sessionId, 'running', null);
+      broadcastEnvelope({
+        channel: 'claude',
+        sessionId: envelope.sessionId,
+        payload: { type: 'claude_started' },
+        auth: '',
+      });
+
+      data.resolve();
+    } catch (err) {
+      data.reject(err as Error);
+    }
+  });
 }
 
 /** Read the qa_finish file written by the QA agent's MCP server */
@@ -1303,6 +1374,30 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
       }
     } else {
       sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
+    }
+  } else if (payload.type === 'queue_message') {
+    const { id, content } = envelope.payload as { id: string; content: string };
+    const session = claudeManager.getSession(envelope.sessionId);
+    if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
+      // sendMessage auto-queues if busy, sends immediately if idle
+      session.sendMessage(content, { id }).catch((err) => {
+        console.warn('[WS] queue_message failed:', (err as Error).message);
+      });
+    } else {
+      sendError(ws, envelope.sessionId, 'No active Claude session for this ID');
+    }
+  } else if (payload.type === 'edit_queued_message') {
+    const { msgId, content } = envelope.payload as { msgId: string; content: string };
+    const session = claudeManager.getSession(envelope.sessionId);
+    if (session) {
+      session.editQueuedMessage(msgId, content);
+    }
+  } else if (payload.type === 'remove_queued_message') {
+    const { msgId } = envelope.payload as { msgId: string };
+    const session = claudeManager.getSession(envelope.sessionId);
+    if (session) {
+      session.removeQueuedMessage(msgId);
     }
   } else if (payload.type === 'approve_tool') {
     const { approvalId, updatedInput } = envelope.payload as ClaudeApproveToolPayload;
