@@ -94,7 +94,7 @@ export class ClaudeSession extends EventEmitter {
     this.logProcessor.onActivity((activity) => {
       if (activity.state === 'idle') {
         // Turn complete — try to drain queue before emitting idle
-        if (this.drainNext()) {
+        if (this.drainAll()) {
           // Sent next queued message, stay busy. Don't emit idle to frontend.
           return;
         }
@@ -131,18 +131,13 @@ export class ClaudeSession extends EventEmitter {
         this._isRunning = false;
         this._isBusy = false;
 
+        // Reject any remaining queued messages — process is gone
         if (this.messageQueue.length > 0) {
-          // Queue has items — request resume instead of emitting done
-          const next = this.messageQueue.shift()!;
-          this.emit('queue_drained', { id: next.id, content: next.content });
+          for (const msg of this.messageQueue) {
+            msg.reject(new Error('Session process exited'));
+          }
+          this.messageQueue = [];
           this.emit('queue_updated', this.getQueueSnapshot());
-          this.emit('queue_needs_resume', {
-            content: next.content,
-            resolve: next.resolve,
-            reject: next.reject,
-            remaining: [...this.messageQueue],
-          });
-          return;
         }
 
         if (code !== 0 && code !== null) {
@@ -176,8 +171,14 @@ export class ClaudeSession extends EventEmitter {
         this._lastMessageId = this._pendingAssistantUuid;
         this._pendingAssistantUuid = null;
       }
-      // result = end of one turn, NOT end of session.
-      // The process stays alive for follow-ups via stdin.
+
+      // Turn complete — drain queue before going idle.
+      // Process stays alive, so we send the next message via stdin.
+      if (this.drainAll()) {
+        // Sent next queued message, stay busy. Don't emit result.
+        return;
+      }
+
       this.emit('result');
     });
 
@@ -271,19 +272,27 @@ export class ClaudeSession extends EventEmitter {
 
   // --- Queue Management ---
 
-  /** Atomically pop next queued message and send it. Returns true if drained. */
-  private drainNext(): boolean {
+  /** Drain all queued messages to stdin at once. Returns true if any were sent. */
+  private drainAll(): boolean {
     if (this.messageQueue.length === 0) return false;
 
-    const next = this.messageQueue.shift()!;
-    this.emit('queue_drained', { id: next.id, content: next.content });
+    const batch = this.messageQueue.splice(0);
+
+    // Notify frontend for each drained message
+    for (const msg of batch) {
+      this.emit('queue_drained', { id: msg.id, content: msg.content });
+    }
     this.emit('queue_updated', this.getQueueSnapshot());
 
-    // Send to subprocess — resolve the caller's Promise
+    // Send all to stdin — Claude sees them all before its next turn
     this._isBusy = true;
-    this.protocol!.sendUserMessage(next.content)
-      .then(() => next.resolve())
-      .catch((err) => next.reject(err));
+    Promise.all(
+      batch.map((msg) =>
+        this.protocol!.sendUserMessage(msg.content)
+          .then(() => msg.resolve())
+          .catch((err) => msg.reject(err)),
+      ),
+    ).catch(() => {/* individual rejects already handled */});
 
     return true;
   }
@@ -313,14 +322,6 @@ export class ClaudeSession extends EventEmitter {
       id: m.id,
       content: typeof m.content === 'string' ? m.content : '[multi-part content]',
     }));
-  }
-
-  /** Transfer queued messages from another session (used during resume). */
-  transferQueue(queue: QueuedMessage[]): void {
-    this.messageQueue.push(...queue);
-    if (queue.length > 0) {
-      this.emit('queue_updated', this.getQueueSnapshot());
-    }
   }
 
   // --- Private ---

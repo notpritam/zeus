@@ -564,6 +564,11 @@ export function upsertClaudeEntry(sessionId: string, entry: NormalizedEntry): vo
   );
 }
 
+export function deleteClaudeEntriesForSession(sessionId: string): void {
+  if (!db) return;
+  db.prepare(`DELETE FROM claude_entries WHERE session_id = ?`).run(sessionId);
+}
+
 interface ClaudeEntryDbRow {
   id: string;
   session_id: string;

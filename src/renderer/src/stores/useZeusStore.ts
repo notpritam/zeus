@@ -227,6 +227,7 @@ interface ZeusState {
     projectId?: string;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
+  clearClaudeHistory: () => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
   interruptClaude: () => void;
@@ -1618,7 +1619,63 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
     const unsubTask = zeusWs.on('task', (envelope: WsEnvelope) => {
       const p = envelope.payload as TaskPayload;
       if (p.type === 'task_created') {
-        set((s) => ({ tasks: [p.task, ...s.tasks], taskError: null }));
+        const task = p.task;
+        set((s) => {
+          const updates: Partial<ZeusState> = {
+            tasks: [task, ...s.tasks],
+            taskError: null,
+            activeTaskId: task.id,
+          };
+
+          // If the task has a linked Claude session, create the ClaudeSessionInfo
+          // so the session is visible in the UI and entries can be rendered
+          if (task.sessionId) {
+            const sessionExists = s.claudeSessions.some((cs) => cs.id === task.sessionId);
+            if (!sessionExists) {
+              const session: ClaudeSessionInfo = {
+                id: task.sessionId,
+                claudeSessionId: null,
+                status: 'running',
+                prompt: task.prompt,
+                name: task.name,
+                notificationSound: true,
+                workingDir: task.worktreeDir,
+                startedAt: task.createdAt,
+              };
+              const userEntry: NormalizedEntry = {
+                id: `user-${Date.now()}`,
+                entryType: { type: 'user_message' },
+                content: task.prompt,
+                timestamp: new Date().toISOString(),
+              };
+              updates.claudeSessions = [...s.claudeSessions, session];
+              updates.activeClaudeId = task.sessionId;
+              updates.claudeEntries = { ...s.claudeEntries, [task.sessionId]: [userEntry] };
+              updates.lastUserMessagePreview = { ...s.lastUserMessagePreview, [task.sessionId]: truncatePreview(task.prompt) };
+              updates.sessionActivity = { ...s.sessionActivity, [task.sessionId]: { state: 'starting' } };
+              updates.lastActivityAt = { ...s.lastActivityAt, [task.sessionId]: Date.now() };
+              updates.viewMode = 'claude';
+            }
+          }
+
+          return updates;
+        });
+
+        // Start git and file watchers for the task's worktree
+        if (task.sessionId && task.worktreeDir) {
+          zeusWs.send({
+            channel: 'git',
+            sessionId: task.sessionId,
+            payload: { type: 'start_watching', workingDir: task.worktreeDir },
+            auth: '',
+          });
+          zeusWs.send({
+            channel: 'files',
+            sessionId: task.sessionId,
+            payload: { type: 'start_watching', workingDir: task.worktreeDir },
+            auth: '',
+          });
+        }
       } else if (p.type === 'task_updated') {
         set((s) => ({
           tasks: s.tasks.map((t) => (t.id === p.task.id ? p.task : t)),
@@ -1880,6 +1937,21 @@ export const useZeusStore = create<ZeusState>((set, get) => ({
       channel: 'claude',
       sessionId: activeClaudeId,
       payload: { type: 'send_message', content, files, images },
+      auth: '',
+    });
+  },
+
+  clearClaudeHistory: () => {
+    const { activeClaudeId } = get();
+    if (!activeClaudeId) return;
+    // Optimistically clear local entries immediately
+    set((state) => ({
+      claudeEntries: { ...state.claudeEntries, [activeClaudeId]: [] },
+    }));
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: activeClaudeId,
+      payload: { type: 'clear_history' },
       auth: '',
     });
   },

@@ -6,6 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Send, Loader2, Check, X, StopCircle, File, Folder, ImagePlus, Pencil, Trash2, Sparkles, Minimize2, Maximize2, Menu, Settings, PanelRight, ArrowDown, RotateCcw } from 'lucide-react';
 import { Kbd } from '@/components/ui/kbd';
 import FileMentionPopover from '@/components/FileMentionPopover';
+import SlashCommandPopover from '@/components/SlashCommandPopover';
+import { SLASH_COMMANDS, getFilteredCommands } from '../../../shared/slash-commands';
+import type { SlashCommand } from '../../../shared/slash-commands';
 import ApprovalCard from '@/components/ApprovalCard';
 import SessionTerminalPanel from '@/components/SessionTerminalPanel';
 import { useZeusStore } from '@/stores/useZeusStore';
@@ -100,6 +103,7 @@ interface ClaudeViewProps {
   onQueueMessage: (content: string) => void;
   onEditQueued: (id: string, content: string) => void;
   onRemoveQueued: (id: string) => void;
+  onClearHistory?: () => void;
   // Mobile header controls (passed only from mobile layout)
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
@@ -122,6 +126,7 @@ function ClaudeView({
   onQueueMessage,
   onEditQueued,
   onRemoveQueued,
+  onClearHistory,
   onToggleSidebar,
   onOpenSettings,
   onOpenCommandPalette,
@@ -135,6 +140,9 @@ function ClaudeView({
   const [attachedImages, setAttachedImages] = useState<ImageAttachmentLocal[]>([]);
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
+  const [showSlashPopover, setShowSlashPopover] = useState(false);
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+  const [slashQuery, setSlashQuery] = useState('/');
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -249,6 +257,18 @@ function ClaudeView({
     const value = e.target.value;
     setInput(value);
 
+    // Slash command detection: show popover when input starts with / and has no space yet
+    const slashMatch = value.match(/^(\/\S*)$/);
+    if (slashMatch) {
+      const q = slashMatch[1];
+      setSlashQuery(q);
+      setShowSlashPopover(true);
+      setSlashSelectedIdx(0);
+    } else {
+      setShowSlashPopover(false);
+    }
+
+    // File @ mention detection
     const cursorPos = e.target.selectionStart ?? value.length;
     const beforeCursor = value.substring(0, cursorPos);
     const atMatch = beforeCursor.match(/@(\S*)$/);
@@ -259,6 +279,33 @@ function ClaudeView({
       setShowMentionPopover(false);
     }
   }, []);
+
+  const filteredSlashCommands = showSlashPopover ? getFilteredCommands(slashQuery) : ([] as SlashCommand[]);
+
+  const handleSlashSelect = useCallback((cmd: SlashCommand) => {
+    // Fill in the command name; add a trailing space if it takes args
+    setInput(cmd.command + (cmd.args ? ' ' : ''));
+    setShowSlashPopover(false);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSlashPopover || filteredSlashCommands.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSlashSelectedIdx((i) => Math.min(i + 1, filteredSlashCommands.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSlashSelectedIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const selected = filteredSlashCommands[slashSelectedIdx];
+      if (selected) handleSlashSelect(selected);
+    } else if (e.key === 'Escape') {
+      setShowSlashPopover(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSlashPopover, filteredSlashCommands, slashSelectedIdx, handleSlashSelect]);
 
   const handleFileSelect = useCallback((filePath: string, type: 'file' | 'directory') => {
     setAttachedFiles((prev) => {
@@ -339,6 +386,19 @@ function ClaudeView({
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed && attachedFiles.length === 0 && attachedImages.length === 0) return;
+
+    setShowSlashPopover(false);
+
+    // Intercept locally-handled slash commands
+    if (trimmed.startsWith('/')) {
+      const cmdName = trimmed.split(' ')[0].toLowerCase();
+      const cmd = SLASH_COMMANDS.find((c) => c.command === cmdName);
+      if (cmd?.localHandler === 'clear') {
+        onClearHistory?.();
+        setInput('');
+        return;
+      }
+    }
 
     if (isBusy) {
       // Queue all messages when busy — they'll be sent when session becomes idle
@@ -631,6 +691,14 @@ function ClaudeView({
 
                 {/* Input bar with popover */}
                 <form onSubmit={handleSubmit} className="relative flex items-center gap-2 px-4 py-3">
+                  {showSlashPopover && filteredSlashCommands.length > 0 && (
+                    <SlashCommandPopover
+                      commands={filteredSlashCommands}
+                      selectedIdx={slashSelectedIdx}
+                      onSelect={handleSlashSelect}
+                      onClose={() => setShowSlashPopover(false)}
+                    />
+                  )}
                   {showMentionPopover && session.status === 'running' && (
                     <FileMentionPopover
                       sessionId={session.id}
@@ -663,8 +731,9 @@ function ClaudeView({
                     data-testid="claude-input"
                     value={input}
                     onChange={handleInputChange}
+                    onKeyDown={handleInputKeyDown}
                     onPaste={handlePaste}
-                    placeholder="Send follow-up... (@ files, paste images)"
+                    placeholder="Send follow-up... (@ files, / commands)"
                     disabled={session.status !== 'running'}
                     className="text-sm"
                   />

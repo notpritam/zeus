@@ -218,7 +218,7 @@ function QuickStartTab({
   form: ReturnType<typeof useNewSessionForm>;
   onSwitchTab: (tab: NewSessionTab) => void;
 }) {
-  const { permissionRules } = useZeusStore();
+  const { permissionRules, taskError } = useZeusStore();
   return (
     <div className="space-y-6">
       <div>
@@ -347,6 +347,11 @@ function QuickStartTab({
             </div>
           )}
         </div>
+      )}
+
+      {/* Task error */}
+      {taskError && form.isTaskMode && (
+        <div className="rounded bg-red-500/10 p-2 text-[10px] text-red-400">{taskError}</div>
       )}
 
       {/* Start Button */}

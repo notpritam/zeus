@@ -76,6 +76,7 @@ import {
   setPermissionRules,
   clearPermissionRules,
   getAuditLog,
+  deleteClaudeEntriesForSession,
 } from './db';
 import type { ClaudeSessionInfo, GitPayload, FilesPayload, QaBrowserPayload, SubagentPayload, SubagentType, SubagentCli, SessionIconName, AndroidPayload, TaskPayload, GitStatusData } from '../../shared/types';
 import { SESSION_ICON_NAMES } from '../../shared/types';
@@ -698,50 +699,6 @@ function wireClaudeSession(ws: WebSocket, session: ClaudeSession, envelope: WsEn
     });
   });
 
-  // Handle resume request when process exits with queued messages
-  session.on('queue_needs_resume', async (data: {
-    content: string | unknown;
-    resolve: () => void;
-    reject: (err: Error) => void;
-    remaining: import('./claude-session').QueuedMessage[];
-  }) => {
-    try {
-      const oldSessionId = session.sessionId;
-      const oldMessageId = session.lastMessageId;
-      if (!oldSessionId || !oldMessageId) {
-        data.reject(new Error('Cannot resume: missing session or message ID'));
-        return;
-      }
-
-      const promptText = typeof data.content === 'string' ? data.content : '[resume]';
-
-      const newSession = await claudeManager.resumeSession(
-        envelope.sessionId,
-        oldSessionId,
-        promptText,
-        { workingDir: session.workingDir, zeusSessionId: envelope.sessionId },
-      );
-
-      // Transfer remaining queue to new session
-      newSession.transferQueue(data.remaining);
-
-      // Re-wire events for the new session instance
-      wireClaudeSession(ws, newSession, envelope);
-
-      // Persist & broadcast
-      updateClaudeSessionStatus(envelope.sessionId, 'running', null);
-      broadcastEnvelope({
-        channel: 'claude',
-        sessionId: envelope.sessionId,
-        payload: { type: 'claude_started' },
-        auth: '',
-      });
-
-      data.resolve();
-    } catch (err) {
-      data.reject(err as Error);
-    }
-  });
 }
 
 /** Read the qa_finish file written by the QA agent's MCP server */
@@ -1482,6 +1439,14 @@ async function handleClaude(ws: WebSocket, envelope: WsEnvelope): Promise<void> 
         auth: '',
       });
     }
+  } else if (payload.type === 'clear_history') {
+    deleteClaudeEntriesForSession(envelope.sessionId);
+    broadcastEnvelope({
+      channel: 'claude',
+      sessionId: envelope.sessionId,
+      payload: { type: 'claude_history', entries: [] },
+      auth: '',
+    });
   } else if (payload.type === 'update_claude_session') {
     const updates: { name?: string; color?: string | null } = {};
     if (payload.name !== undefined) updates.name = payload.name;

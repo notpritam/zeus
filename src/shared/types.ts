@@ -373,6 +373,10 @@ export interface ClaudeSessionUpdatedPayload {
   color?: string | null;
 }
 
+export interface ClaudeClearHistoryPayload {
+  type: 'clear_history';
+}
+
 export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
@@ -390,6 +394,7 @@ export type ClaudePayload =
   | ClaudeHistoryPayload
   | ClaudeUpdateSessionPayload
   | ClaudeSessionUpdatedPayload
+  | ClaudeClearHistoryPayload
 ;
 
 // ─── Claude UI Types (renderer-side) ───
