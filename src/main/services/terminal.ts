@@ -7,7 +7,14 @@ interface SessionOptions {
   cwd?: string;
 }
 
+interface SessionBuffer {
+  buffer: string;
+  cursor: number;
+}
+
 const sessions = new Map<string, pty.IPty>();
+const sessionBuffers = new Map<string, SessionBuffer>();
+const MAX_BUFFER_SIZE = 2 * 1024 * 1024; // 2MB
 
 export function createSession(
   options: SessionOptions,
@@ -27,9 +34,22 @@ export function createSession(
     env: process.env as Record<string, string>,
   });
 
-  term.onData((data) => onOutput(sessionId, data));
+  term.onData((data) => {
+    let buf = sessionBuffers.get(sessionId);
+    if (!buf) {
+      buf = { buffer: '', cursor: 0 };
+      sessionBuffers.set(sessionId, buf);
+    }
+    buf.buffer += data;
+    buf.cursor += data.length;
+    if (buf.buffer.length > MAX_BUFFER_SIZE) {
+      buf.buffer = buf.buffer.slice(-MAX_BUFFER_SIZE);
+    }
+    onOutput(sessionId, data);
+  });
   term.onExit(({ exitCode }) => {
     sessions.delete(sessionId);
+    sessionBuffers.delete(sessionId);
     onExit(sessionId, exitCode);
   });
 
@@ -59,6 +79,7 @@ export function destroySession(sessionId: string): void {
   if (term) {
     term.kill();
     sessions.delete(sessionId);
+    sessionBuffers.delete(sessionId);
     console.log(`[Zeus] Terminal session destroyed: ${sessionId}`);
   }
 }
@@ -69,6 +90,7 @@ export function destroyAllSessions(): void {
     console.log(`[Zeus] Terminal session destroyed: ${id}`);
   }
   sessions.clear();
+  sessionBuffers.clear();
 }
 
 export function getSessionCount(): number {
@@ -85,4 +107,10 @@ export function getSessionPids(): Array<{ sessionId: string; pid: number }> {
     if (term.pid) result.push({ sessionId: id, pid: term.pid });
   }
   return result;
+}
+
+export function getSessionBuffer(sessionId: string): { data: string; cursor: number } | null {
+  const buf = sessionBuffers.get(sessionId);
+  if (!buf) return null;
+  return { data: buf.buffer, cursor: buf.cursor };
 }
