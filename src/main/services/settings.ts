@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { app } from 'electron';
 import type { ZeusSettings, SavedProject, ClaudeDefaults } from '../../shared/types';
-import { insertProject, getAllProjects, deleteProject } from './db';
+import { insertProject, getAllProjects, deleteProject } from '../db/queries/settings';
 import { getThemeMeta } from './themes';
 import { zeusEnv } from './env';
 

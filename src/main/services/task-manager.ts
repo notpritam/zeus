@@ -9,7 +9,7 @@ import {
   getTask,
   getAllTasks,
   deleteTask,
-} from './db';
+} from '../db/queries/tasks';
 import type { TaskRecord, PermissionMode } from '../../shared/types';
 
 export interface CreateTaskOptions {

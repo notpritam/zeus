@@ -15,7 +15,8 @@ import type {
 import { ClaudeLogProcessor } from './claude-log-processor';
 import type { PermissionRule } from '../../shared/permission-types';
 import { evaluate, extractPattern, relativize } from './permission-evaluator';
-import { insertAuditEntry } from './db';
+import { insertAuditEntry } from '../db/queries/permissions';
+import { getClaudeBinary } from './claude-cli';
 import path from 'path';
 import { app } from 'electron';
 
@@ -110,9 +111,10 @@ export class ClaudeSession extends EventEmitter {
     const mode = this.options.permissionMode ?? 'bypassPermissions';
 
     // 1. Spawn Claude CLI as piped subprocess
-    const spawnArgs = ['-y', '@anthropic-ai/claude-code@latest', ...args];
-    console.log('[Claude] Spawning:', 'npx', spawnArgs.join(' '));
-    this.child = spawn('npx', spawnArgs, {
+    const { command, prefixArgs } = getClaudeBinary();
+    const spawnArgs = [...prefixArgs, ...args];
+    console.log('[Claude] Spawning:', command, spawnArgs.join(' '));
+    this.child = spawn(command, spawnArgs, {
       cwd: this.options.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {

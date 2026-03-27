@@ -25,7 +25,7 @@ import {
   attachSessionMcps,
   updateSessionMcpStatus,
   getSessionMcps,
-} from './db';
+} from '../db/queries/mcp';
 import type { McpServerRecord, McpHealthResult } from '../../shared/types';
 
 // ─── CRUD Wrappers ───

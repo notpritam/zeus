@@ -6,8 +6,12 @@ loadEnv({ path: resolve(__dirname, '../../.env') });
 
 import { app, BrowserWindow, Menu, nativeImage } from 'electron';
 import path from 'path';
+import { registerService, bootAll, shutdownAll } from './lifecycle';
+import { Log } from './log/log';
+import { initDatabase, closeDatabase } from './db/client';
+import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from './server/server';
+import { resolveClaudeBinary } from './services/claude-cli';
 import { startPowerBlock } from './services/power';
-import { startWebSocketServer, stopWebSocketServer, notifyTunnelStatus } from './services/websocket';
 import { destroyAllSessions } from './services/terminal';
 import { getActiveSessions, markKilled } from './services/sessions';
 import { initAuthToken } from './services/auth';
@@ -15,7 +19,8 @@ import { initSettings, getAutoTunnel } from './services/settings';
 import { loadAllThemes } from './services/themes';
 import { startTunnel, stopTunnel } from './services/tunnel';
 import { createMainWindowOptions } from './window';
-import { initDatabase, closeDatabase, markStaleSessionsErrored, markStaleSubagentsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './services/db';
+import { markStaleSessionsErrored, pruneOldSessions, finalizeAllCompletedSessions } from './db/queries/claude';
+import { markStaleSubagentsErrored } from './db/queries/subagent';
 import { zeusEnv } from './services/env';
 import { TaskManager } from './services/task-manager';
 
@@ -121,8 +126,42 @@ function createWindow(): void {
 
 app.setName('Zeus');
 
+// ─── Register lifecycle services ───
+
+const { wsPort, label } = zeusEnv;
+const dbPath = zeusEnv.dbPath();
+
+registerService({
+  name: 'log',
+  deps: [],
+  start: async () => Log.init({ level: 'INFO', logDir: path.join(app.getPath('userData'), 'logs') }),
+  stop: async () => Log.close(),
+});
+
+registerService({
+  name: 'db',
+  deps: ['log'],
+  start: async () => initDatabase(dbPath),
+  stop: async () => closeDatabase(),
+});
+
+registerService({
+  name: 'claude-cli',
+  deps: ['log'],
+  start: async () => { await resolveClaudeBinary(); },
+  stop: async () => {},
+});
+
+registerService({
+  name: 'ws-server',
+  deps: ['log', 'db'],
+  start: async () => { await startWebSocketServer(wsPort); },
+  stop: async () => { await stopWebSocketServer(); },
+});
+
+// ─── Boot sequence ───
+
 app.whenReady().then(async () => {
-  const { wsPort, label } = zeusEnv;
   console.log(`[Zeus ${label}] Starting on port ${wsPort}...`);
 
   // Expose WS port so child processes (MCP bridges) connect to the right server
@@ -132,9 +171,14 @@ app.whenReady().then(async () => {
   // so QA agents test the correct app without manual URL entry
   process.env.ZEUS_QA_DEFAULT_URL = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173';
 
+  // Pre-lifecycle init (no deps on log/db)
   startPowerBlock();
   initAuthToken();
-  initDatabase();
+
+  // Boot log -> db -> claude-cli -> ws-server in dependency order
+  await bootAll();
+
+  // Post-boot init (depends on db being ready)
   initSettings();
   loadAllThemes();
   markStaleSessionsErrored();
@@ -145,7 +189,6 @@ app.whenReady().then(async () => {
   });
   finalizeAllCompletedSessions();
   pruneOldSessions(30);
-  await startWebSocketServer(wsPort);
 
   const autoTunnel = getAutoTunnel();
   if (autoTunnel) {
@@ -164,15 +207,20 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', async () => {
+app.on('before-quit', async (e) => {
+  e.preventDefault();
+
   // Mark all active sessions as killed before destroying
   for (const session of getActiveSessions()) {
     markKilled(session.id);
   }
   destroyAllSessions();
   await stopTunnel();
-  await stopWebSocketServer();
-  closeDatabase();
+
+  // Shutdown services in reverse dependency order (ws-server -> db -> log)
+  await shutdownAll();
+
+  app.exit();
 });
 
 app.on('window-all-closed', () => {

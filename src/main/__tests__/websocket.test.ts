@@ -5,7 +5,7 @@ import {
   startWebSocketServer,
   stopWebSocketServer,
   isWebSocketRunning,
-} from '../services/websocket';
+} from '../server/server';
 import { destroyAllSessions } from '../services/terminal';
 
 const TEST_PORT = 3099;
