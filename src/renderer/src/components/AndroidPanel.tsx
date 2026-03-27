@@ -14,7 +14,7 @@ import {
   ScrollText,
   Layers,
 } from 'lucide-react';
-import type { AndroidViewNode, LogcatEntry } from '@shared/types';
+import type { AndroidViewNode, LogcatEntry } from '../../../shared/types';
 
 type AndroidTab = 'devices' | 'screenshot' | 'hierarchy' | 'logcat';
 
@@ -52,7 +52,7 @@ function ViewNodeItem({ node, depth = 0 }: { node: AndroidViewNode; depth?: numb
         {node.resourceId && <span className="text-blue-400 truncate ml-1">#{node.resourceId.split('/').pop()}</span>}
         {node.clickable && <span className="text-yellow-400 ml-1 text-[10px]">click</span>}
       </button>
-      {expanded && hasChildren && node.children!.map((child, i) => (
+      {expanded && hasChildren && node.children!.map((child: AndroidViewNode, i: number) => (
         <ViewNodeItem key={i} node={child} depth={depth + 1} />
       ))}
     </div>

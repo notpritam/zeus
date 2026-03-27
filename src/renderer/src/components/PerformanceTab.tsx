@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Cpu, MemoryStick, Clock, Activity, Gauge, Server, Zap } from 'lucide-react';
-import type { ProcessMetric } from '@shared/types';
+import type { ProcessMetric } from '../../../shared/types';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';

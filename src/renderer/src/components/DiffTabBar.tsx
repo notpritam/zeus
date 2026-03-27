@@ -2,7 +2,7 @@ import { X, MessageSquare, TerminalSquare, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { getFileIcon } from '@/lib/file-icons';
-import type { GitFileStatus } from '../../../../shared/types';
+import type { GitFileStatus } from '../../../shared/types';
 
 const STATUS_STYLES: Record<string, { label: string; color: string }> = {
   M: { label: 'M', color: 'text-warn' },

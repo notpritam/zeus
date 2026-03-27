@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
-import type { SubagentType } from '@shared/types';
+import type { SubagentType } from '../../../shared/types';
 
 // Keep in sync with src/main/services/subagent-registry.ts
 const SUBAGENT_TYPES = [

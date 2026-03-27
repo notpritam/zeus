@@ -182,7 +182,7 @@ function AskUserQuestionCard({
           <HelpCircle className="size-4 shrink-0 text-blue-400" />
           <span className="text-xs font-semibold text-blue-300">Question from Claude</span>
         </div>
-        <Button size="xs" variant="destructive" onClick={onDeny}>
+        <Button size="xs" variant="destructive" onClick={() => onDeny()}>
           <X className="size-3" />
           Dismiss
         </Button>

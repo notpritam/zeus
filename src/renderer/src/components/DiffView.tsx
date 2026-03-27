@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { monaco } from '@/lib/monaco-setup';
 import { useZeusStore } from '@/stores/useZeusStore';
 import { getFileIcon } from '@/lib/file-icons';
-import type { GitFileStatus } from '../../../../shared/types';
+import type { GitFileStatus } from '../../../shared/types';
 
 const STATUS_STYLES: Record<string, { label: string; color: string }> = {
   M: { label: 'M', color: 'text-warn' },
