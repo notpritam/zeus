@@ -34,6 +34,13 @@ export const ClaudeSendMessage = z.object({
   images: z.array(z.unknown()).optional(),
 });
 
+export const ClaudeInjectMessage = z.object({
+  type: z.literal("inject_message"),
+  content: z.string(),
+  files: z.array(z.string()).optional(),
+  images: z.array(z.unknown()).optional(),
+});
+
 export const ClaudeQueueMessage = z.object({
   type: z.literal("queue_message"),
   id: z.string(),
@@ -146,6 +153,7 @@ export const ClaudeIncoming = z.discriminatedUnion("type", [
   ClaudeStartClaude,
   ClaudeResumeClaude,
   ClaudeSendMessage,
+  ClaudeInjectMessage,
   ClaudeQueueMessage,
   ClaudeEditQueuedMessage,
   ClaudeRemoveQueuedMessage,

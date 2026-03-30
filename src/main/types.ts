@@ -20,6 +20,7 @@ export type {
   ClaudeStartPayload,
   ClaudeResumePayload,
   ClaudeSendMessagePayload,
+  ClaudeInjectMessagePayload,
   ClaudeApproveToolPayload,
   ClaudeDenyToolPayload,
   ClaudeInterruptPayload,

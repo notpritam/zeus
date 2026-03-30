@@ -49,6 +49,7 @@ export interface ClaudeSlice {
     projectId?: string;
   }) => void;
   sendClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
+  injectClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   clearClaudeHistory: () => void;
   approveClaudeTool: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   denyClaudeTool: (approvalId: string, reason?: string) => void;
@@ -200,6 +201,41 @@ export const createClaudeSlice: StateCreator<ZeusState, [], [], ClaudeSlice> = (
       channel: 'claude',
       sessionId: activeClaudeId,
       payload: { type: 'send_message', content, files, images },
+      auth: '',
+    });
+  },
+
+  injectClaudeMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => {
+    const { activeClaudeId } = get();
+    if (!activeClaudeId) return;
+
+    const meta: Record<string, unknown> = {};
+    if (files && files.length > 0) meta.files = files;
+    if (images && images.length > 0) meta.images = images.map((img) => ({ filename: img.filename, dataUrl: img.dataUrl }));
+
+    const userEntry: NormalizedEntry = {
+      id: `user-inject-${Date.now()}`,
+      entryType: { type: 'user_message' },
+      content,
+      metadata: Object.keys(meta).length > 0 ? meta : undefined,
+      timestamp: new Date().toISOString(),
+    };
+    set((state) => ({
+      claudeEntries: {
+        ...state.claudeEntries,
+        [activeClaudeId]: [...(state.claudeEntries[activeClaudeId] ?? []), userEntry],
+      },
+      lastUserMessagePreview: {
+        ...state.lastUserMessagePreview,
+        [activeClaudeId]: truncatePreview(content),
+      },
+      lastActivityAt: { ...state.lastActivityAt, [activeClaudeId]: Date.now() },
+    }));
+
+    zeusWs.send({
+      channel: 'claude',
+      sessionId: activeClaudeId,
+      payload: { type: 'inject_message', content, files, images },
       auth: '',
     });
   },

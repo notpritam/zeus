@@ -67,6 +67,7 @@ export class ClaudeSession extends EventEmitter {
   private projectId: string | null;
   private messageQueue: QueuedMessage[] = [];
   private _isBusy = false;
+  private _pendingInject: { content: string | import('./claude-types').ContentBlock[] } | null = null;
 
   get sessionId(): string | null {
     return this._sessionId;
@@ -94,6 +95,8 @@ export class ClaudeSession extends EventEmitter {
     this.projectId = options.projectId ?? null;
     this.logProcessor.onActivity((activity) => {
       if (activity.state === 'idle') {
+        // Check for pending inject first — don't go idle yet
+        if (this._pendingInject) return;
         // Turn complete — try to drain queue before emitting idle
         if (this.drainAll()) {
           // Sent next queued message, stay busy. Don't emit idle to frontend.
@@ -132,6 +135,7 @@ export class ClaudeSession extends EventEmitter {
       if (this._isRunning) {
         this._isRunning = false;
         this._isBusy = false;
+        this._pendingInject = null;
 
         // Reject any remaining queued messages — process is gone
         if (this.messageQueue.length > 0) {
@@ -172,6 +176,17 @@ export class ClaudeSession extends EventEmitter {
       if (this._pendingAssistantUuid) {
         this._lastMessageId = this._pendingAssistantUuid;
         this._pendingAssistantUuid = null;
+      }
+
+      // Check for pending inject — send immediately before draining queue
+      if (this._pendingInject) {
+        const inject = this._pendingInject;
+        this._pendingInject = null;
+        this._isBusy = true;
+        this.protocol!.sendUserMessage(inject.content).catch((err) => {
+          this.emit('error', err);
+        });
+        return; // skip drainAll and result emit
       }
 
       // Turn complete — drain queue before going idle.
@@ -223,6 +238,24 @@ export class ClaudeSession extends EventEmitter {
     // Not busy — send immediately
     this._isBusy = true;
     await this.protocol.sendUserMessage(content);
+  }
+
+  /** Inject a message mid-turn — interrupts current work, then sends immediately */
+  async injectMessage(
+    content: string | import('./claude-types').ContentBlock[],
+  ): Promise<void> {
+    if (!this.protocol) throw new Error('Session not started');
+
+    if (!this._isBusy) {
+      // Not busy — just send normally
+      this._isBusy = true;
+      await this.protocol.sendUserMessage(content);
+      return;
+    }
+
+    // Set pending inject so the result handler sends it after interrupt completes
+    this._pendingInject = { content };
+    await this.protocol.interrupt();
   }
 
   /** Approve a pending tool use */

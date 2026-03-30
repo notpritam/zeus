@@ -93,6 +93,7 @@ function App() {
     stopSession,
     selectSession,
     sendClaudeMessage,
+    injectClaudeMessage,
     clearClaudeHistory,
     approveClaudeTool,
     denyClaudeTool,
@@ -304,6 +305,7 @@ function App() {
               activity={activeActivity}
               queue={activeQueue}
               onSendMessage={sendClaudeMessage}
+              onInjectMessage={injectClaudeMessage}
               onClearHistory={clearClaudeHistory}
               onApprove={approveClaudeTool}
               onDeny={denyClaudeTool}
@@ -462,6 +464,7 @@ function App() {
                     activity={activeActivity}
                     queue={activeQueue}
                     onSendMessage={sendClaudeMessage}
+                    onInjectMessage={injectClaudeMessage}
                     onClearHistory={clearClaudeHistory}
                     onApprove={approveClaudeTool}
                     onDeny={denyClaudeTool}

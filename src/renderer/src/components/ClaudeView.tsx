@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import type { SlashCommand } from '../../../shared/slash-commands';
 import ApprovalCard from '@/components/ApprovalCard';
 import SessionTerminalPanel from '@/components/SessionTerminalPanel';
 import { useZeusStore } from '@/stores/useZeusStore';
-import { EntryItem, CompressedGroup, groupEntriesByUser } from '@/components/EntryRenderers';
+import VirtualizedEntryList from '@/components/VirtualizedEntryList';
 import type {
   NormalizedEntry,
   ClaudeApprovalInfo,
@@ -96,6 +96,7 @@ interface ClaudeViewProps {
   activity: SessionActivity;
   queue: Array<{ id: string; content: string }>;
   onSendMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
+  onInjectMessage: (content: string, files?: string[], images?: Array<{ filename: string; mediaType: string; dataUrl: string }>) => void;
   onApprove: (approvalId: string, updatedInput?: Record<string, unknown>) => void;
   onDeny: (approvalId: string, reason?: string) => void;
   onInterrupt: () => void;
@@ -119,6 +120,7 @@ function ClaudeView({
   activity,
   queue,
   onSendMessage,
+  onInjectMessage,
   onApprove,
   onDeny,
   onInterrupt,
@@ -143,12 +145,10 @@ function ClaudeView({
   const [showSlashPopover, setShowSlashPopover] = useState(false);
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
   const [slashQuery, setSlashQuery] = useState('/');
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const userScrolledUp = useRef(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const scrollToBottomRef = useRef<(() => void) | null>(null);
   // Pagination — read from store
   const meta = useZeusStore((s) => session ? s.claudeEntriesMeta[session.id] : null);
   const loadMoreEntries = useZeusStore((s) => s.loadMoreEntries);
@@ -200,58 +200,25 @@ function ClaudeView({
     }
   }, [panelVisible]);
 
-  // Preserve scroll position when older entries are prepended
-  const prevScrollHeightRef = useRef<number>(0);
-  const firstEntryIdRef = useRef<string | undefined>(entries[0]?.id);
+  // Scroll callbacks for virtualized list
+  const handleScrollStateChange = useCallback((atBottom: boolean) => {
+    setShowScrollToBottom(!atBottom);
+  }, []);
 
-  // Snapshot scrollHeight before render so we can compare after
-  // This runs before browser paint to avoid visual flicker
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const prevFirstId = firstEntryIdRef.current;
-    const newFirstId = entries[0]?.id;
-    // If the first entry ID changed, entries were prepended
-    if (prevFirstId && newFirstId && prevFirstId !== newFirstId && prevScrollHeightRef.current > 0) {
-      const heightAdded = el.scrollHeight - prevScrollHeightRef.current;
-      if (heightAdded > 0) {
-        el.scrollTop = el.scrollTop + heightAdded;
-      }
-    }
-    firstEntryIdRef.current = newFirstId;
-    prevScrollHeightRef.current = el.scrollHeight;
-  });
-
-  // Track if user has scrolled away from bottom + load more on scroll near top
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      userScrolledUp.current = !atBottom;
-      setShowScrollToBottom(!atBottom);
-
-      // Load more entries when scrolled near top
-      if (el.scrollTop < 200 && session) {
-        loadMoreEntries(session.id);
-      }
-    };
-    el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => el.removeEventListener('scroll', handleScroll);
-  }, [session?.id, loadMoreEntries]);
-
-  // Auto-scroll to bottom on new entries (unless user scrolled up)
-  useEffect(() => {
-    if (!userScrolledUp.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [entries.length, entries[entries.length - 1]?.id]);
+  const handleLoadMore = useCallback(() => {
+    if (session) loadMoreEntries(session.id);
+  }, [session, loadMoreEntries]);
 
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }
+    scrollToBottomRef.current?.();
   }, []);
+
+  const renderQueueItem = useCallback(
+    (msg: { id: string; content: string }) => (
+      <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+    ),
+    [onEditQueued, onRemoveQueued],
+  );
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -401,8 +368,12 @@ function ClaudeView({
     }
 
     if (isBusy) {
-      // Queue all messages when busy — they'll be sent when session becomes idle
-      onQueueMessage(trimmed);
+      // Inject message mid-turn — interrupts Claude and sends immediately
+      onInjectMessage(
+        trimmed,
+        attachedFiles.length > 0 ? attachedFiles.map((f) => f.path) : undefined,
+        attachedImages.length > 0 ? attachedImages.map((img) => ({ filename: img.filename, mediaType: img.mediaType, dataUrl: img.dataUrl })) : undefined,
+      );
     } else {
       onSendMessage(
         trimmed,
@@ -499,61 +470,20 @@ function ClaudeView({
         {/* Chat area */}
         <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
 
-          {/* Entry list */}
+          {/* Virtualized entry list */}
           <div className="relative min-h-0 flex-1">
-            {/* Floating "loading older" badge */}
-            <AnimatePresence>
-              {meta?.loading && (
-                <motion.div
-                  key="loading-badge"
-                  initial={{ opacity: 0, y: -12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  transition={{ duration: 0.2 }}
-                  className="pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2"
-                >
-                  <div className="bg-card border-border text-muted-foreground flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-md">
-                    <Loader2 className="size-3 animate-spin" />
-                    Loading...
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto p-4" style={{ overflowAnchor: 'none' }}>
-              {compressed ? (
-                groupEntriesByUser(entries).map((group, i, arr) => (
-                  <CompressedGroup
-                    key={group.userEntry?.id ?? `group-${i}`}
-                    group={group}
-                    isLast={i === arr.length - 1}
-                    sessionDone={session.status !== 'running'}
-                  />
-                ))
-              ) : (
-                entries.map((entry, i) => (
-                  <EntryItem key={entry.id} entry={entry} sessionDone={session.status !== 'running'} isLastEntry={i === entries.length - 1} />
-                ))
-              )}
-
-              {/* Queued messages */}
-              {queue.length > 0 && (
-                <div className="space-y-2">
-                  {queue.map((msg) => (
-                    <QueuedMessageItem key={msg.id} msg={msg} onEdit={onEditQueued} onRemove={onRemoveQueued} />
-                  ))}
-                </div>
-              )}
-
-              {entries.length === 0 && session.status === 'running' && (
-                <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                  <Loader2 className="size-3 animate-spin" />
-                  Starting Claude session...
-                </div>
-              )}
-
-              {/* Scroll anchor — keeps content pinned to bottom */}
-              <div ref={scrollAnchorRef} style={{ overflowAnchor: 'auto', height: 0 }} />
-            </div>
+            <VirtualizedEntryList
+              entries={entries}
+              compressed={compressed}
+              sessionDone={session.status !== 'running'}
+              sessionRunning={session.status === 'running'}
+              queue={queue}
+              onLoadMore={handleLoadMore}
+              loadingOlder={meta?.loading ?? false}
+              renderQueueItem={renderQueueItem}
+              onScrollStateChange={handleScrollStateChange}
+              scrollToBottomRef={scrollToBottomRef}
+            />
 
             {/* Floating scroll-to-bottom button */}
             <AnimatePresence>
@@ -753,10 +683,10 @@ function ClaudeView({
                     type="submit"
                     disabled={session.status !== 'running' || (!input.trim() && attachedFiles.length === 0 && attachedImages.length === 0)}
                     size="sm"
-                    variant={isBusy ? 'secondary' : 'default'}
+                    variant="default"
                   >
                     <Send className="size-3" />
-                    {isBusy ? 'Queue' : 'Send'}
+                    Send
                   </Button>
                 </form>
               </>

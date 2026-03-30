@@ -8,6 +8,7 @@ import type {
   ClaudeStartPayload,
   ClaudeResumePayload,
   ClaudeSendMessagePayload,
+  ClaudeInjectMessagePayload,
   ClaudeApproveToolPayload,
   ClaudeDenyToolPayload,
   NormalizedEntry,
@@ -680,6 +681,88 @@ export async function handleClaude(ctx: HandlerContext): Promise<void> {
         await session.sendMessage(blocks);
       } else {
         await session.sendMessage(enhancedText);
+      }
+    } else {
+      sendError(ctx, "No active Claude session for this ID");
+    }
+  } else if (payload.type === "inject_message") {
+    const { content, files, images } = envelope.payload as ClaudeInjectMessagePayload;
+    const session = claudeManager.getSession(envelope.sessionId);
+    if (session) {
+      adoptClaudeSession(ws, envelope.sessionId);
+
+      // Persist user message to DB
+      const meta: Record<string, unknown> = {};
+      if (files && files.length > 0) meta.files = files;
+      if (images && images.length > 0)
+        meta.images = images.map((img) => ({
+          filename: img.filename,
+          mediaType: img.mediaType,
+        }));
+
+      upsertClaudeEntry(envelope.sessionId, {
+        id: `user-${Date.now()}`,
+        entryType: { type: "user_message" },
+        content,
+        metadata: Object.keys(meta).length > 0 ? meta : undefined,
+      });
+
+      // Build enhanced message with file contents if files attached
+      let enhancedText = content;
+      if (files && files.length > 0) {
+        const fileTreeManager = getFileTreeManager();
+        const fileService = fileTreeManager.getService(envelope.sessionId);
+        if (fileService) {
+          const fileBlocks: string[] = [];
+          for (const filePath of files) {
+            try {
+              const resolved = path.resolve(fileService.getWorkingDir(), filePath);
+              const stats = await fsStat(resolved);
+              if (stats.isDirectory()) {
+                const dirFiles = await fileService.readDirectoryRecursive(filePath);
+                for (const f of dirFiles) {
+                  fileBlocks.push(`<file path="${f.path}">\n${f.content}\n</file>`);
+                }
+              } else {
+                const fileContent = await fileService.readFileContent(filePath);
+                if (fileContent !== null) {
+                  fileBlocks.push(`<file path="${filePath}">\n${fileContent}\n</file>`);
+                } else {
+                  fileBlocks.push(
+                    `<file path="${filePath}">\n[Binary or too large to include]\n</file>`,
+                  );
+                }
+              }
+            } catch {
+              fileBlocks.push(`<file path="${filePath}">\n[Could not read file]\n</file>`);
+            }
+          }
+          if (fileBlocks.length > 0) {
+            enhancedText = `<attached_files>\n${fileBlocks.join("\n")}\n</attached_files>\n\n${content}`;
+          }
+        }
+      }
+
+      // Send as inject (interrupt + send)
+      if (images && images.length > 0) {
+        const blocks: ContentBlock[] = [];
+        for (const img of images) {
+          const base64 = img.dataUrl.replace(/^data:image\/\w+;base64,/, "");
+          blocks.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: img.mediaType,
+              data: base64,
+            },
+          });
+        }
+        if (enhancedText) {
+          blocks.push({ type: "text", text: enhancedText });
+        }
+        await session.injectMessage(blocks);
+      } else {
+        await session.injectMessage(enhancedText);
       }
     } else {
       sendError(ctx, "No active Claude session for this ID");

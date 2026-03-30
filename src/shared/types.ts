@@ -305,6 +305,13 @@ export interface ClaudeSendMessagePayload {
   images?: ImageAttachment[];
 }
 
+export interface ClaudeInjectMessagePayload {
+  type: 'inject_message';
+  content: string;
+  files?: string[];
+  images?: ImageAttachment[];
+}
+
 export interface ClaudeQueueMessagePayload {
   type: 'queue_message';
   id: string;
@@ -381,6 +388,7 @@ export type ClaudePayload =
   | ClaudeStartPayload
   | ClaudeResumePayload
   | ClaudeSendMessagePayload
+  | ClaudeInjectMessagePayload
   | ClaudeQueueMessagePayload
   | ClaudeEditQueuedMessagePayload
   | ClaudeRemoveQueuedMessagePayload
