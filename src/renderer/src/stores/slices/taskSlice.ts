@@ -29,14 +29,14 @@ export const createTaskSlice: StateCreator<ZeusState, [], [], TaskSlice> = (set)
 
   createTask: (name, prompt, projectPath, opts) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'create_task', name, prompt, projectPath, ...opts },
     });
   },
 
   listTasks: () => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'list_tasks' },
     });
   },
@@ -45,49 +45,49 @@ export const createTaskSlice: StateCreator<ZeusState, [], [], TaskSlice> = (set)
 
   continueTask: (taskId, prompt) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'continue_task', taskId, prompt },
     });
   },
 
   mergeTask: (taskId) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'merge_task', taskId },
     });
   },
 
   createTaskPR: (taskId, title, body) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'create_pr', taskId, title, body },
     });
   },
 
   archiveTask: (taskId) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'archive_task', taskId },
     });
   },
 
   unarchiveTask: (taskId) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'unarchive_task', taskId },
     });
   },
 
   discardTask: (taskId) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'discard_task', taskId },
     });
   },
 
   getTaskDiff: (taskId) => {
     zeusWs.send({
-      channel: 'task', sessionId: '', auth: '',
+      channel: 'tasks', sessionId: '', auth: '',
       payload: { type: 'get_task_diff', taskId },
     });
   },

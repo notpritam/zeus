@@ -81,7 +81,7 @@ export const createConnectionSlice: StateCreator<ZeusState, [], [], ConnectionSl
           auth: '',
         });
         zeusWs.send({
-          channel: 'task', sessionId: '', auth: '', payload: { type: 'list_tasks' },
+          channel: 'tasks', sessionId: '', auth: '', payload: { type: 'list_tasks' },
         });
         return;
       }
@@ -1126,7 +1126,7 @@ export const createConnectionSlice: StateCreator<ZeusState, [], [], ConnectionSl
     });
 
     // Subscribe to task channel
-    const unsubTask = zeusWs.on('task', (envelope: WsEnvelope) => {
+    const unsubTask = zeusWs.on('tasks', (envelope: WsEnvelope) => {
       const p = envelope.payload as TaskPayload;
       if (p.type === 'task_created') {
         const task = p.task;
