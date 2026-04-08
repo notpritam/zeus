@@ -287,6 +287,16 @@ export function wireClaudeSession(
     );
   });
 
+  // Forward stderr lines as diagnostic entries (visible in session log)
+  session.on("stderr_line", (line: string) => {
+    ctx.broadcast({
+      channel: "claude",
+      sessionId: envelope.sessionId,
+      payload: { type: "stderr_line", line },
+      auth: "",
+    });
+  });
+
   // Forward queue state changes to frontend
   session.on("queue_updated", (queue: Array<{ id: string; content: string }>) => {
     ctx.broadcast({

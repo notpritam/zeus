@@ -4,6 +4,27 @@ import { resolve } from 'path';
 // Load .env from project root (one level up from out/main/)
 loadEnv({ path: resolve(__dirname, '../../.env') });
 
+// Fix PATH for Electron — when launched from Finder/dock, PATH is stripped to
+// /usr/bin:/bin:/usr/sbin:/sbin. Prepend common user binary locations so that
+// `which claude`, `node`, `npm`, and `npx` resolve correctly.
+function fixElectronPath(): void {
+  const home = process.env.HOME ?? '';
+  const additions = [
+    `${home}/.local/bin`,
+    `${home}/.npm/bin`,
+    '/usr/local/bin',
+    `${home}/.nvm/versions/node/${process.version}/bin`,
+    `${home}/.volta/bin`,
+  ].filter(Boolean);
+  const current = process.env.PATH ?? '';
+  const missing = additions.filter(p => !current.includes(p));
+  if (missing.length > 0) {
+    process.env.PATH = [...missing, current].join(':');
+  }
+}
+
+fixElectronPath();
+
 import { app, BrowserWindow, Menu, nativeImage } from 'electron';
 import path from 'path';
 import { registerService, bootAll, shutdownAll } from './lifecycle';

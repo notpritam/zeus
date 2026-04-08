@@ -130,6 +130,19 @@ export class ClaudeSession extends EventEmitter {
 
     this._isRunning = true;
 
+    // Track stderr for startup failure diagnosis
+    let stderrBuffer: string[] = [];
+    let startupTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // If no stdout message within 10s, the CLI likely failed to start.
+    // The timer is cleared by protocol.once('message') on first output.
+    startupTimer = setTimeout(() => {
+      if (this._isRunning) {
+        const stderrMsg = stderrBuffer.join('\n') || 'No output received';
+        this.emit('error', new Error(`Claude CLI failed to start: ${stderrMsg}`));
+      }
+    }, 10_000);
+
     this.child.on('exit', (code, signal) => {
       console.log(`[Claude] Process exited: code=${code} signal=${signal}`);
       if (this._isRunning) {
@@ -165,6 +178,17 @@ export class ClaudeSession extends EventEmitter {
     // 3. Wire up message handling
     this.protocol.on('message', (msg: ClaudeJson) => {
       this.handleMessage(msg);
+    });
+
+    // Clear startup timer on first message — CLI is alive
+    this.protocol.once('message', () => {
+      if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+    });
+
+    // Forward stderr lines as UI-visible entries
+    this.protocol.on('stderr_line', (line: string) => {
+      stderrBuffer.push(line);
+      this.emit('stderr_line', line);
     });
 
     this.protocol.on('control_request', (requestId: string, request: ControlRequestType) => {

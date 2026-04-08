@@ -64,6 +64,8 @@ export class ProtocolPeer extends EventEmitter {
       const stderrRl = createInterface({ input: this.child.stderr });
       stderrRl.on('line', (line: string) => {
         console.error('[Claude stderr]', line);
+        // Emit raw stderr line for startup diagnostics
+        this.emit('stderr_line', line);
         if (line.includes('[WARN] Fast mode')) return;
         if (line.includes('npm warn')) return;
         this.emit('message', { type: 'stderr', content: line } as ClaudeJson);
