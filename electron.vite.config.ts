@@ -2,7 +2,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'path';
-import { readFileSync } from 'fs';
+import { readFileSync, copyFileSync, mkdirSync } from 'fs';
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 const deps = Object.keys(pkg.dependencies || {});
@@ -22,6 +22,19 @@ export default defineConfig({
         external: (id) => externalPattern.test(id),
       },
     },
+    plugins: [
+      // Copy spawn-proxy.js to out/main/ — it runs in Electron's utilityProcess
+      // and cannot be bundled (it uses process.parentPort, not module imports).
+      {
+        name: 'copy-spawn-proxy',
+        writeBundle() {
+          const src = resolve(__dirname, 'src/main/services/spawn-proxy.js');
+          const dest = resolve(__dirname, 'out/main/spawn-proxy.js');
+          mkdirSync(resolve(__dirname, 'out/main'), { recursive: true });
+          copyFileSync(src, dest);
+        },
+      },
+    ],
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

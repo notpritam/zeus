@@ -2,9 +2,10 @@
 // Spawns Claude CLI as a piped subprocess, manages the stream-json protocol,
 // and emits normalized entries for the UI layer.
 
-import { spawn, ChildProcess } from 'child_process';
+import { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
+import { electronSpawn, SpawnResult } from './electron-spawn';
 import { ProtocolPeer } from './claude-protocol';
 import type {
   ClaudeJson,
@@ -55,7 +56,7 @@ export interface QueuedMessage {
 }
 
 export class ClaudeSession extends EventEmitter {
-  private child: ChildProcess | null = null;
+  private child: (ChildProcess | SpawnResult) | null = null;
   private protocol: ProtocolPeer | null = null;
   private logProcessor: ClaudeLogProcessor;
   private _sessionId: string | null = null;
@@ -113,19 +114,18 @@ export class ClaudeSession extends EventEmitter {
     const args = this.buildArgs();
     const mode = this.options.permissionMode ?? 'bypassPermissions';
 
-    // 1. Spawn Claude CLI as piped subprocess
+    // 1. Spawn Claude CLI via utility process (bypasses EBADF FD leak in Electron main)
     const { command, prefixArgs } = getClaudeBinary();
     const spawnArgs = [...prefixArgs, ...args];
     console.log('[Claude] Spawning:', command, spawnArgs.join(' '));
-    this.child = spawn(command, spawnArgs, {
+    this.child = electronSpawn(command, spawnArgs, {
       cwd: this.options.workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         NPM_CONFIG_LOGLEVEL: 'error',
         ...(this.options.zeusSessionId ? { ZEUS_SESSION_ID: this.options.zeusSessionId } : {}),
         ...(this.options.subagentId ? { ZEUS_QA_AGENT_ID: this.options.subagentId } : {}),
-      },
+      } as Record<string, string>,
     });
 
     this._isRunning = true;

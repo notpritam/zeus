@@ -3,6 +3,7 @@
 
 import { ChildProcess } from 'child_process';
 import { createInterface } from 'readline';
+import { Readable, Writable } from 'stream';
 import { EventEmitter } from 'events';
 import type {
   ClaudeJson,
@@ -13,10 +14,17 @@ import type {
 } from './claude-types';
 import { makeControlRequest, makeControlResponse, makeUserMessage } from './claude-types';
 
-export class ProtocolPeer extends EventEmitter {
-  private stdin: NodeJS.WritableStream;
+/** Minimal interface for a piped child process — works with both ChildProcess and SpawnResult */
+interface PipedProcess {
+  stdin: Writable | null;
+  stdout: Readable | null;
+  stderr: Readable | null;
+}
 
-  constructor(private child: ChildProcess) {
+export class ProtocolPeer extends EventEmitter {
+  private stdin: Writable;
+
+  constructor(private child: PipedProcess) {
     super();
     if (!child.stdin || !child.stdout) {
       throw new Error('Child process must have piped stdin and stdout');
